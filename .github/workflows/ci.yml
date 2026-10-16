@@ -1,0 +1,203 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo build
+        run: cargo build --workspace --all-targets
+
+      - name: cargo test
+        run: cargo test --workspace
+        # No KULYRAX_PG_URL / KULYRAX_REDIS_URL / KULYRAX_MONGO_URL /
+        # KULYRAX_NEO4J_URI / KULYRAX_MYSQL_URL / Docker here — the Phase 19.6
+        # `pg_backend`, Phase 22.5 `redis_backend`, Phase 23.5 `mongo_backend`,
+        # Phase 24.6 `neo4j_backend`, and Phase 25.3 `mysql_backend` suites,
+        # and the Phase 21.6 `#[cfg(unix)]` UDS test, skip or don't compile
+        # (Windows) accordingly. See `test-postgres` / `test-redis` /
+        # `test-mongo` / `test-neo4j` / `test-mysql` for the first five.
+
+  test-postgres:
+    name: test (postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: kulyrax
+          POSTGRES_DB: kulyrax_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test -p kulyrax-adapter-postgres --test pg_backend
+        run: cargo test -p kulyrax-adapter-postgres --test pg_backend
+        env:
+          KULYRAX_PG_URL: postgres://postgres:kulyrax@localhost:5432/kulyrax_ci
+      - name: examples/postgres matches expected/
+        run: bash examples/postgres/run.sh
+        env:
+          DATABASE_URL: postgres://postgres:kulyrax@localhost:5432/kulyrax_ci
+
+  test-redis:
+    name: test (redis)
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test -p kulyrax-core --test redis_backend
+        run: cargo test -p kulyrax-core --test redis_backend
+        env:
+          KULYRAX_REDIS_URL: redis://localhost:6379
+
+  test-mongo:
+    name: test (mongodb)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Phase 23.3's transactions need a replica set — a standalone `mongod`
+      # can't run them. `services:` has no way to override a container's
+      # command (only `docker create` flags like health checks), so `--replSet`
+      # needs a plain `docker run` instead of the services: block.
+      - name: start a single-node MongoDB replica set
+        run: |
+          docker run -d --name mongo -p 27017:27017 mongo:7 --replSet rs0
+          for i in $(seq 1 30); do
+            docker exec mongo mongosh --quiet --eval 'db.adminCommand({ping:1})' && break
+            sleep 1
+          done
+          docker exec mongo mongosh --quiet --eval 'rs.initiate()'
+          for i in $(seq 1 30); do
+            state=$(docker exec mongo mongosh --quiet --eval 'rs.status().myState' 2>/dev/null)
+            [ "$state" = "1" ] && break
+            sleep 1
+          done
+      - name: cargo test -p kulyrax-core --test mongo_backend
+        run: cargo test -p kulyrax-core --test mongo_backend
+        env:
+          KULYRAX_MONGO_URL: mongodb://localhost:27017/?directConnection=true
+          KULYRAX_MONGO_DB: kulyrax_ci
+
+  test-neo4j:
+    name: test (neo4j)
+    runs-on: ubuntu-latest
+    services:
+      neo4j:
+        image: neo4j:5
+        env:
+          NEO4J_AUTH: neo4j/kulyrax-test
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p kulyrax-test 'RETURN 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test -p kulyrax-core --test neo4j_backend
+        run: cargo test -p kulyrax-core --test neo4j_backend
+        env:
+          KULYRAX_NEO4J_URI: bolt://localhost:7687
+          KULYRAX_NEO4J_USER: neo4j
+          KULYRAX_NEO4J_PASSWORD: kulyrax-test
+
+  test-mysql:
+    name: test (mysql)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: yes
+          MYSQL_DATABASE: kulyrax_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test -p kulyrax-core --test mysql_backend
+        run: cargo test -p kulyrax-core --test mysql_backend
+        env:
+          KULYRAX_MYSQL_URL: mysql://root@localhost:3306/kulyrax_ci
+
+  msrv:
+    name: MSRV (1.88)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace
+
+  examples:
+    name: examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: build kulyrax CLI
+        run: cargo build -p kulyrax-cli
+      - name: sqlite-quickstart matches expected/
+        run: bash examples/sqlite-quickstart/run.sh
+      - name: embedded example runs
+        run: cargo run --manifest-path examples/embedded/Cargo.toml

@@ -1,0 +1,33 @@
+[package]
+name = "kulyrax-adapter-postgres"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Postgres SQL backend for Kulyrax — a StorageAdapter/SqlTxn extension crate."
+keywords = ["cqrs", "event-sourcing", "postgres"]
+categories = ["database"]
+
+[dependencies]
+kulyrax-core = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# Phase 19 (moved out of kulyrax-core in Phase 28): sync `postgres` (no TLS
+# features → no openssl); r2d2 pool. The adapter path stays synchronous — the
+# driver's internal runtime is not exposed. `with-chrono-0_4` for typed
+# timestamptz/timestamp/date binding (Phase 19.3).
+postgres = { version = "0.19", features = ["with-chrono-0_4"] }
+r2d2 = "0.8"
+r2d2_postgres = "0.18"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+[dev-dependencies]
+# For pg_backend.rs's sql_cross_backend convergence test against the
+# in-tree SQLite adapter — a dev-only, one-directional dependency back onto
+# kulyrax-core (see Phase 28's plan notes: this is not a cycle).
+rusqlite = { version = "0.32", features = ["bundled"] }
+tempfile = "3"

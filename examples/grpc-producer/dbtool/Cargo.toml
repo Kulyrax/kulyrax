@@ -1,0 +1,8 @@
+[package]
+name = "grpc-producer-example-dbtool"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }

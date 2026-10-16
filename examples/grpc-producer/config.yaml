@@ -1,0 +1,13 @@
+# Config for `kulyrax ingest` — no `sources:` block needed; gRPC ingestion
+# (Phase 20) doesn't go through the Phase 17 directory/stdin source path.
+version: 1
+
+routing:
+  file: routing.json
+
+adapters:
+  - type: sqlite
+    id: sql-primary
+    priority: 10
+    config:
+      path: ./app.db

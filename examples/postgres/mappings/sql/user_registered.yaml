@@ -1,0 +1,11 @@
+# The default facet: creates the row. A faceted entity's default-facet
+# mapping must stay `on_existing: ignore` (the default) — `replace` on a
+# faceted entity is rejected at validation (Phase 15.1: whole-row replace and
+# independent facet lanes are mutually exclusive).
+event: UserRegistered
+table: users
+primary_key: id
+version: 1
+columns:
+  id: payload.id
+  name: payload.name

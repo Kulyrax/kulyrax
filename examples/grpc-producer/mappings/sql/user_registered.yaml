@@ -1,0 +1,7 @@
+event: UserRegistered
+table: users
+primary_key: id
+version: 1
+columns:
+  id: payload.id
+  name: payload.name

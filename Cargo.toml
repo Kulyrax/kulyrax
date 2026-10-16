@@ -1,0 +1,30 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/kulyrax-core",
+    "crates/kulyrax-cli",
+    "crates/kulyrax-ingest",
+    "crates/kulyrax-client",
+    "crates/kulyrax-adapter-postgres",
+    "crates/kulyrax-backends",
+]
+# examples/ are standalone Cargo projects (each depends on the engine via a
+# path dependency, the way a real consumer would depend on a published
+# version) — kept out of the workspace so they build and version
+# independently and never affect `cargo build --workspace` / the main lockfile.
+exclude = ["examples"]
+
+[workspace.package]
+version = "0.8.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/kulyrax/kulyrax"
+authors = ["Kulyrax Contributors"]
+rust-version = "1.88"
+
+[workspace.dependencies]
+kulyrax-core = { path = "crates/kulyrax-core", version = "0.8.0" }
+kulyrax-ingest = { path = "crates/kulyrax-ingest", version = "0.8.0" }
+kulyrax-client = { path = "crates/kulyrax-client", version = "0.8.0" }
+kulyrax-adapter-postgres = { path = "crates/kulyrax-adapter-postgres", version = "0.8.0" }
+kulyrax-backends = { path = "crates/kulyrax-backends", version = "0.8.0" }

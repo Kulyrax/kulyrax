@@ -1,0 +1,14 @@
+# `on_existing: replace` (Phase 12) overwrites the *whole* row, sequence-gated
+# against the highest sequence already projected for this id — so this
+# mapping must carry every column, not just `email`, even though the event is
+# "about" the email. A narrower event that only wants to touch one column
+# needs a facet (see docs/concepts.md#facets) instead of `replace`.
+event: UserEmailChanged
+table: users
+primary_key: id
+version: 1
+on_existing: replace
+columns:
+  id: payload.id
+  name: payload.name
+  email: payload.email

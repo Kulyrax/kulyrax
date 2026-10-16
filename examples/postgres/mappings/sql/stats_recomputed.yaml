@@ -1,0 +1,11 @@
+# The `stats` facet — owns only `followers`. Disjoint from `profile`: the two
+# can be updated out of order (or concurrently, from Phase 19.4's `FOR UPDATE`
+# guard-row lock) without either one winning the other's column.
+event: StatsRecomputed
+table: users
+primary_key: id
+version: 1
+facet: stats
+columns:
+  id: payload.id
+  followers: payload.followers

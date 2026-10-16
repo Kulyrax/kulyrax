@@ -1,0 +1,3 @@
+# `mappings/document/` is mandatory (Phase 3/11 convention) even when this
+# project has no document mappings — `load_document_mappings` errors if the
+# directory is missing, empty is fine.

@@ -1,0 +1,107 @@
+# Kulyrax
+
+[![CI](https://github.com/Panchauly/kulyrax/actions/workflows/ci.yml/badge.svg)](https://github.com/Panchauly/kulyrax/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#status)
+
+**Kulyrax** deterministically projects events into SQL, document, key-value, and graph
+stores using explicit, schema-driven mappings. It is **projection-only**: it consumes an
+event log it does not own and never produces, buffers, or stores events itself (see
+[`architecture.md` §1.1](architecture.md)).
+
+Every storage kind has a real database backend, not just a file-backed default — SQL on
+SQLite, Postgres, or MySQL; key-value on Redis; document on MongoDB; graph on Neo4j —
+all nine behind the exact same sequence-gated idempotency model. Adding a tenth is a
+public extension point, not a fork: see
+[`docs/writing-a-backend.md`](docs/writing-a-backend.md).
+
+## Quickstart
+
+```sh
+git clone https://github.com/Panchauly/kulyrax.git
+cd kulyrax
+bash examples/sqlite-quickstart/run.sh
+```
+
+That's it — three events go in, a projected SQLite table comes out:
+
+```
+OK — app.db.users matches expected/users.txt:
+u1|Ada|ada.lovelace@example.com
+u2|Grace|grace@example.com
+```
+
+What just ran, unpacked (all under [`examples/sqlite-quickstart/`](examples/sqlite-quickstart/)):
+
+```sh
+kulyrax run --config config.yaml --mappings mappings --once
+```
+
+- **`config.yaml`** points at a `sqlite` adapter and a `directory` event source.
+- **`mappings/sql/user_registered.yaml`** and **`user_email_changed.yaml`** map
+  `event_type` → SQL columns, one file per event type.
+- **`routing.json`** says which adapters each event type reaches.
+- **`events/events.ndjson`** is the input — three NDJSON events.
+
+Same event, three other storage kinds, one call each: `examples/postgres/` (a real
+transactional Postgres backend), `examples/embedded/` (call `kulyrax-core` as a library,
+no CLI), `examples/grpc-producer/` (stream events into a long-lived `kulyrax ingest`
+service instead of reading a file).
+
+## Why Kulyrax exists
+
+A single event often needs to reach a SQL table (transactions), a document store (read
+models), a key-value store (fast lookups), and a graph (relationships) — and that
+fan-out logic tends to get duplicated across services, implemented inconsistently, and
+be hard to reason about when something fails. Kulyrax centralizes it with deterministic
+routing, explicit mappings, and a startup-time validation pass, so a redelivered or
+out-of-order event is a clean, explainable skip rather than a duplicate write.
+
+## Core principles
+
+- **Event-first** — routing is by `event_type`, never content or metadata heuristics.
+- **Deterministic** — no implicit behavior; the same event log always produces the same
+  projected state.
+- **Schema-explicit** — mappings are declared YAML, not inferred from payloads.
+- **Fail fast** — bad config, unroutable events, and missing adapter capabilities are
+  caught at startup, not mid-run.
+- **Storage-agnostic** — adapters define *how* to write; mappings define *what*.
+
+## What Kulyrax is not
+
+Not a streaming platform (no Kafka-alternative ambitions), not an ETL/ELT tool, not a
+workflow engine, not a database, not a schema-inference system. It prefers explicitness
+over convenience throughout.
+
+## Learn more
+
+- [`docs/concepts.md`](docs/concepts.md) — the mental model: the event envelope,
+  `sequence` vs `position`, the guard, facets, `decide()`.
+- [`docs/mapping-reference.md`](docs/mapping-reference.md) — every mapping field, per
+  storage kind, with examples.
+- [`architecture.md`](architecture.md) — the three-part structure (engine / sources /
+  adapters), dependency rules, and open-source vs. product scope.
+- [`docs/producer-contract.md`](docs/producer-contract.md) — the ordering/delivery
+  assumptions a producer must satisfy.
+- [`proto/README.md`](proto/README.md) — write a non-Rust producer against the gRPC
+  ingestion contract.
+- [`docs/writing-a-backend.md`](docs/writing-a-backend.md) — add a real database
+  backend for a storage kind Kulyrax doesn't ship, without forking the crate.
+- [`ROADMAP.md`](ROADMAP.md) — where things stand and what's still open.
+
+## Contributing
+
+Bug reports, mapping-reference corrections, and new backends are all welcome — see
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for dev setup and the PR process, and
+[`docs/writing-a-backend.md`](docs/writing-a-backend.md) specifically for adding a
+database backend.
+
+## Status
+
+Latest release notes: **[`RELEASES/v0.8.0.md`](RELEASES/v0.8.0.md)**.
+
+Kulyrax is in an **alpha** phase — core architecture and execution semantics are stable,
+but public APIs may still evolve. Intended for early feedback, not production
+deployment.
+
+Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE) at your
+option.

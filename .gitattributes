@@ -1,0 +1,14 @@
+# Normalize line endings: check in as LF, check out native (Phase 18.3).
+* text=auto eol=lf
+
+*.rs    text eol=lf
+*.toml  text eol=lf
+*.lock  text eol=lf
+*.json  text eol=lf
+*.jsonl text eol=lf
+*.ndjson text eol=lf
+*.md    text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.gitattributes text eol=lf
+*.gitignore     text eol=lf

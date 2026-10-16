@@ -1,0 +1,12 @@
+[package]
+name = "postgres-example-dbtool"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Not a Kulyrax component — a small helper so `run.sh` can create the schema
+# and dump the projected table without a `psql` CLI installed. `unwrap`/
+# `expect` are fine here; the Zero Panic Rule (CLAUDE.md) applies to the
+# `kulyrax-core` library, not example scripts.
+[dependencies]
+postgres = "0.19"

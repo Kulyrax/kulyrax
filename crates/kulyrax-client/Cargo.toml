@@ -1,0 +1,23 @@
+[package]
+name = "kulyrax-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Reference Rust producer client for Kulyrax's gRPC ingestion contract (kulyrax/v1)."
+keywords = ["cqrs", "event-sourcing", "grpc", "producer"]
+categories = ["database", "network-programming"]
+readme = "README.md"
+include = ["src/**", "build.rs", "README.md", "proto/**"]
+
+[dependencies]
+tonic = "0.12"
+prost = "0.13"
+tokio = { version = "1", features = ["rt", "sync", "macros"] }
+tokio-stream = "0.1"
+
+[build-dependencies]
+tonic-build = "0.12"
+protoc-bin-vendored = "3"

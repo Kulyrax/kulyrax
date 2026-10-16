@@ -1,0 +1,25 @@
+# Kulyrax quickstart — a single SQLite read model fed by a directory source.
+# Run from this directory: `bash run.sh` (or see README.md for the raw
+# `kulyrax` commands it wraps).
+version: 1
+
+routing:
+  file: routing.json
+
+adapters:
+  - type: sqlite
+    id: sql-primary
+    priority: 10
+    # `UserEmailChanged` uses `on_existing: replace` (Phase 12), which requires
+    # the adapter to declare the `upsert` capability (Phase 8) — a mapping
+    # that a non-upsert-capable adapter can't safely run fails validation at
+    # startup, not at write time.
+    capabilities: [write, upsert]
+    config:
+      path: ./app.db
+
+sources:
+  - type: directory
+    id: quickstart
+    path: ./events
+    state_dir: ./.conduit/state

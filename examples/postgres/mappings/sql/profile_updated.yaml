@@ -1,0 +1,11 @@
+# The `profile` facet — owns only `bio`. Sequence-gated on its own lane
+# (Phase 15.2), independent of the `stats` facet below and of the create
+# mapping's `name` column.
+event: ProfileUpdated
+table: users
+primary_key: id
+version: 1
+facet: profile
+columns:
+  id: payload.id
+  bio: payload.bio

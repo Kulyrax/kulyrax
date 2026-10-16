@@ -1,0 +1,12 @@
+[package]
+name = "sqlite-quickstart-dbtool"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Not a Kulyrax component — a ~20-line helper so the example's `run.sh` needs
+# no system `sqlite3` CLI (portable across the CI matrix and a clean local
+# checkout on any OS). `unwrap`/`panic!` are fine here; the Zero Panic Rule
+# (CLAUDE.md) applies to the `kulyrax-core` library, not example scripts.
+[dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }

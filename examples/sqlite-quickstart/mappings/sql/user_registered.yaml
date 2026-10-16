@@ -1,0 +1,10 @@
+# Create-only: a redelivered UserRegistered for an id already projected is a
+# clean Skipped(AlreadyProjected), not a duplicate or an error.
+event: UserRegistered
+table: users
+primary_key: id
+version: 1
+columns:
+  id: payload.id
+  name: payload.name
+  email: payload.email

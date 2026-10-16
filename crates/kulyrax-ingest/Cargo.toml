@@ -1,0 +1,32 @@
+[package]
+name = "kulyrax-ingest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "gRPC ingestion server for the Kulyrax projection engine (the kulyrax/v1 producer contract)."
+keywords = ["cqrs", "event-sourcing", "grpc", "ingestion"]
+categories = ["database", "network-programming"]
+readme = "README.md"
+include = ["src/**", "build.rs", "README.md", "proto/**"]
+
+[dependencies]
+kulyrax-core = { workspace = true }
+tonic = "0.12"
+prost = "0.13"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "net", "macros", "time"] }
+tokio-stream = { version = "0.1", features = ["sync", "net"] }
+futures-core = "0.3"
+
+[build-dependencies]
+tonic-build = "0.12"
+protoc-bin-vendored = "3"
+
+[dev-dependencies]
+kulyrax-client = { workspace = true }
+serde_json = "1.0"
+serde_yaml = "0.9"
+rusqlite = { version = "0.32", features = ["bundled"] }
+tempfile = "3"

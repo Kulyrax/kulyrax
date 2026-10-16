@@ -1,0 +1,30 @@
+# Kulyrax against Postgres, showing facets (Phase 15): `profile` and `stats`
+# are independent sequence lanes on the same `users` row, so a `ProfileUpdated`
+# and a `StatsRecomputed` can arrive in either order without one clobbering
+# the other's column. Contrast examples/sqlite-quickstart, which shows the
+# whole-row `on_existing: replace` this is an alternative to.
+version: 1
+
+routing:
+  file: routing.json
+
+adapters:
+  - type: postgres
+    id: pg-primary
+    priority: 10
+    # Postgres is the first adapter with real multi-writer safety (Phase
+    # 19.4: `SELECT ... FOR UPDATE` on the guard row) — `transactions` is
+    # declared genuinely, not aspirationally.
+    capabilities: [write, upsert, delete, transactions]
+    config:
+      # ${DATABASE_URL} is expanded from the environment (Phase 19.2) so the
+      # connection string — and any credentials in it — never lands in this
+      # committed file. `run.sh` defaults it to a local dev Postgres.
+      url: ${DATABASE_URL}
+      pool_size: 4
+
+sources:
+  - type: directory
+    id: quickstart
+    path: ./events
+    state_dir: ./.conduit/state
