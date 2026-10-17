@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # Finish the adapter crate split and make the workspace navigable
@@ -18,15 +18,15 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 - [x] Existing configs keep working unchanged (`type: mysql|redis|mongodb|neo4j|postgres|elasticsearch`).
 - [x] Adapter factories receive mappings, upcasters and migration policy through one context value instead of capturing them at registration time.
 - [x] Crate directories drop the `kulyrax-` prefix (`crates/core`, `crates/adapters/postgres`, …); package names, `-p` flags and `use kulyrax_*` paths are unchanged.
-- [ ] The four copy-pasted `loader.rs` files are replaced by one generic loader.
-- [ ] No `// Phase N:` history comments remain in `crates/*/src`; comments that explain an invariant or a reason are kept.
-- [ ] CLAUDE.md, architecture.md and docs/writing-a-backend.md describe the real layout.
-- [ ] `cargo build`, `test`, `clippy -D warnings` and `fmt --check` all pass for the workspace at every step.
+- [ ] Waived by the owner on 2026-10-17: the four copy-pasted `loader.rs` files are replaced by one generic loader. Not done; the four files remain.
+- [ ] Waived by the owner on 2026-10-17: no `// Phase N:` history comments remain in `crates/*/src`. Not done; 296 lines still match (361 at the survey).
+- [x] CLAUDE.md, architecture.md and docs/writing-a-backend.md describe the real layout.
+- [x] `cargo build`, `test`, `clippy -D warnings` and `fmt --check` all pass for the workspace at every step.
 
 ## Constraints and assumptions
 
 - Constraint: Zero Panic Rule and Thin CLI Pattern (CLAUDE.md).
-- Constraint: work happens on branch `refactor/adapter-crates` (PR #1), now checked out in the main checkout; the worktree was removed on 2026-10-17.
+- Constraint: work happened on branch `refactor/adapter-crates`, merged into `main` as PR #1.
 - Assumption (owner said "start" without answering): the pre-1.0 API break is accepted, and SQLite plus the file-backed document / KV / graph adapters stay in core. They are the reference backends most of `crates/core/tests/` runs against, and they need no network.
 - Constraint: the networked backend tests (`*_backend.rs`) return early unless `KULYRAX_<DB>_URL` is set. Without live databases they prove only that the code compiles.
 - Assumption: the unmerged branch `claude/phase-28-mysql-crate` (d8de7bf, still using the old `conduit-*` names) can serve as a reference for the MySQL extraction. It cannot be merged as is.
@@ -38,9 +38,9 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 3. Done: extract MySQL, Redis, MongoDB and Neo4j, one commit each. Remove each enum variant from `AdapterConfig` and move its `*_backend.rs` test.
 4. Done early, so new crates are created in place: move the adapter crates under `crates/adapters/`.
 5. Done (owner request, 2026-10-17): drop the `kulyrax-` prefix from crate directories and fix every path reference in docs, examples, proto comments and the ledger's current-state lines. Also fixed while checking the docs: the `CLAUDE.md` tree and overview, the startup-failure paragraph in `docs/writing-a-backend.md`, and three stale example README lines.
-6. Replace the four `loader.rs` files with one generic `load_mappings<M>`.
-7. Do the comment pass.
-8. Re-check the docs against the final layout.
+6. Not done (waived): replace the four `loader.rs` files with one generic `load_mappings<M>`.
+7. Not done (waived): the comment pass.
+8. Covered by step 5: the docs were checked against the final layout, which steps 6 and 7 would not have changed.
 
 ## Decisions
 
@@ -97,6 +97,8 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 | Step 5: doc claim on startup failure | read `KulyraxRuntime::build_adapters` (`crates/core/src/runtime/engine.rs:150`) and its call sites in `crates/core/src/pipeline.rs` and `crates/ingest/src/lib.rs` | returns `PipelineError::AdapterBuild` before the first event; `docs/writing-a-backend.md` rewritten to match |
 | Step 5: final gates | `cargo fmt --check`; clippy `-D warnings`; `cargo test --workspace --no-fail-fast`; `git diff Cargo.lock` | clean; clean; 103 test binaries, 290 passed, 0 failed; root lockfile unchanged |
 | Step 5: examples outside the workspace | `cargo check --manifest-path` for `examples/embedded` and `examples/grpc-producer/producer` | both finish. `examples/embedded/Cargo.lock` lost about 3,100 lines: it was stale since core dropped its network drivers, and the regenerated file is kept |
+| Merge | `gh pr checks 1`; `gh pr view 1` | all 10 required CI checks pass on `e9baa66`; merged into `main` as `e02c744` on 2026-10-17 |
+| Waived criteria, current state | `grep -c "Phase [0-9]"` over `crates/*/src` and `crates/adapters/*/src`; `ls crates/core/src/adapter/*/loader.rs` | 296 lines; 4 loader files |
 
 Not run: the `neo4j_backend` integration suite against a real Neo4j (gated on `KULYRAX_NEO4J_URI`).
 
@@ -121,4 +123,13 @@ Not run: the `mysql_backend` integration suite against a real MySQL. Its 7 tests
 - Neo4j's factory now rejects a malformed URI or unsupported scheme at startup. Before this branch such a config passed validation and failed on every event. Behaviour change, in the safe direction. A wrong entry would apply the wrong kind's checks to that type.
 
 ## Outcome
+
+Completed on 2026-10-17 and merged as PR #1 (`e02c744`). The owner declared the work complete and waived the generic loader and the comment pass. Every networked backend now lives in `crates/adapters/<name>/` and resolves through the registry. `kulyrax-core` has no network driver and no tokio. Crate directories drop the `kulyrax-` prefix, and adapters that fail to build stop startup.
+
+Follow-ups, not started:
+- Replace the four `loader.rs` files with one generic loader.
+- Remove the 296 `Phase N` history comments that are left.
+- Write the release note for the public API break (removed `AdapterConfig` variants, new `AdapterFactory` signature).
+- Give `execute_event*` a registry parameter, or document them as core-only.
+- Run the four networked backend suites against real databases. CI runs them in their own jobs, which pass.
 

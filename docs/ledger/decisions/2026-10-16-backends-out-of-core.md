@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Networked backends live in their own crates and resolve through the registry
