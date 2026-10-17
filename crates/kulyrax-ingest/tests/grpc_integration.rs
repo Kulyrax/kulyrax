@@ -285,6 +285,11 @@ fn grpc_poison_event_acked() {
         ack.position, "pos-3",
         "the batch still acks past the poison event"
     );
+    assert_eq!(
+        ack.dlq_events, 1,
+        "dlq_events is the producer's only signal that the position advanced \
+         past a batch with a dead-lettered (not actually projected) event"
+    );
 
     let report = h.shutdown();
     assert!(report.events_dlq >= 1, "{report:?}");

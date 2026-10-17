@@ -316,7 +316,7 @@ pub fn run_sources_with_adapters(
             });
 
             if committed {
-                source.commit(position_to.clone())?;
+                source.commit_with_dlq_count(position_to.clone(), dlq_count as u32)?;
                 report.batches_committed += 1;
             } else {
                 report.stopped_reason = StoppedReason::RetryExhausted;

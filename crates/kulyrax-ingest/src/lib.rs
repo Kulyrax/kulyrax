@@ -99,6 +99,7 @@ impl From<&Event> for pb::EventEnvelope {
 struct AckMsg {
     position: String,
     batch_events: u32,
+    dlq_events: u32,
 }
 
 struct IngestService {
@@ -142,6 +143,7 @@ impl pb::ingest_server::Ingest for IngestService {
                 Ok(pb::Ack {
                     position: a.position,
                     batch_events: a.batch_events,
+                    dlq_events: a.dlq_events,
                 })
             })
         });
@@ -184,11 +186,22 @@ impl EventSource for GrpcSource {
     }
 
     fn commit(&mut self, position: SourcePosition) -> Result<(), SourceError> {
+        self.commit_with_dlq_count(position, 0)
+    }
+
+    fn commit_with_dlq_count(
+        &mut self,
+        position: SourcePosition,
+        dlq_events: u32,
+    ) -> Result<(), SourceError> {
         // Fan the position out to every session; a session forwards it as an
-        // `Ack` and the producer advances its offset.
+        // `Ack` and the producer advances its offset. `dlq_events == 0` is
+        // the producer's only signal that every event this ack covers was
+        // actually projected, not silently dead-lettered (Phase 29).
         let _ = self.ack_tx.send(AckMsg {
             position: position.0.clone(),
             batch_events: std::mem::take(&mut self.since_commit),
+            dlq_events,
         });
         self.committed = Some(position);
         Ok(())

@@ -104,4 +104,20 @@ pub trait EventSource {
     /// The currently committed position, if any (for `kulyrax sources` and
     /// resume). Read from the checkpoint at construction.
     fn committed_position(&self) -> Option<&SourcePosition>;
+
+    /// Like [`commit`](Self::commit), but also reports how many of this
+    /// batch's events were DLQ'd rather than genuinely projected (0 when no
+    /// DLQ is configured, or none of this batch needed it). The position
+    /// still advances either way — a DLQ'd event is done with, not retried —
+    /// this is purely an extra signal for a source that can forward it
+    /// somewhere a consumer might see it (`GrpcSource`, into the `Ack`).
+    /// Default: ignore the count and defer to `commit`, so every existing
+    /// source (`directory`, `stdin`) needs no change.
+    fn commit_with_dlq_count(
+        &mut self,
+        position: SourcePosition,
+        _dlq_events: u32,
+    ) -> Result<(), SourceError> {
+        self.commit(position)
+    }
 }

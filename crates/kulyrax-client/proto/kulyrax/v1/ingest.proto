@@ -56,4 +56,12 @@ message Ack {
   // Events dispatched in the batch this ack covers (created + updated + deleted
   // + skipped + dlq). Observability only.
   uint32 batch_events = 2;
+  // How many of `batch_events` were dead-lettered rather than genuinely
+  // projected to every adapter they were routed to. The position still
+  // advances past a DLQ'd event (it will not be redelivered), so this is the
+  // only signal that distinguishes "every event in this batch was actually
+  // projected" from "this batch is done with, but N events didn't make it."
+  // `dlq_events == 0` is the only condition under which every event this ack
+  // covers reached every adapter it was routed to without a hard failure.
+  uint32 dlq_events = 3;
 }
