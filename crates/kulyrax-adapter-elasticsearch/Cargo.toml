@@ -1,0 +1,31 @@
+[package]
+name = "kulyrax-adapter-elasticsearch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Elasticsearch document backend for Kulyrax — a StorageAdapter/DocumentBackend extension crate."
+keywords = ["cqrs", "event-sourcing", "elasticsearch"]
+categories = ["database"]
+
+[dependencies]
+kulyrax-core = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# Elasticsearch has no official synchronous Rust client and the community
+# `elasticsearch` crate lags ES's own release cadence; the REST surface this
+# adapter needs (GET/PUT a document by id with if_seq_no/if_primary_term
+# optimistic concurrency, POST _update for a partial merge) is small enough
+# to call directly over plain HTTP, matching the project's existing
+# preference for talking to a store natively rather than through a thick
+# client (Postgres/MySQL do raw SQL, not an ORM). `blocking` keeps the
+# adapter path synchronous end to end, like every other built-in backend.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+
+[dev-dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+tempfile = "3"

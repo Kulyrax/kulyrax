@@ -1,7 +1,8 @@
 //! Phase 28: thin wiring crate. `kulyrax-core` stopped shipping every
-//! networked backend's driver unconditionally — each one (Postgres, and
-//! eventually MySQL/Redis/MongoDB/Neo4j) now lives in its own
-//! `kulyrax-adapter-*` crate and resolves via [`kulyrax_core::KulyraxRuntime`]'s
+//! networked backend's driver unconditionally — each one (Postgres,
+//! Elasticsearch, and eventually MySQL/Redis/MongoDB/Neo4j) now lives in its
+//! own `kulyrax-adapter-*` crate and resolves via
+//! [`kulyrax_core::KulyraxRuntime`]'s
 //! instance-scoped adapter registry, exactly like a third-party community
 //! backend would. This crate's only job is registering the default set so
 //! `kulyrax-cli` (and any other embedder who wants "every backend works out
@@ -32,6 +33,21 @@ pub fn register_default_backends(runtime: &mut KulyraxRuntime) {
         let migration_policy = runtime.config().migration_policy;
         runtime.register_adapter_factory("postgres", move |raw| {
             kulyrax_adapter_postgres::factory(
+                raw,
+                mappings.clone(),
+                Arc::clone(&upcasters),
+                migration_policy,
+            )
+        });
+    }
+
+    #[cfg(feature = "elasticsearch")]
+    {
+        let mappings = runtime.document_mappings().cloned().unwrap_or_default();
+        let upcasters = runtime.upcasters();
+        let migration_policy = runtime.config().migration_policy;
+        runtime.register_adapter_factory("elasticsearch", move |raw| {
+            kulyrax_adapter_elasticsearch::factory(
                 raw,
                 mappings.clone(),
                 Arc::clone(&upcasters),

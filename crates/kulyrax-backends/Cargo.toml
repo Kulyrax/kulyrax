@@ -6,15 +6,18 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "Thin wiring crate: registers Kulyrax's optional networked-backend factories (Postgres, MySQL, Redis, MongoDB, Neo4j) onto a KulyraxRuntime, one Cargo feature per backend."
+description = "Thin wiring crate: registers Kulyrax's optional networked-backend factories (Postgres, Elasticsearch, MySQL, Redis, MongoDB, Neo4j) onto a KulyraxRuntime, one Cargo feature per backend."
 
 [dependencies]
 kulyrax-core = { workspace = true }
 kulyrax-adapter-postgres = { workspace = true, optional = true }
+kulyrax-adapter-elasticsearch = { workspace = true, optional = true }
 
 [features]
-# Phase 28: only Postgres has moved out of kulyrax-core so far. mysql/redis/
-# mongo/neo4j features join `all` as each backend's own crate lands.
+# Phase 28: Postgres and Elasticsearch have moved out of kulyrax-core so
+# far. mysql/redis/mongo/neo4j features join `all` as each backend's own
+# crate lands.
 postgres = ["dep:kulyrax-adapter-postgres"]
-all = ["postgres"]
+elasticsearch = ["dep:kulyrax-adapter-elasticsearch"]
+all = ["postgres", "elasticsearch"]
 default = ["all"]
