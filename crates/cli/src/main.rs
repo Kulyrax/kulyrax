@@ -96,6 +96,7 @@ enum Commands {
         output: OutputFormat,
     },
 
+    /// Show which adapters an event reaches and in what order (no writes)
     Explain {
         #[arg(long)]
         config: PathBuf,

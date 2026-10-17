@@ -13,3 +13,7 @@ Thumbs.db
 
 # Backup files
 **/*.rs.bk
+
+# State and output written by running the examples
+examples/*/.kulyrax/
+examples/*/app.db

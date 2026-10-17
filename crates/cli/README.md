@@ -1,6 +1,6 @@
 # kulyrax-cli
 
-The command-line binary for [Kulyrax](https://github.com/Panchauly/kulyrax) — a thin
+The command-line binary for [Kulyrax](https://github.com/Kulyrax/kulyrax) — a thin
 wrapper (argument parsing + rendering only) over `kulyrax-core`.
 
 ```sh
@@ -13,9 +13,9 @@ kulyrax explain --config config.yaml --event event.json         # routing/depend
 kulyrax dry-run  --config config.yaml --mappings mappings/ --event event.json
 ```
 
-See the root [README](https://github.com/Panchauly/kulyrax#readme) for a full quickstart
-and [`docs/concepts.md`](https://github.com/Panchauly/kulyrax/blob/master/docs/concepts.md)
+See the root [README](https://github.com/Kulyrax/kulyrax#readme) for a full quickstart
+and [`docs/concepts.md`](https://github.com/Kulyrax/kulyrax/blob/main/docs/concepts.md)
 for the mental model.
 
-Licensed under either of [MIT](https://github.com/Panchauly/kulyrax/blob/master/LICENSE-MIT)
-or [Apache-2.0](https://github.com/Panchauly/kulyrax/blob/master/LICENSE-APACHE) at your option.
+Licensed under either of [MIT](https://github.com/Kulyrax/kulyrax/blob/main/LICENSE-MIT)
+or [Apache-2.0](https://github.com/Kulyrax/kulyrax/blob/main/LICENSE-APACHE) at your option.

@@ -8,7 +8,7 @@ read that first if that's what brought you here.
 ## Getting set up
 
 ```sh
-git clone https://github.com/Panchauly/kulyrax.git
+git clone https://github.com/Kulyrax/kulyrax.git
 cd kulyrax
 cargo build --workspace
 cargo test --workspace

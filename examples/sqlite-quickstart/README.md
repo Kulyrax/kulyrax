@@ -33,7 +33,7 @@ column, not just `email` — a full replace always writes the whole row. That's 
 limitation [facets](../../docs/concepts.md#facets) exist to lift.
 
 Run it twice: the second run is a no-op (every event is `Skipped(AlreadyProjected)` /
-`Skipped(StaleSequence)`) because the source's checkpoint (`.conduit/state/`) remembers
+`Skipped(StaleSequence)`) because the source's checkpoint (`.kulyrax/state/`) remembers
 what it already delivered.
 
 ## Next

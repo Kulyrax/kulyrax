@@ -27,4 +27,4 @@ sources:
   - type: directory
     id: quickstart
     path: ./events
-    state_dir: ./.conduit/state
+    state_dir: ./.kulyrax/state

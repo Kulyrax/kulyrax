@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 rm -f app.db
-rm -rf .conduit
+rm -rf .kulyrax
 
 DBTOOL="cargo run --quiet --manifest-path dbtool/Cargo.toml --"
 KULYRAX="cargo run --quiet --manifest-path ../../Cargo.toml -p kulyrax-cli --bin kulyrax --"

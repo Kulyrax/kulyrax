@@ -1,6 +1,6 @@
 # Kulyrax
 
-[![CI](https://github.com/Panchauly/kulyrax/actions/workflows/ci.yml/badge.svg)](https://github.com/Panchauly/kulyrax/actions/workflows/ci.yml)
+[![CI](https://github.com/Kulyrax/kulyrax/actions/workflows/ci.yml/badge.svg)](https://github.com/Kulyrax/kulyrax/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#status)
 
 **Kulyrax** deterministically projects events into SQL, document, key-value, and graph
@@ -9,15 +9,28 @@ event log it does not own and never produces, buffers, or stores events itself (
 [`architecture.md` §1.1](architecture.md)).
 
 Every storage kind has a real database backend, not just a file-backed default — SQL on
-SQLite, Postgres, or MySQL; key-value on Redis; document on MongoDB; graph on Neo4j —
-all nine behind the exact same sequence-gated idempotency model. Adding a tenth is a
-public extension point, not a fork: see
+SQLite, Postgres, or MySQL; key-value on Redis; document on MongoDB or Elasticsearch;
+graph on Neo4j — all behind the exact same sequence-gated idempotency model, alongside
+file-backed document, key-value and graph adapters. Adding another is a public
+extension point, not a fork: see
 [`docs/writing-a-backend.md`](docs/writing-a-backend.md).
+
+## Install
+
+Kulyrax is not on crates.io yet, so build it from source with a Rust toolchain
+(1.88 or newer):
+
+```sh
+cargo install --git https://github.com/Kulyrax/kulyrax kulyrax-cli
+```
+
+That installs one binary, `kulyrax`, with every backend included. No `protoc` install
+is needed; it is vendored.
 
 ## Quickstart
 
 ```sh
-git clone https://github.com/Panchauly/kulyrax.git
+git clone https://github.com/Kulyrax/kulyrax.git
 cd kulyrax
 bash examples/sqlite-quickstart/run.sh
 ```
@@ -41,6 +54,11 @@ kulyrax run --config config.yaml --mappings mappings --once
   `event_type` → SQL columns, one file per event type.
 - **`routing.yaml`** says which adapters each event type reaches.
 - **`events/events.ndjson`** is the input — three NDJSON events.
+
+**You create the tables, Kulyrax fills them.** Kulyrax never creates or migrates your
+read-model schema; it only creates its own bookkeeping table (`conduit_projection_state`).
+That's why `run.sh` calls `dbtool init` to create `users` before the run. Without it,
+every event fails because the table doesn't exist.
 
 Same event, three other storage kinds, one call each: `examples/postgres/` (a real
 transactional Postgres backend), `examples/embedded/` (call `kulyrax-core` as a library,
