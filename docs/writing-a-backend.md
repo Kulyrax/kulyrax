@@ -174,9 +174,9 @@ already does, consistent with the Thin CLI Pattern.
 
 ## Worked example: the MySQL backend
 
-[`crates/kulyrax-core/src/adapter/sql/mysql.rs`](../crates/kulyrax-core/src/adapter/sql/mysql.rs)
-implements `SqlTxn` for MySQL and is a genuine worked example of everything
-above, not a hypothetical:
+[`kulyrax-adapter-mysql`](../crates/adapters/kulyrax-adapter-mysql/src/lib.rs)
+implements `SqlTxn` for MySQL in its own crate, exactly as an out-of-tree
+backend would:
 
 - **Which trait:** `SqlTxn`, because the target is a SQL table.
 - **Atomicity contract:** the pessimistic-lock shape — a `REPEATABLE READ`
@@ -200,19 +200,14 @@ above, not a hypothetical:
   `tests/mysql_backend.rs`'s `mysql_type_coercion` test for exactly what it
   does and doesn't handle (a temporal column needs MySQL's own
   `YYYY-MM-DD HH:MM:SS` form, not RFC 3339).
-- **Test coverage:** `crates/kulyrax-core/tests/mysql_backend.rs` runs the
+- **Test coverage:** `crates/adapters/kulyrax-adapter-mysql/tests/mysql_backend.rs` runs the
   same scenario suite as `pg_backend.rs` — out-of-order upsert, delete
   lifecycle, disjoint facets, a missing-column rejection, type coercion,
   cross-backend convergence with SQLite, and concurrent writers under the
   `FOR UPDATE` lock.
 
-MySQL ships inside `kulyrax-core` itself (a deliberate product decision), not
-as a separate crate. A community backend for a store Kulyrax doesn't ship
-(DynamoDB, Elasticsearch, …) follows the exact same pattern from its own,
-separate crate: implement the trait that matches your storage kind, satisfy
-the atomicity contract, decide on a guard shape, and call
-`register_adapter_factory` on the embedding application's `KulyraxRuntime`
-from your crate's own init path (or ask the embedding application to call
-it). Nothing about being out-of-tree changes
-any of the above — `mysql.rs` is the same code shape a real out-of-tree
-backend would have, just living in this repository instead of its own.
+A community backend for a store Kulyrax doesn't ship (DynamoDB, …) follows
+the same pattern from its own crate: implement the trait for your storage
+kind, satisfy the atomicity contract, choose a guard shape, expose a
+`factory`, and have the embedding application register it on its
+`KulyraxRuntime`.

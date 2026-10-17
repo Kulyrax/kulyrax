@@ -12,12 +12,14 @@ description = "Thin wiring crate: registers Kulyrax's optional networked-backend
 kulyrax-core = { workspace = true }
 kulyrax-adapter-postgres = { workspace = true, optional = true }
 kulyrax-adapter-elasticsearch = { workspace = true, optional = true }
+kulyrax-adapter-mysql = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_yaml = "0.9"
 
 [features]
-# Phase 28: Postgres and Elasticsearch have moved out of kulyrax-core so
-# far. mysql/redis/mongo/neo4j features join `all` as each backend's own
-# crate lands.
-postgres = ["dep:kulyrax-adapter-postgres"]
+postgres =["dep:kulyrax-adapter-postgres"]
 elasticsearch = ["dep:kulyrax-adapter-elasticsearch"]
-all = ["postgres", "elasticsearch"]
+mysql = ["dep:kulyrax-adapter-mysql"]
+all = ["postgres", "elasticsearch", "mysql"]
 default = ["all"]

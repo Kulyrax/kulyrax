@@ -34,8 +34,8 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 
 1. Done: introduce `MappingSet` and `AdapterBuildContext`, change `AdapterFactory` to `Fn(&CustomAdapterConfig, &AdapterBuildContext)`, and add `CustomAdapterConfig::backend_config`. Port Postgres and Elasticsearch to it. The only API removal is `KulyraxRuntime::{sql,document,kv,graph}_mappings()`.
 2. Done: guard against the regressions the extraction would cause. Validation classifies first-party custom types (`postgres`, `mysql`, `mongodb`, `elasticsearch`, `redis`, `neo4j`) by storage kind via a name → kind table, so their mapping and capability checks still run; third-party types stay deferred. `KulyraxRuntime::build_adapters()` returns `PipelineError::AdapterBuild` when any custom adapter fails to build; every pipeline command and `kulyrax-ingest` call it at startup. This also restores both checks for Postgres, which lost them when it moved out.
-3. Extract MySQL, then Redis, then MongoDB, then Neo4j, one commit each. Remove each enum variant from `AdapterConfig` and move its `*_backend.rs` test.
-4. Move all adapter crates under `crates/adapters/`.
+3. Extract MySQL (done), then Redis, then MongoDB, then Neo4j, one commit each. Remove each enum variant from `AdapterConfig` and move its `*_backend.rs` test.
+4. Done early, so new crates are created in place: move the adapter crates under `crates/adapters/`.
 5. Replace the four `loader.rs` files with one generic `load_mappings<M>`.
 6. Do the comment pass.
 7. Update the docs.
@@ -65,6 +65,13 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 | Step 2: final gates | clippy `-D warnings`; `cargo test --workspace`; `cargo fmt --check` | clean; 94 test binaries, 268 passed, 0 failed; exit 0 |
 | Step 2: example configs still validate | `kulyrax explain --mappings …` on `examples/postgres` and `examples/automotive-csv-producer` (the latter with dummy `KULYRAX_*_URL` values that parse) | both exit 0 |
 | Step 2: startup failure end to end | `DATABASE_URL="not a url" kulyrax dry-run` on `examples/postgres` | exit 1 at startup: `AdapterBuild([… "pg-primary" … \`url\` does not parse: not a url])` |
+| Step 4: crate move | clippy `-D warnings`; `cargo test --workspace` | clean; 94 test binaries, 268 passed, 0 failed |
+| Step 3: MySQL out of core | `cargo tree -p kulyrax-core -e normal --depth 1` | no `mysql`; still `mongodb`, `neo4rs`, `redis`, `tokio` |
+| Step 3: MySQL resolves via registry | `cargo test -p kulyrax-backends --test registration` | postgres, elasticsearch and mysql factories each reject an unparseable URL by name, so each was found and ran |
+| Step 3: MySQL factory | `cargo test -p kulyrax-adapter-mysql --lib` | 2 passed (empty and unparseable URL rejected) |
+| Step 3: final gates | clippy `-D warnings`; `cargo test --workspace`; `cargo fmt --check` | clean; 97 test binaries, 273 passed, 0 failed; exit 0 |
+
+Not run: the `mysql_backend` integration suite against a real MySQL. Its 7 tests return early without `KULYRAX_MYSQL_URL` (they report "ok" in 0.00s), so they only show the moved file compiles. No database was available in this session.
 
 ## Risks and open questions
 

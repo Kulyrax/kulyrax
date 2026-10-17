@@ -1,4 +1,4 @@
-//! Phase 25.3: MySQL backend integration scenarios.
+//! MySQL backend integration scenarios.
 //!
 //! **Gated on `KULYRAX_MYSQL_URL`** (`mysql://user:pass@host/db`). When it is
 //! unset every test prints a skip line and returns `Ok` — the hermetic SQLite
@@ -11,8 +11,8 @@
 //! cross-backend convergence, concurrent writers) — the phase doc's stated
 //! guarantee that MySQL gets the same coverage as SQLite/Postgres.
 
+use kulyrax_adapter_mysql::MySqlAdapter;
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
-use kulyrax_core::adapter::sql::mysql::MySqlAdapter;
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use kulyrax_core::adapter::sql::sqlite::SqliteAdapter;
 use kulyrax_core::adapter::{AdapterOutcome, SkipReason, StorageAdapter};

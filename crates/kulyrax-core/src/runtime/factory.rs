@@ -10,7 +10,6 @@ use crate::adapter::graph::store::GraphStore;
 use crate::adapter::keyvalue::redis::RedisAdapter;
 use crate::adapter::keyvalue::runtime::KvRuntimeBuilder;
 use crate::adapter::keyvalue::store::FileKvStore;
-use crate::adapter::sql::mysql::MySqlAdapter;
 use crate::adapter::sql::runtime::SqlRuntimeBuilder;
 use crate::adapter::sql::sqlite::SqliteAdapter;
 use crate::adapter::{AdapterError, AdapterResult};
@@ -178,20 +177,6 @@ pub fn build_adapters_reporting_failures(
                     &cfg.config.user,
                     &password,
                     cfg.config.database.clone(),
-                    cfg.priority,
-                    builder,
-                    Arc::clone(&ctx.upcasters),
-                    config.migration_policy,
-                )));
-            }
-
-            AdapterConfig::MySql(cfg) => {
-                let builder = SqlRuntimeBuilder::new(ctx.mappings.sql.clone());
-                let url = crate::runtime::config::expand_env(&cfg.config.url);
-                adapters.push(Box::new(MySqlAdapter::new(
-                    cfg.id.clone(),
-                    &url,
-                    cfg.config.pool_size.unwrap_or(4),
                     cfg.priority,
                     builder,
                     Arc::clone(&ctx.upcasters),

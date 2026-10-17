@@ -1675,6 +1675,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "kulyrax-adapter-mysql"
+version = "0.8.0"
+dependencies = [
+ "kulyrax-core",
+ "mysql",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+]
+
+[[package]]
 name = "kulyrax-adapter-postgres"
 version = "0.8.0"
 dependencies = [
@@ -1695,8 +1708,10 @@ name = "kulyrax-backends"
 version = "0.8.0"
 dependencies = [
  "kulyrax-adapter-elasticsearch",
+ "kulyrax-adapter-mysql",
  "kulyrax-adapter-postgres",
  "kulyrax-core",
+ "serde_yaml",
 ]
 
 [[package]]
@@ -1728,7 +1743,6 @@ name = "kulyrax-core"
 version = "0.8.0"
 dependencies = [
  "mongodb",
- "mysql",
  "neo4rs",
  "once_cell",
  "r2d2",

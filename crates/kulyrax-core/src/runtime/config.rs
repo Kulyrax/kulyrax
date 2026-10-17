@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use crate::routing::AdapterId;
 
 const KNOWN_ADAPTER_TYPES: &[&str] = &[
-    "sqlite", "file", "keyvalue", "graph", "redis", "mongodb", "neo4j", "mysql",
+    "sqlite", "file", "keyvalue", "graph", "redis", "mongodb", "neo4j",
 ];
 
 // ------------------------------------------------------------
@@ -178,9 +178,6 @@ enum KnownAdapterConfig {
 
     #[serde(rename = "neo4j")]
     Neo4j(Neo4jAdapterConfig),
-
-    #[serde(rename = "mysql")]
-    MySql(MySqlAdapterConfig),
 }
 
 #[derive(Debug)]
@@ -192,7 +189,6 @@ pub enum AdapterConfig {
     Redis(RedisAdapterConfig),
     MongoDb(MongoDbAdapterConfig),
     Neo4j(Neo4jAdapterConfig),
-    MySql(MySqlAdapterConfig),
 
     /// An unrecognized `type:`, resolved against the
     /// [`crate::runtime::registry`] when adapters are built, not when config
@@ -257,7 +253,6 @@ impl<'de> Deserialize<'de> for AdapterConfig {
                 KnownAdapterConfig::Redis(c) => Ok(AdapterConfig::Redis(c)),
                 KnownAdapterConfig::MongoDb(c) => Ok(AdapterConfig::MongoDb(c)),
                 KnownAdapterConfig::Neo4j(c) => Ok(AdapterConfig::Neo4j(c)),
-                KnownAdapterConfig::MySql(c) => Ok(AdapterConfig::MySql(c)),
             };
         }
 
@@ -447,30 +442,6 @@ pub struct Neo4jConfig {
     pub database: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct MySqlAdapterConfig {
-    pub id: String,
-    pub priority: u32,
-    pub config: MySqlConfig,
-
-    #[serde(default)]
-    pub capabilities: Option<AdapterCapabilities>,
-
-    #[serde(default)]
-    pub depends_on: Vec<AdapterId>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct MySqlConfig {
-    /// `mysql://user:pass@host:port/db`. May contain `${ENV_VAR}` references
-    /// (Phase 19.2 pattern, reused as-is) so credentials stay out of the
-    /// committed config.
-    pub url: String,
-    /// Connection pool size (default 4).
-    #[serde(default)]
-    pub pool_size: Option<u32>,
-}
-
 /// Expand `${VAR}` references against the process environment. An unset
 /// variable is left literally in place (surfaces as a connection error rather
 /// than a silent empty string).
@@ -626,7 +597,6 @@ impl AdapterConfig {
             AdapterConfig::Redis(cfg) => &cfg.id,
             AdapterConfig::MongoDb(cfg) => &cfg.id,
             AdapterConfig::Neo4j(cfg) => &cfg.id,
-            AdapterConfig::MySql(cfg) => &cfg.id,
             AdapterConfig::Custom(cfg) => &cfg.id,
         }
     }
@@ -640,7 +610,6 @@ impl AdapterConfig {
             AdapterConfig::Redis(cfg) => cfg.priority,
             AdapterConfig::MongoDb(cfg) => cfg.priority,
             AdapterConfig::Neo4j(cfg) => cfg.priority,
-            AdapterConfig::MySql(cfg) => cfg.priority,
             AdapterConfig::Custom(cfg) => cfg.priority,
         }
     }
@@ -655,7 +624,6 @@ impl AdapterConfig {
             AdapterConfig::Redis(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::MongoDb(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::Neo4j(cfg) => cfg.capabilities.as_deref(),
-            AdapterConfig::MySql(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::Custom(cfg) => cfg.capabilities.as_deref(),
         }
     }
@@ -669,7 +637,6 @@ impl AdapterConfig {
             AdapterConfig::Redis(cfg) => &cfg.depends_on,
             AdapterConfig::MongoDb(cfg) => &cfg.depends_on,
             AdapterConfig::Neo4j(cfg) => &cfg.depends_on,
-            AdapterConfig::MySql(cfg) => &cfg.depends_on,
             AdapterConfig::Custom(cfg) => &cfg.depends_on,
         }
     }

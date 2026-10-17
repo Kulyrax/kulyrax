@@ -14,4 +14,7 @@ pub fn register_default_backends(runtime: &mut KulyraxRuntime) {
 
     #[cfg(feature = "elasticsearch")]
     runtime.register_adapter_factory("elasticsearch", kulyrax_adapter_elasticsearch::factory);
+
+    #[cfg(feature = "mysql")]
+    runtime.register_adapter_factory("mysql", kulyrax_adapter_mysql::factory);
 }

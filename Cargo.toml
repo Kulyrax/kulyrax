@@ -7,6 +7,7 @@ members = [
     "crates/kulyrax-client",
     "crates/adapters/kulyrax-adapter-postgres",
     "crates/adapters/kulyrax-adapter-elasticsearch",
+    "crates/adapters/kulyrax-adapter-mysql",
     "crates/kulyrax-backends",
 ]
 # examples/ are standalone Cargo projects (each depends on the engine via a
@@ -29,4 +30,5 @@ kulyrax-ingest = { path = "crates/kulyrax-ingest", version = "0.8.0" }
 kulyrax-client = { path = "crates/kulyrax-client", version = "0.8.0" }
 kulyrax-adapter-postgres = { path = "crates/adapters/kulyrax-adapter-postgres", version = "0.8.0" }
 kulyrax-adapter-elasticsearch = { path = "crates/adapters/kulyrax-adapter-elasticsearch", version = "0.8.0" }
+kulyrax-adapter-mysql = { path = "crates/adapters/kulyrax-adapter-mysql", version = "0.8.0" }
 kulyrax-backends = { path = "crates/kulyrax-backends", version = "0.8.0" }

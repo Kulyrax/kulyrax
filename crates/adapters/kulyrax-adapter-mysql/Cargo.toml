@@ -1,0 +1,26 @@
+[package]
+name = "kulyrax-adapter-mysql"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "MySQL SQL backend for Kulyrax — a StorageAdapter/SqlTxn extension crate."
+keywords = ["cqrs", "event-sourcing", "mysql"]
+categories = ["database"]
+
+[dependencies]
+kulyrax-core = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# Sync client with its own internal pool, so dispatch stays synchronous.
+# `minimal-rust` + `rustls-tls` avoid system zlib and openssl.
+mysql = { version = "28", default-features = false, features = ["minimal-rust", "derive", "buffer-pool", "rustls-tls"] }
+
+[dev-dependencies]
+# The cross-backend convergence test compares against core's SQLite adapter.
+rusqlite = { version = "0.32", features = ["bundled"] }
+tempfile = "3"

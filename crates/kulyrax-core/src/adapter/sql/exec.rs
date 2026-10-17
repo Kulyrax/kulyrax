@@ -120,33 +120,23 @@ pub struct GuardRow {
 /// One backend's transaction. Everything a driver genuinely must own — nothing
 /// about *when* to write or *what* to decide (that is [`project`]).
 ///
-/// **Public extension surface (Phase 25.1).** Implement this trait for a
-/// SQL-flavored store Kulyrax doesn't ship and every SQL mapping feature —
-/// facets, deletes, tombstones, resurrection — works for free; the trait is
-/// the entire contract. MySQL ([`super::mysql::MySqlTxn`], Phase 25.3) is
-/// itself a worked example of implementing this trait fresh, not just a
-/// built-in — nothing about it is special-cased outside this file. A
-/// breaking change to this trait is a breaking change to `kulyrax-core`,
-/// tracked deliberately (pre-1.0, semver still allows it, but not silently).
+/// **Public extension surface.** Implement this trait for a SQL store and
+/// every SQL mapping feature (facets, deletes, tombstones, resurrection)
+/// works unchanged; the trait is the entire contract. A breaking change here
+/// is a breaking change to `kulyrax-core`.
 ///
 /// **The atomicity contract.** `ensure_guard_table` through `commit` all run
 /// against the *same* underlying transaction: the guard read
 /// (`read_guard_lane`), the target write (`execute_write`/`delete_row`), and
 /// the guard write (`upsert_guard_row`/`bump_guard_lane`/`cascade_facets`)
 /// must be indivisible from the perspective of any other writer — either all
-/// of them land, or none do. Concretely, per built-in backend:
-/// - **SQLite** ([`super::sqlite::SqliteTxn`]): a single-writer assumption
-///   (SQLite serializes writers itself) plus a real `rusqlite::Transaction`;
-///   `lock` on `read_guard_lane` is a no-op.
-/// - **Postgres** ([`super::postgres::PostgresTxn`]): a real
-///   `READ COMMITTED` transaction with `SELECT … FOR UPDATE` on the guard
-///   row when `lock` is set (Phase 19.4) — genuine multi-writer safety via a
-///   pessimistic lock, not a retry loop.
-/// - **MySQL** ([`super::mysql::MySqlTxn`]): the same pessimistic-lock shape
-///   as Postgres — a `REPEATABLE READ` transaction with `SELECT … FOR UPDATE`
-///   on the guard row (InnoDB supports it identically) — over a driver with a
-///   looser wire protocol, so it skips Postgres's column-type introspection
-///   and binds JSON scalars by their own Rust type instead (Phase 25.3).
+/// of them land, or none do. How the shipped backends meet it:
+/// - **SQLite** ([`super::sqlite::SqliteTxn`]): SQLite serializes writers
+///   itself, plus a real `rusqlite::Transaction`; `lock` is a no-op.
+/// - **Postgres** (`kulyrax-adapter-postgres`): `READ COMMITTED` with
+///   `SELECT … FOR UPDATE` on the guard row when `lock` is set.
+/// - **MySQL** (`kulyrax-adapter-mysql`): the same pessimistic lock under
+///   `REPEATABLE READ`.
 ///
 /// **This seam has no built-in retry path** — unlike the KV/Document/Graph
 /// traits below, `SqlError` carries no "someone else changed this, retry"

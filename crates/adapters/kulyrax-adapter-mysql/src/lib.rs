@@ -1,44 +1,76 @@
-//! Phase 25.3: the MySQL SQL backend — a fifth, first-party SQL adapter
-//! alongside SQLite/Postgres, over the same `SqlTxn` seam (Phase 19.1). Per
-//! an explicit product decision this ships inside `kulyrax-core` exactly
-//! like every other backend, not as an out-of-tree example crate — this file
-//! doubles as the worked example for [`super::exec::SqlTxn`]'s "public
-//! extension surface" doc comment (Phase 25.1).
+//! MySQL SQL backend over core's `SqlTxn` seam. Registers as `type: mysql`
+//! via [`factory`].
 //!
-//! Unlike Postgres, MySQL's wire protocol is comparatively permissive about
-//! parameter/column type mismatches — a bound string coerces into a
-//! DATE/DATETIME/numeric column under the server's default `sql_mode`. So
-//! this backend skips Postgres's `information_schema` column-type
-//! introspection and binds every JSON scalar directly by its own shape
-//! (`bool` → `Value::Int(0/1)`, matching MySQL's `TINYINT(1)` `BOOLEAN`
-//! convention; a JSON number → `Value::Int`/`Value::Double`; a JSON string →
-//! `Value::Bytes`; `null` → `Value::NULL`) — the same "trust the server's own
-//! coercion" stance SQLite's backend takes, not Postgres's typed one.
+//! MySQL coerces a bound string into DATE/DATETIME/numeric columns under its
+//! default `sql_mode`, so unlike Postgres this backend does not introspect
+//! column types: each JSON scalar binds by its own shape (`bool` → 0/1 to
+//! match `TINYINT(1)`, number → int or double, string → bytes, `null` → NULL).
 //!
-//! Multi-writer safety mirrors Postgres: a real `REPEATABLE READ` (MySQL's
-//! default) transaction with `SELECT … FOR UPDATE` on the guard row when
-//! `lock` is set (InnoDB supports the same pessimistic row lock Postgres
-//! does) — no retry loop needed.
+//! Multi-writer safety matches Postgres: a `REPEATABLE READ` transaction with
+//! `SELECT … FOR UPDATE` on the guard row, so no retry loop is needed.
 
 use std::sync::Arc;
 
 use mysql::prelude::Queryable;
 use mysql::{IsolationLevel, Opts, OptsBuilder, Pool, PoolConstraints, PoolOpts, TxOpts};
+use serde::Deserialize;
 use serde_json::Value;
 
-use super::adapter::SqlError;
-use super::exec::{self, GuardRow, Placeholders, SqlOutcome, SqlPlan, SqlTxn, SqlWrite};
-use super::runtime::SqlRuntimeBuilder;
-use crate::adapter::{AdapterError, AdapterResult, GuardState, SkipReason, StorageAdapter};
-use crate::event::Event;
-use crate::routing::StorageKind;
-use crate::runtime::config::MigrationPolicy;
-use crate::upcast::UpcasterRegistry;
+use kulyrax_core::adapter::sql::adapter::SqlError;
+use kulyrax_core::adapter::sql::exec::{
+    self, GuardRow, Placeholders, SqlOutcome, SqlPlan, SqlTxn, SqlWrite,
+};
+use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
+use kulyrax_core::adapter::{AdapterError, AdapterResult, GuardState, SkipReason, StorageAdapter};
+use kulyrax_core::event::Event;
+use kulyrax_core::routing::StorageKind;
+use kulyrax_core::runtime::AdapterBuildContext;
+use kulyrax_core::runtime::config::{
+    ConfigError, CustomAdapterConfig, MigrationPolicy, expand_env,
+};
+use kulyrax_core::upcast::UpcasterRegistry;
 
-/// MySQL SQL adapter (Phase 25.3). Structurally identical to
-/// [`super::postgres::PostgresAdapter`]: a lazily-erroring connection pool
-/// held as `Result<Pool, String>` so a bad URL surfaces per-event rather than
-/// making the adapter factory fallible.
+/// The `config:` block of a `type: mysql` adapter entry.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MySqlConfig {
+    /// `mysql://user:pass@host:port/db`; `${ENV_VAR}` references are expanded.
+    pub url: String,
+    /// Connection pool size (default 4).
+    #[serde(default)]
+    pub pool_size: Option<u32>,
+}
+
+/// Registry factory for `type: mysql`.
+pub fn factory(
+    entry: &CustomAdapterConfig,
+    ctx: &AdapterBuildContext,
+) -> Result<Box<dyn StorageAdapter>, ConfigError> {
+    let id = entry.id.clone();
+    let cfg: MySqlConfig = entry.backend_config()?;
+    let url = expand_env(&cfg.url);
+    if url.trim().is_empty() {
+        return Err(ConfigError::FactoryConfigInvalid(format!(
+            "mysql adapter {id:?}: `url` is empty"
+        )));
+    }
+    if Opts::from_url(&url).is_err() {
+        return Err(ConfigError::FactoryConfigInvalid(format!(
+            "mysql adapter {id:?}: `url` does not parse: {url}"
+        )));
+    }
+    Ok(Box::new(MySqlAdapter::new(
+        id,
+        &url,
+        cfg.pool_size.unwrap_or(4),
+        entry.priority,
+        SqlRuntimeBuilder::new(ctx.mappings.sql.clone()),
+        Arc::clone(&ctx.upcasters),
+        ctx.migration_policy,
+    )))
+}
+
+/// The pool is held as `Result<Pool, String>`: a connection error surfaces
+/// on the event that needs it instead of making construction fallible.
 pub struct MySqlAdapter {
     id: String,
     priority: u32,
@@ -49,10 +81,6 @@ pub struct MySqlAdapter {
 }
 
 impl MySqlAdapter {
-    /// Build the pool from a connection URL
-    /// (`mysql://user:pass@host:3306/db`). Infallible — a bad URL or pool
-    /// size is stored and surfaced per-event, keeping
-    /// `build_adapters_from_config` free of a `Result`.
     pub fn new(
         id: String,
         url: &str,
@@ -182,10 +210,6 @@ impl StorageAdapter for MySqlAdapter {
     }
 }
 
-// ---------------------------------------------------------------------------
-// MySqlTxn
-// ---------------------------------------------------------------------------
-
 pub struct MySqlTxn<'a> {
     tx: mysql::Transaction<'a>,
 }
@@ -194,8 +218,8 @@ fn my_err(e: mysql::Error) -> SqlError {
     SqlError::ExecutionFailed(e.to_string())
 }
 
-/// Convert a JSON scalar to a bindable `mysql::Value` (see the module doc
-/// comment for why this skips Postgres-style column-type introspection).
+/// Binds by the JSON value's own shape; see the module docs for why there is
+/// no column-type introspection.
 fn json_to_value(v: &Value) -> mysql::Value {
     match v {
         Value::Null => mysql::Value::NULL,
@@ -240,8 +264,7 @@ impl SqlTxn for MySqlTxn<'_> {
         facet: &str,
         lock: bool,
     ) -> Result<Option<GuardState>, SqlError> {
-        // InnoDB's FOR UPDATE serializes concurrent writers on this row, the
-        // same real pessimistic lock Postgres uses (Phase 19.4's pattern).
+        // FOR UPDATE serializes concurrent writers on this guard row.
         let sql = if lock {
             "SELECT last_sequence, deleted, permanent FROM conduit_projection_state
              WHERE target_table = ? AND entity_key = ? AND facet = ? FOR UPDATE"
@@ -369,5 +392,49 @@ impl SqlTxn for MySqlTxn<'_> {
 
     fn commit(self) -> Result<(), SqlError> {
         self.tx.commit().map_err(my_err)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build(url: &str) -> Result<Box<dyn StorageAdapter>, ConfigError> {
+        let raw = serde_yaml::to_value(serde_json::json!({
+            "type": "mysql",
+            "id": "my1",
+            "priority": 10,
+            "config": { "url": url },
+        }))
+        .map_err(|e| ConfigError::FactoryConfigInvalid(e.to_string()))?;
+        let entry = CustomAdapterConfig {
+            type_name: "mysql".into(),
+            id: "my1".into(),
+            priority: 10,
+            raw,
+            capabilities: None,
+            depends_on: Vec::new(),
+        };
+        let ctx = AdapterBuildContext {
+            mappings: Default::default(),
+            upcasters: Arc::new(UpcasterRegistry::new()),
+            migration_policy: MigrationPolicy::default(),
+        };
+        factory(&entry, &ctx)
+    }
+
+    #[test]
+    fn factory_rejects_an_empty_url() {
+        let err = build("").err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(err.contains("`url` is empty"), "{err}");
+    }
+
+    #[test]
+    fn factory_rejects_an_unparseable_url() {
+        let err = build("not a url")
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default();
+        assert!(err.contains("`url` does not parse"), "{err}");
     }
 }
