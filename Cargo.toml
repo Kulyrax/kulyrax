@@ -5,8 +5,8 @@ members = [
     "crates/kulyrax-cli",
     "crates/kulyrax-ingest",
     "crates/kulyrax-client",
-    "crates/kulyrax-adapter-postgres",
-    "crates/kulyrax-adapter-elasticsearch",
+    "crates/adapters/kulyrax-adapter-postgres",
+    "crates/adapters/kulyrax-adapter-elasticsearch",
     "crates/kulyrax-backends",
 ]
 # examples/ are standalone Cargo projects (each depends on the engine via a
@@ -27,6 +27,6 @@ rust-version = "1.88"
 kulyrax-core = { path = "crates/kulyrax-core", version = "0.8.0" }
 kulyrax-ingest = { path = "crates/kulyrax-ingest", version = "0.8.0" }
 kulyrax-client = { path = "crates/kulyrax-client", version = "0.8.0" }
-kulyrax-adapter-postgres = { path = "crates/kulyrax-adapter-postgres", version = "0.8.0" }
-kulyrax-adapter-elasticsearch = { path = "crates/kulyrax-adapter-elasticsearch", version = "0.8.0" }
+kulyrax-adapter-postgres = { path = "crates/adapters/kulyrax-adapter-postgres", version = "0.8.0" }
+kulyrax-adapter-elasticsearch = { path = "crates/adapters/kulyrax-adapter-elasticsearch", version = "0.8.0" }
 kulyrax-backends = { path = "crates/kulyrax-backends", version = "0.8.0" }

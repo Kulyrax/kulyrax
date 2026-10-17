@@ -137,8 +137,8 @@ let mut runtime = KulyraxRuntime::load(&config_path, &mappings_dir)?;
 runtime.register_adapter_factory("mydb", factory);
 ```
 
-The [`kulyrax-adapter-postgres`](../crates/kulyrax-adapter-postgres/src/lib.rs)
-and [`kulyrax-adapter-elasticsearch`](../crates/kulyrax-adapter-elasticsearch/src/lib.rs)
+The [`kulyrax-adapter-postgres`](../crates/adapters/kulyrax-adapter-postgres/src/lib.rs)
+and [`kulyrax-adapter-elasticsearch`](../crates/adapters/kulyrax-adapter-elasticsearch/src/lib.rs)
 factories are complete real examples.
 
 Call this **before** the runtime resolves adapters (i.e. before the first
