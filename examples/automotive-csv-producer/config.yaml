@@ -8,6 +8,15 @@
 # destination, not a mock (see this example's README "Capability assessment").
 version: 1
 
+# ContinueOnError, not the default FailFast: the three destinations below are
+# independent, and a permanent failure in one (e.g. Elasticsearch rejecting a
+# document) must not prevent the others from being attempted for the same
+# event — FailFast stops at the first failing adapter in execution order and
+# never even tries the rest. Found via kulyrax-ingest's
+# grpc_dlq_count_reflects_a_real_cross_backend_failure test, which failed
+# under the default policy for exactly this reason.
+failure_policy: continue_on_error
+
 routing:
   file: routing.json
 

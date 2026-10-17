@@ -7,6 +7,21 @@ using Microsoft.Extensions.Logging;
 namespace AutomotiveCsvProducer.Grpc;
 
 /// <summary>
+/// Thrown when the server's first <c>Ack</c> reports
+/// <c>AckProtocolVersion == 0</c> — the producer cannot establish that this
+/// server populates <c>dlq_events</c> accurately, so it must not treat any
+/// event as confirmed. This stops the producer rather than silently
+/// proceeding as if every send were a success (see docs/concepts.md's
+/// "Ack — what it proves, and what it doesn't" in the main repo).
+/// </summary>
+public sealed class IncompatibleServerException : Exception
+{
+    public IncompatibleServerException(string message) : base(message)
+    {
+    }
+}
+
+/// <summary>
 /// One producer session over <c>Ingest.Stream</c>, sending events strictly
 /// sequentially (send, wait for its own ack, only then send the next). This
 /// is not just a simplicity choice: with at most one event ever in flight,
@@ -24,6 +39,13 @@ public sealed class KulyraxIngestClient : IAsyncDisposable
     private readonly string _endpoint;
     private GrpcChannel? _channel;
     private AsyncDuplexStreamingCall<EventEnvelope, Ack>? _call;
+
+    /// <summary>
+    /// Set once the server's compatibility with <c>dlq_events</c> accounting
+    /// has been confirmed via a real <see cref="Ack"/>. Checked exactly once
+    /// per process — a server doesn't change its protocol version mid-run.
+    /// </summary>
+    private bool _serverCompatibilityConfirmed;
 
     public KulyraxIngestClient(string endpoint, ILogger<KulyraxIngestClient> logger)
     {
@@ -108,6 +130,26 @@ public sealed class KulyraxIngestClient : IAsyncDisposable
                         // keep reading for the one that is.
                         continue;
                     }
+
+                    if (!_serverCompatibilityConfirmed)
+                    {
+                        if (ack.AckProtocolVersion == 0)
+                        {
+                            // Zero is what every pre-dlq_events server sends by
+                            // default — the producer has NOT established that
+                            // dlq_events means anything on this connection,
+                            // including when it reads 0. Fail loudly instead
+                            // of silently treating this (or any later) event
+                            // as confirmed.
+                            throw new IncompatibleServerException(
+                                "kulyrax server did not report ack_protocol_version >= 1 " +
+                                "on its first Ack; dlq_events cannot be trusted on this " +
+                                "connection, so no event can be confirmed successful. " +
+                                "Upgrade the kulyrax-ingest server.");
+                        }
+                        _serverCompatibilityConfirmed = true;
+                    }
+
                     return ack.DlqEvents > 0
                         ? new SendResult(
                             SendOutcome.DeadLettered,

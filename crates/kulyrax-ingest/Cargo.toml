@@ -30,3 +30,12 @@ serde_json = "1.0"
 serde_yaml = "0.9"
 rusqlite = { version = "0.32", features = ["bundled"] }
 tempfile = "3"
+
+# For grpc_dlq_count_reflects_a_real_cross_backend_failure: a genuine
+# Postgres-succeeds / Elasticsearch-fails scenario through the full
+# poll->dispatch->DLQ->Ack path, gated on KULYRAX_PG_URL /
+# KULYRAX_ELASTICSEARCH_URL exactly like each adapter's own *_backend.rs suite.
+kulyrax-adapter-postgres = { workspace = true }
+kulyrax-adapter-elasticsearch = { workspace = true }
+postgres = { version = "0.19", features = ["with-chrono-0_4"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }

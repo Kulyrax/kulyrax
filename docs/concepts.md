@@ -56,6 +56,39 @@ maintained alongside the write that created the outbox row — for `decide()`
 to gate on. Mixing them up (feeding the outbox row id in as `sequence`)
 breaks gating the moment two entities interleave in the outbox.
 
+## `Ack` — what it proves, and what it doesn't
+
+An `Ack` means the position advanced — not that every event in the batch
+landed. `batch_events` is an observability count. The only field that tells
+a producer whether anything was actually lost is `dlq_events`: how many of
+`batch_events` were dead-lettered (retries exhausted, written to the DLQ
+directory) rather than genuinely projected to every adapter they were routed
+to. The position still advances past a dead-lettered event — it will not be
+redelivered — so `dlq_events` is the one signal that distinguishes "every
+event in this batch was actually projected" from "this batch is done with,
+but N events didn't make it."
+
+That guarantee only holds against a server new enough to populate it.
+`ack_protocol_version` exists for exactly that reason: `0` is what every
+`Ack` carried before this field existed, and what an old server's generated
+code still sends by default — a producer that sees `0` has **not**
+established that `dlq_events` means anything, including when it reads `0`.
+Only `ack_protocol_version >= 1` licenses this guarantee:
+
+> A compatible server acknowledgement (`ack_protocol_version >= 1`) with
+> `dlq_events == 0` means no event in that committed batch was dead-lettered.
+> It does **not** guarantee atomicity across destination databases — a batch
+> can still contain an event that landed in some adapters and failed in
+> others; `dlq_events` only tells you whether that failure was retried to
+> exhaustion and dead-lettered (counted) versus still succeeding after retry
+> (not counted, not a failure).
+
+A producer that cannot confirm `ack_protocol_version >= 1` must not treat
+`dlq_events == 0` — or any other field of an unverified `Ack` — as proof of
+success. See [`kulyrax-client`](../crates/kulyrax-client/src/lib.rs)'s
+`Ack::outcome()` for the reference classification (`Confirmed` /
+`DeadLettered` / `Unverified`).
+
 ## The guard
 
 The guard is Kulyrax's idempotency and ordering gate — a small persisted

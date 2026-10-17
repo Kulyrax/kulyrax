@@ -172,7 +172,10 @@ underlying issue:
 
 ```bash
 docker compose exec postgres psql -U postgres -d producer_ledger -c \
-  "DELETE FROM processed_files WHERE file_name = '<file>'; DELETE FROM producer_events WHERE file_name = '<file>';"
+  "DELETE FROM producer_events WHERE file_name = '<file>'; DELETE FROM processed_files WHERE file_name = '<file>';"
+  # producer_events first: it has a foreign key onto processed_files(file_name)
+  # with no ON DELETE CASCADE, so deleting the parent row first fails with a
+  # foreign-key violation (verified by actually running it the other way round).
 ```
 
 then put the (corrected, if applicable) file back in `data/incoming/`.

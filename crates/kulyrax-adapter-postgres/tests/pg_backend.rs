@@ -248,6 +248,15 @@ fn pg_column_missing_rejected() -> R {
         &url,
         &format!("DROP TABLE IF EXISTS {t}; CREATE TABLE {t} (id text primary key)"),
     )?;
+    // `fresh_table`'s counter restarts at 0 every process invocation, so
+    // against a long-lived (not freshly provisioned) database, a prior run
+    // can leave a guard row behind for this same table name — every sibling
+    // test in this file clears it first for exactly that reason.
+    pg_exec(
+        &url,
+        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+    )
+    .ok();
     let mut m = HashMap::new();
     m.insert(
         "U".into(),

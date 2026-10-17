@@ -16,6 +16,42 @@ use tonic::Streaming;
 
 pub use pb::{Ack, EventEnvelope};
 
+/// What an `Ack` actually proves about the batch it covers (Phase 29.1).
+/// Read this before treating any `Ack` as a success signal — see
+/// [`Ack::outcome`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AckOutcome {
+    /// `ack_protocol_version >= 1` and `dlq_events == 0`: every event this
+    /// batch covers reached every adapter it was routed to.
+    Confirmed,
+    /// `ack_protocol_version >= 1` and `dlq_events > 0`: the position still
+    /// advanced, but this many events were dead-lettered rather than
+    /// genuinely projected.
+    DeadLettered { count: u32 },
+    /// `ack_protocol_version == 0`: this server predates `dlq_events`
+    /// accounting (or the field was never set), so `dlq_events` cannot be
+    /// trusted either way — including when it reads `0`. Do not treat this
+    /// as success.
+    Unverified,
+}
+
+impl Ack {
+    /// Classify this `Ack` per the compatibility signal in
+    /// `ack_protocol_version` — never read `dlq_events` directly as a
+    /// success/failure signal without going through this.
+    pub fn outcome(&self) -> AckOutcome {
+        if self.ack_protocol_version == 0 {
+            AckOutcome::Unverified
+        } else if self.dlq_events > 0 {
+            AckOutcome::DeadLettered {
+                count: self.dlq_events,
+            }
+        } else {
+            AckOutcome::Confirmed
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ClientError {
     Connect(String),
@@ -78,5 +114,34 @@ impl Producer {
     /// Close the send side; the server sees the stream end and stops reading.
     pub fn finish(self) {
         drop(self.tx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ack(ack_protocol_version: u32, dlq_events: u32) -> Ack {
+        Ack {
+            position: "p".into(),
+            batch_events: 1,
+            dlq_events,
+            ack_protocol_version,
+        }
+    }
+
+    #[test]
+    fn an_old_server_that_never_sets_ack_protocol_version_is_unverified_not_confirmed() {
+        // The exact failure this type exists to prevent: an old server
+        // defaults `dlq_events` to 0 on the wire, which must NOT be read as
+        // proof of success just because it happens to equal 0.
+        assert_eq!(ack(0, 0).outcome(), AckOutcome::Unverified);
+        assert_eq!(ack(0, 3).outcome(), AckOutcome::Unverified);
+    }
+
+    #[test]
+    fn a_compatible_server_s_ack_is_classified_by_dlq_events() {
+        assert_eq!(ack(1, 0).outcome(), AckOutcome::Confirmed);
+        assert_eq!(ack(1, 2).outcome(), AckOutcome::DeadLettered { count: 2 });
     }
 }

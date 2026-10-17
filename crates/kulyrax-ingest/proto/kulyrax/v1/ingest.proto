@@ -64,4 +64,13 @@ message Ack {
   // `dlq_events == 0` is the only condition under which every event this ack
   // covers reached every adapter it was routed to without a hard failure.
   uint32 dlq_events = 3;
+  // Compatibility signal for `dlq_events` (Phase 29.1). `0` (the default a
+  // pre-Phase-29.1 server sends, since old code never sets this field) means
+  // the producer has NOT established that this server populates `dlq_events`
+  // accurately — treat `dlq_events` as unverified even when it reads 0.
+  // `>= 1` means `dlq_events` is populated per the guarantee documented in
+  // producer-contract.md: a committed batch's `dlq_events` correctly counts
+  // every one of `batch_events` that was dead-lettered rather than genuinely
+  // projected to every adapter it was routed to.
+  uint32 ack_protocol_version = 4;
 }

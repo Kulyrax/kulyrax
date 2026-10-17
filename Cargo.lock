@@ -1746,10 +1746,14 @@ name = "kulyrax-ingest"
 version = "0.8.0"
 dependencies = [
  "futures-core",
+ "kulyrax-adapter-elasticsearch",
+ "kulyrax-adapter-postgres",
  "kulyrax-client",
  "kulyrax-core",
+ "postgres",
  "prost",
  "protoc-bin-vendored",
+ "reqwest",
  "rusqlite",
  "serde_json",
  "serde_yaml",

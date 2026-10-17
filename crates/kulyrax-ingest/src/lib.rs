@@ -29,6 +29,11 @@ use tonic::{Request, Response, Status, Streaming, transport::Server};
 /// producer's stream: backpressure, not buffering (Phase 20.2).
 const CHANNEL_BOUND: usize = 1024;
 
+/// The `ack_protocol_version` this server sends on every `Ack` (Phase 29.1).
+/// `1` means `dlq_events` is populated per the guarantee in
+/// producer-contract.md. Bump only when that guarantee's meaning changes.
+const CURRENT_ACK_PROTOCOL_VERSION: u32 = 1;
+
 #[derive(Debug)]
 pub enum IngestError {
     Bind(String),
@@ -144,6 +149,7 @@ impl pb::ingest_server::Ingest for IngestService {
                     position: a.position,
                     batch_events: a.batch_events,
                     dlq_events: a.dlq_events,
+                    ack_protocol_version: CURRENT_ACK_PROTOCOL_VERSION,
                 })
             })
         });
