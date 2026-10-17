@@ -270,7 +270,7 @@ fn pg_type_coercion() -> R {
     pg_exec(
         &url,
         &format!(
-            "DROP TABLE IF EXISTS {t}; CREATE TABLE {t} (id text primary key, n bigint, active boolean, seen timestamptz)"
+            "DROP TABLE IF EXISTS {t}; CREATE TABLE {t} (id text primary key, n bigint, small_n smallint, plain_n integer, active boolean, seen timestamptz)"
         ),
     )?;
     pg_exec(
@@ -284,7 +284,7 @@ fn pg_type_coercion() -> R {
         upsert_mapping(
             "U",
             &t,
-            "  id: payload.id\n  n: payload.n\n  active: payload.active\n  seen: payload.seen\n",
+            "  id: payload.id\n  n: payload.n\n  small_n: payload.small_n\n  plain_n: payload.plain_n\n  active: payload.active\n  seen: payload.seen\n",
         ),
     );
     let a = pg_adapter(&url, m);
@@ -292,7 +292,7 @@ fn pg_type_coercion() -> R {
         "U",
         1,
         serde_json::json!({
-            "id": "u1", "n": 42, "active": true, "seen": "2026-01-02T03:04:05Z"
+            "id": "u1", "n": 42, "small_n": 7, "plain_n": 1234, "active": true, "seen": "2026-01-02T03:04:05Z"
         }),
     ));
     assert!(
@@ -302,9 +302,19 @@ fn pg_type_coercion() -> R {
     );
 
     let mut c = postgres::Client::connect(&url, postgres::NoTls)?;
-    let row = c.query_one(&format!("SELECT n, active FROM {t} WHERE id = 'u1'"), &[])?;
+    let row = c.query_one(
+        &format!("SELECT n, small_n, plain_n, active FROM {t} WHERE id = 'u1'"),
+        &[],
+    )?;
     assert_eq!(row.get::<_, i64>(0), 42);
-    assert!(row.get::<_, bool>(1));
+    // `small_n` (smallint/int2) and `plain_n` (integer/int4) — not just
+    // `n` (bigint/int8) — must bind correctly too: the wire protocol
+    // requires an exact width match, and an ordinary `INTEGER` column (the
+    // default width in nearly every real schema) is the one that most
+    // needed this covered.
+    assert_eq!(row.get::<_, i16>(1), 7);
+    assert_eq!(row.get::<_, i32>(2), 1234);
+    assert!(row.get::<_, bool>(3));
     Ok(())
 }
 

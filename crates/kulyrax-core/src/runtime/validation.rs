@@ -534,6 +534,24 @@ fn is_graph(a: &AdapterConfig) -> bool {
     matches!(a, AdapterConfig::Graph(_) | AdapterConfig::Neo4j(_))
 }
 
+/// A registry-resolved adapter (Phase 25.2/28: Postgres, and any
+/// third-party or future split-out backend) whose real kind this module
+/// cannot know before the registry actually resolves it — the resolution
+/// only happens later, at `build_adapters_from_config` time. Used only to
+/// stop the four "this mapping's route has at least one adapter of my
+/// kind" checks below from rejecting a route whose only adapter happens to
+/// be a `Custom` one that genuinely is the right kind (Postgres is SQL;
+/// nothing here can tell). The per-route capability check a few lines up
+/// already defers a `Custom` adapter's capability mismatch to dispatch/build
+/// time for the same reason — this extends that same deferral to the
+/// coarser existence check instead of only the capability one, which is
+/// the part Phase 28's `is_sql` doc-comment didn't fully cover (a config
+/// that a registered Postgres factory would resolve correctly should not
+/// fail validation before ever reaching the registry).
+fn is_custom(a: &AdapterConfig) -> bool {
+    matches!(a, AdapterConfig::Custom(_))
+}
+
 fn is_scalar_path(p: &str) -> bool {
     p.starts_with("payload.") || p.starts_with("metadata.")
 }
@@ -1318,7 +1336,7 @@ pub fn validate_projection_config(
             adapters_by_id
                 .get(id.as_str())
                 .copied()
-                .map(is_sql)
+                .map(|a| is_sql(a) || is_custom(a))
                 .unwrap_or(false)
         });
         if !has_sqlite {
@@ -1339,7 +1357,7 @@ pub fn validate_projection_config(
             adapters_by_id
                 .get(id.as_str())
                 .copied()
-                .map(is_document)
+                .map(|a| is_document(a) || is_custom(a))
                 .unwrap_or(false)
         });
         if !has_document_target {
@@ -1360,7 +1378,7 @@ pub fn validate_projection_config(
             adapters_by_id
                 .get(id.as_str())
                 .copied()
-                .map(is_keyvalue)
+                .map(|a| is_keyvalue(a) || is_custom(a))
                 .unwrap_or(false)
         });
         if !has_keyvalue {
@@ -1381,7 +1399,7 @@ pub fn validate_projection_config(
             adapters_by_id
                 .get(id.as_str())
                 .copied()
-                .map(is_graph)
+                .map(|a| is_graph(a) || is_custom(a))
                 .unwrap_or(false)
         });
         if !has_graph {

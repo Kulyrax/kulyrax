@@ -40,7 +40,19 @@ type PgPool = r2d2::Pool<PostgresConnectionManager<NoTls>>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PgColType {
     Text,
+    /// `smallint` (int2) — Postgres's wire protocol requires an exact
+    /// width match on a bound parameter, not just "any integer", so this
+    /// is its own variant rather than folded into `Int`/`BigInt`.
+    SmallInt,
+    /// `integer` (int4) — the common case or `PgColType` previously
+    /// treated no differently from `bigint`, binding every integer column
+    /// as `i64`; Postgres rejects an `i64` bind for an int4 parameter
+    /// (`WrongType { postgres: Int4, rust: "i64" }`), so a plain
+    /// `INTEGER` column — the default width in nearly every real schema —
+    /// never actually worked through this adapter until this variant.
     Int,
+    /// `bigint` (int8).
+    BigInt,
     Float,
     Bool,
     Timestamptz,
@@ -54,7 +66,9 @@ enum PgColType {
 impl PgColType {
     fn from_data_type(dt: &str) -> Self {
         match dt {
-            "smallint" | "integer" | "bigint" => PgColType::Int,
+            "smallint" => PgColType::SmallInt,
+            "integer" => PgColType::Int,
+            "bigint" => PgColType::BigInt,
             "real" | "double precision" => PgColType::Float,
             "boolean" => PgColType::Bool,
             "timestamp with time zone" => PgColType::Timestamptz,
@@ -296,7 +310,9 @@ fn pg_err(e: postgres::Error) -> SqlError {
 enum Bound {
     Null,
     Text(String),
-    Int(i64),
+    SmallInt(i16),
+    Int(i32),
+    BigInt(i64),
     Float(f64),
     Bool(bool),
     Tstz(DateTime<Utc>),
@@ -309,7 +325,9 @@ impl Bound {
         match self {
             Bound::Null => &Option::<&str>::None,
             Bound::Text(s) => s,
+            Bound::SmallInt(v) => v,
             Bound::Int(v) => v,
+            Bound::BigInt(v) => v,
             Bound::Float(v) => v,
             Bound::Bool(v) => v,
             Bound::Tstz(v) => v,
@@ -329,9 +347,25 @@ fn bind_value(v: &Value, col_type: PgColType) -> Result<Bound, SqlError> {
             .as_bool()
             .map(Bound::Bool)
             .ok_or_else(|| SqlError::ExecutionFailed(format!("expected boolean, got {v}"))),
+        PgColType::SmallInt => v
+            .as_i64()
+            .ok_or_else(|| SqlError::ExecutionFailed(format!("expected integer, got {v}")))
+            .and_then(|n| {
+                i16::try_from(n)
+                    .map(Bound::SmallInt)
+                    .map_err(|_| SqlError::ExecutionFailed(format!("{n} does not fit in smallint")))
+            }),
         PgColType::Int => v
             .as_i64()
-            .map(Bound::Int)
+            .ok_or_else(|| SqlError::ExecutionFailed(format!("expected integer, got {v}")))
+            .and_then(|n| {
+                i32::try_from(n)
+                    .map(Bound::Int)
+                    .map_err(|_| SqlError::ExecutionFailed(format!("{n} does not fit in integer")))
+            }),
+        PgColType::BigInt => v
+            .as_i64()
+            .map(Bound::BigInt)
             .ok_or_else(|| SqlError::ExecutionFailed(format!("expected integer, got {v}"))),
         PgColType::Float => v
             .as_f64()
@@ -622,8 +656,9 @@ mod tests {
 
     #[test]
     fn data_type_names_map_to_bind_categories() {
-        assert_eq!(PgColType::from_data_type("bigint"), PgColType::Int);
+        assert_eq!(PgColType::from_data_type("smallint"), PgColType::SmallInt);
         assert_eq!(PgColType::from_data_type("integer"), PgColType::Int);
+        assert_eq!(PgColType::from_data_type("bigint"), PgColType::BigInt);
         assert_eq!(PgColType::from_data_type("boolean"), PgColType::Bool);
         assert_eq!(
             PgColType::from_data_type("double precision"),
@@ -669,6 +704,37 @@ mod tests {
         // wrong shape for the column → a clear error, not a silent coercion
         assert!(bind_value(&json!("not a number"), PgColType::Int).is_err());
         assert!(bind_value(&json!("nonsense"), PgColType::Timestamptz).is_err());
+    }
+
+    /// A plain `integer` (int4) column — not `bigint` — must bind as `i32`,
+    /// not `i64`. Before `PgColType::Int`/`PgColType::BigInt` were split
+    /// apart, every integer column bound as `i64` regardless of its actual
+    /// Postgres width; rust-postgres's extended protocol rejects an `i64`
+    /// value for a server-negotiated int4 parameter slot
+    /// (`WrongType { postgres: Int4, rust: "i64" }`), so a plain `INTEGER`
+    /// column — the default width in nearly every real schema — never
+    /// actually worked through this adapter. This only asserts the binding
+    /// categories are distinct; `pg_backend.rs`'s integration tests exercise
+    /// the real wire-level behavior against a live Postgres.
+    #[test]
+    fn smallint_int_and_bigint_bind_to_their_own_width() {
+        use serde_json::json;
+        assert!(matches!(
+            bind_value(&json!(42), PgColType::SmallInt).unwrap(),
+            Bound::SmallInt(42)
+        ));
+        assert!(matches!(
+            bind_value(&json!(42), PgColType::Int).unwrap(),
+            Bound::Int(42)
+        ));
+        assert!(matches!(
+            bind_value(&json!(42), PgColType::BigInt).unwrap(),
+            Bound::BigInt(42)
+        ));
+        // A value that doesn't fit the column's width is a clear error, not
+        // a silent truncation.
+        assert!(bind_value(&json!(i64::MAX), PgColType::Int).is_err());
+        assert!(bind_value(&json!(100_000), PgColType::SmallInt).is_err());
     }
 
     #[test]
