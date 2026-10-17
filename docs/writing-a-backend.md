@@ -142,7 +142,7 @@ and [`kulyrax-adapter-elasticsearch`](../crates/adapters/elasticsearch/src/lib.r
 factories are complete real examples.
 
 Call this **before** the runtime resolves adapters (i.e. before the first
-`run_once`/`dry_run_once`/`replay`/`run_sources` call) — typically right after
+`run_once`/`replay`/`run_sources` call) — typically right after
 `KulyraxRuntime::load` in your embedding application's `main`, if you're
 using Kulyrax as a library (the "embedded crate" deployment mode; see
 `architecture.md` §1.3). From that point on, `type: mydb` in the YAML config
@@ -157,7 +157,7 @@ process-wide global, so two runtimes in one process never see each other's
 registrations.
 
 If `type:` names something nobody registered, or your factory returns an
-error (a bad URL, a missing field), `run` / `dry-run` / `replay` / `ingest`
+error (a bad URL, a missing field), `run` / `replay` / `ingest`
 stop at startup with `PipelineError::AdapterBuild`, naming every adapter that
 failed. They do this by calling `KulyraxRuntime::build_adapters` before the
 first event. An embedder that skips that call gets the lower-level

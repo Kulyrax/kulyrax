@@ -6,7 +6,9 @@ use kulyrax_core::execution::{
 use kulyrax_core::pipeline;
 use kulyrax_core::replay::{ReplayReport, ReplayRunOptions};
 use kulyrax_core::routing::StorageKind;
-use kulyrax_core::runtime::PROJECTION_DEPTH_EXCEEDS_RECOMMENDED_WARNING;
+use kulyrax_core::runtime::{
+    DryRunOutcome, DryRunReport, PROJECTION_DEPTH_EXCEEDS_RECOMMENDED_WARNING,
+};
 use kulyrax_core::source::runner::{RunMode, SourceRunOptions, SourceRunReport, StoppedReason};
 
 use std::path::PathBuf;
@@ -112,6 +114,7 @@ enum Commands {
         output: OutputFormat,
     },
 
+    /// Show what one event would write to each adapter, without writing anything
     DryRun {
         #[arg(long)]
         config: PathBuf,
@@ -560,7 +563,7 @@ fn explain_cmd(
 }
 
 // --------------------------------------------------
-// Dry-run (full simulated execution)
+// Dry-run (resolve writes, never perform them)
 // --------------------------------------------------
 
 fn dry_run_cmd(
@@ -569,14 +572,57 @@ fn dry_run_cmd(
     event: PathBuf,
     output: OutputFormat,
 ) -> Result<i32, Box<dyn std::error::Error>> {
-    let report = pipeline::dry_run(
-        &config,
-        &mappings,
-        &event,
-        kulyrax_backends::register_default_backends,
-    )?;
-    render_report(&report, output)?;
-    Ok(exit_code_from_status(report.status))
+    let report = pipeline::dry_run(&config, &mappings, &event)?;
+    match output {
+        OutputFormat::Text => print_dry_run_report(&report),
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+    }
+    let any_failed = report
+        .adapters
+        .iter()
+        .any(|a| matches!(a.outcome, DryRunOutcome::Failed { .. }));
+    Ok(if any_failed { 1 } else { 0 })
+}
+
+fn print_dry_run_report(report: &DryRunReport) {
+    println!("--- Dry Run (nothing was written) ---");
+    println!("Event: {} ({})", report.event_id, report.event_type);
+    if report.adapters.is_empty() {
+        println!("No adapter is routed for this event type.");
+    }
+    for (i, adapter) in report.adapters.iter().enumerate() {
+        let kind = adapter
+            .kind
+            .map_or_else(|| "unknown kind".to_string(), |k| k.to_string());
+        println!();
+        println!("{}. {} ({kind})", i + 1, adapter.adapter_id);
+        match &adapter.outcome {
+            DryRunOutcome::Planned(w) => {
+                let facet = if w.facet.is_empty() {
+                    String::new()
+                } else {
+                    format!(", facet {}", w.facet)
+                };
+                println!(
+                    "   would {:?} {} key {}{facet} (on_existing: {:?}, v{} -> v{})",
+                    w.operation,
+                    w.target,
+                    w.entity_key,
+                    w.on_existing,
+                    w.source_version,
+                    w.projected_version
+                );
+                println!("   values: {}", w.values);
+            }
+            DryRunOutcome::Failed { error } => println!("   would fail: {error}"),
+            DryRunOutcome::NotPreviewable { reason } => println!("   not previewable: {reason}"),
+        }
+    }
+    println!();
+    println!(
+        "Guard state was not read, so a live run may still skip these writes as \
+         already projected or stale."
+    );
 }
 
 // --------------------------------------------------

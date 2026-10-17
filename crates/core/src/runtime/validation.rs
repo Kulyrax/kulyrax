@@ -471,7 +471,7 @@ fn first_party_backend_kind(type_name: &str) -> Option<StorageKind> {
 
 /// `None` for a third-party custom type, whose kind is unknown until its
 /// factory runs; its kind-specific checks are deferred to build time.
-fn storage_kind(a: &AdapterConfig) -> Option<StorageKind> {
+pub(crate) fn storage_kind(a: &AdapterConfig) -> Option<StorageKind> {
     match a {
         AdapterConfig::Sqlite(_) => Some(StorageKind::Sql),
         AdapterConfig::File(_) => Some(StorageKind::Document),

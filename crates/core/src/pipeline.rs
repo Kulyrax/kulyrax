@@ -22,6 +22,7 @@ use crate::execution::ExecutionReport;
 use crate::replay::{ReplayLoadError, ReplayReport, ReplayRunOptions, events_from_path};
 use crate::routing::{AdapterId, load_routing, route_with_rules};
 use crate::runtime::config::{ConfigError, KulyraxConfig, SourceConfig};
+use crate::runtime::dry_run::DryRunReport;
 use crate::runtime::engine::KulyraxRuntime;
 use crate::runtime::factory::AdapterBuildFailure;
 use crate::runtime::{
@@ -240,18 +241,16 @@ pub fn run(
     Ok(runtime.run_once(event))
 }
 
-/// Same as [run] but executes in dry-run mode.
+/// Show what one event would write, without writing. Loads and validates the
+/// project like [run], but never builds adapters, so no store is contacted.
 pub fn dry_run(
     config_path: &Path,
     mappings_dir: &Path,
     event_path: &Path,
-    register_backends: impl FnOnce(&mut KulyraxRuntime),
-) -> Result<ExecutionReport, PipelineError> {
-    let mut runtime =
-        KulyraxRuntime::load_with_backends(config_path, mappings_dir, register_backends)?;
-    runtime.build_adapters()?;
+) -> Result<DryRunReport, PipelineError> {
+    let runtime = KulyraxRuntime::load(config_path, mappings_dir)?;
     let event = load_event(event_path)?;
-    Ok(runtime.dry_run_once(event))
+    runtime.dry_run_once(&event)
 }
 
 /// Result of [explain]: routing/dependency resolution for one event, without execution.

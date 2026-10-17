@@ -1,5 +1,6 @@
 pub mod config;
 pub mod dependency_graph;
+pub mod dry_run;
 pub mod engine;
 pub mod error;
 pub mod execute;
@@ -14,6 +15,7 @@ pub use dependency_graph::{
     dependency_layers_grouped, dependency_layers_parallel, execution_order_for_routed,
     max_dependency_layer,
 };
+pub use dry_run::{DryRunAdapter, DryRunOutcome, DryRunReport, PlannedWrite};
 pub use engine::KulyraxRuntime;
 pub use error::RuntimeError;
 pub use factory::{
