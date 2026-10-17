@@ -1704,12 +1704,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "kulyrax-adapter-redis"
+version = "0.8.0"
+dependencies = [
+ "kulyrax-core",
+ "r2d2",
+ "redis",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+]
+
+[[package]]
 name = "kulyrax-backends"
 version = "0.8.0"
 dependencies = [
  "kulyrax-adapter-elasticsearch",
  "kulyrax-adapter-mysql",
  "kulyrax-adapter-postgres",
+ "kulyrax-adapter-redis",
  "kulyrax-core",
  "serde_yaml",
 ]
@@ -1745,8 +1759,6 @@ dependencies = [
  "mongodb",
  "neo4rs",
  "once_cell",
- "r2d2",
- "redis",
  "rusqlite",
  "serde",
  "serde_json",

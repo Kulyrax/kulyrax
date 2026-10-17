@@ -36,11 +36,6 @@ pub enum ValidationIssue {
         event: String,
         reason: String,
     },
-    /// Phase 22.4: a Redis adapter's connection config is unusable.
-    InvalidRedisConfig {
-        adapter_id: String,
-        reason: String,
-    },
     /// Phase 23.4: a MongoDB adapter's connection config is unusable.
     InvalidMongoDbConfig {
         adapter_id: String,
@@ -187,13 +182,6 @@ impl fmt::Display for ValidationIssue {
             }
             ValidationIssue::InvalidGraphMapping { event, reason } => {
                 write!(f, "invalid graph mapping for event {:?}: {}", event, reason)
-            }
-            ValidationIssue::InvalidRedisConfig { adapter_id, reason } => {
-                write!(
-                    f,
-                    "invalid redis adapter {:?} config: {}",
-                    adapter_id, reason
-                )
             }
             ValidationIssue::InvalidMongoDbConfig { adapter_id, reason } => {
                 write!(
@@ -511,7 +499,7 @@ fn storage_kind(a: &AdapterConfig) -> Option<StorageKind> {
     match a {
         AdapterConfig::Sqlite(_) => Some(StorageKind::Sql),
         AdapterConfig::File(_) | AdapterConfig::MongoDb(_) => Some(StorageKind::Document),
-        AdapterConfig::KeyValue(_) | AdapterConfig::Redis(_) => Some(StorageKind::KeyValue),
+        AdapterConfig::KeyValue(_) => Some(StorageKind::KeyValue),
         AdapterConfig::Graph(_) | AdapterConfig::Neo4j(_) => Some(StorageKind::Graph),
         AdapterConfig::Custom(c) => first_party_backend_kind(&c.type_name),
     }
@@ -798,25 +786,6 @@ pub fn validate_projection_config(
     // Postgres no longer has a typed `AdapterConfig` variant to match on here
     // — see the phase's design note on this trade-off (the check still
     // happens, just at adapter-build time instead of config-validate time).
-
-    // Phase 22.4: a Redis adapter's `url` must be non-empty and parse.
-    // `redis::Client::open` validates scheme/host without connecting.
-    for a in &config.adapters {
-        if let AdapterConfig::Redis(cfg) = a {
-            let url = crate::runtime::config::expand_env(&cfg.config.url);
-            if url.trim().is_empty() {
-                report.push(ValidationIssue::InvalidRedisConfig {
-                    adapter_id: cfg.id.clone(),
-                    reason: "`url` is empty".into(),
-                });
-            } else if ::redis::Client::open(url.as_str()).is_err() {
-                report.push(ValidationIssue::InvalidRedisConfig {
-                    adapter_id: cfg.id.clone(),
-                    reason: format!("`url` does not parse: {url}"),
-                });
-            }
-        }
-    }
 
     // Phase 23.4: a MongoDB adapter's `url` and `database` must be
     // non-empty and `url` must parse. `Client::with_uri_str` validates

@@ -1,33 +1,74 @@
-//! Phase 22.2–22.3: the Redis key-value backend.
+//! Redis key-value backend over core's `KvBackend` seam. Registers as
+//! `type: redis` via [`factory`].
 //!
-//! Same `KvMapping` / `decide()` / guard model as the file-backed store — this
-//! file supplies only what a driver genuinely owns: an r2d2 connection pool,
-//! the `{namespace}:{key}` / `__kulyrax:guard:{namespace}:{key}` layout, and
-//! an optimistic `WATCH`/`MULTI`/`EXEC` transaction with bounded retry (Redis
-//! has no server-side row lock reachable from a client transaction, unlike
-//! Postgres's `FOR UPDATE` — Phase 19.4).
+//! Layout: values at `{namespace}:{key}`, guards at
+//! `__kulyrax:guard:{namespace}:{key}`. Redis has no row lock reachable from a
+//! client transaction, so writes use optimistic `WATCH`/`MULTI`/`EXEC` with a
+//! bounded retry.
 
 use std::sync::Arc;
 
 use r2d2::{Pool, PooledConnection};
 use redis::Commands;
+use serde::Deserialize;
 use serde_json::Value;
 
-use super::adapter::KvError;
-use super::exec::{self, KvBackend, KvGuard, KvOutcome, KvPlan};
-use super::runtime::KvRuntimeBuilder;
-use crate::adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter};
-use crate::event::Event;
-use crate::routing::StorageKind;
-use crate::runtime::config::MigrationPolicy;
-use crate::upcast::UpcasterRegistry;
+use kulyrax_core::adapter::keyvalue::adapter::KvError;
+use kulyrax_core::adapter::keyvalue::exec::{self, KvBackend, KvGuard, KvOutcome, KvPlan};
+use kulyrax_core::adapter::keyvalue::runtime::KvRuntimeBuilder;
+use kulyrax_core::adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter};
+use kulyrax_core::event::Event;
+use kulyrax_core::routing::StorageKind;
+use kulyrax_core::runtime::AdapterBuildContext;
+use kulyrax_core::runtime::config::{
+    ConfigError, CustomAdapterConfig, MigrationPolicy, expand_env,
+};
+use kulyrax_core::upcast::UpcasterRegistry;
 
 type RedisPool = Pool<redis::Client>;
 
-/// Bounded optimistic-retry budget for a WATCH/MULTI/EXEC conflict (Phase
-/// 22.3) — not a config knob; five attempts against one contended entity is
-/// already an unusual amount of concurrent write pressure.
+/// Not a config knob: five attempts against one contended entity is already
+/// unusual write pressure.
 const MAX_ATTEMPTS: u32 = 5;
+
+/// The `config:` block of a `type: redis` adapter entry.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RedisConfig {
+    /// `redis://[:password@]host:port[/db]`; `${ENV_VAR}` references are expanded.
+    pub url: String,
+    /// Connection pool size (default 4).
+    #[serde(default)]
+    pub pool_size: Option<u32>,
+}
+
+/// Registry factory for `type: redis`.
+pub fn factory(
+    entry: &CustomAdapterConfig,
+    ctx: &AdapterBuildContext,
+) -> Result<Box<dyn StorageAdapter>, ConfigError> {
+    let id = entry.id.clone();
+    let cfg: RedisConfig = entry.backend_config()?;
+    let url = expand_env(&cfg.url);
+    if url.trim().is_empty() {
+        return Err(ConfigError::FactoryConfigInvalid(format!(
+            "redis adapter {id:?}: `url` is empty"
+        )));
+    }
+    if redis::Client::open(url.as_str()).is_err() {
+        return Err(ConfigError::FactoryConfigInvalid(format!(
+            "redis adapter {id:?}: `url` does not parse: {url}"
+        )));
+    }
+    Ok(Box::new(RedisAdapter::new(
+        id,
+        &url,
+        cfg.pool_size.unwrap_or(4),
+        entry.priority,
+        KvRuntimeBuilder::new(ctx.mappings.kv.clone()),
+        Arc::clone(&ctx.upcasters),
+        ctx.migration_policy,
+    )))
+}
 
 fn guard_key(namespace: &str, key: &str) -> String {
     format!("__kulyrax:guard:{namespace}:{key}")
@@ -41,14 +82,12 @@ fn redis_err(e: redis::RedisError) -> KvError {
     KvError::WriteFailed(e.to_string())
 }
 
-/// Redis key-value adapter (Phase 22). Like [`crate::adapter::sql::postgres::PostgresAdapter`],
-/// the first KV backend **without** a single-writer assumption — concurrent
-/// writers to the same entity race on `WATCH`/`MULTI`/`EXEC` instead of a lock.
+/// Concurrent writers to the same entity race on `WATCH`/`MULTI`/`EXEC`
+/// rather than relying on a single-writer assumption.
 pub struct RedisAdapter {
     id: String,
     priority: u32,
-    /// `Err` (a stored message) when the URL didn't parse — every `handle()`
-    /// then fails cleanly rather than the factory being fallible.
+    /// `Err` when the URL did not parse; every `handle()` then fails cleanly.
     pool: Result<RedisPool, String>,
     builder: KvRuntimeBuilder,
     upcasters: Arc<UpcasterRegistry>,
@@ -56,11 +95,8 @@ pub struct RedisAdapter {
 }
 
 impl RedisAdapter {
-    /// Build the pool from a connection URL (`redis://[:password@]host:port[/db]`).
-    /// Infallible — a bad URL is stored and surfaced per-event, keeping
-    /// `build_adapters_from_config` free of a `Result`. The pool is
-    /// `build_unchecked` (lazy connect): connectivity problems surface on the
-    /// first real write, not at construction.
+    /// The pool connects lazily (`build_unchecked`), so an unreachable server
+    /// surfaces on the first write rather than here.
     pub fn new(
         id: String,
         url: &str,
@@ -154,10 +190,9 @@ impl StorageAdapter for RedisAdapter {
         };
         let mut backend = RedisBackend { conn };
 
-        // Phase 22.3: WATCH/MULTI/EXEC is optimistic — retry the whole
-        // read-decide-write cycle (a fresh WATCH + guard read each time) on a
-        // conflict, bounded, then surface a batch failure like any other
-        // transient error (retried by the run loop — Phase 17.5).
+        // On a conflict, retry the whole read-decide-write cycle with a fresh
+        // WATCH and guard read. Once the budget is spent, the failure goes to
+        // the run loop, which retries the batch like any transient error.
         let mut attempts = 0;
         let result = loop {
             attempts += 1;
@@ -205,10 +240,6 @@ impl StorageAdapter for RedisAdapter {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// RedisBackend — the driver
-// ---------------------------------------------------------------------------
 
 struct RedisBackend {
     conn: PooledConnection<redis::Client>,
@@ -276,5 +307,56 @@ impl KvBackend for RedisBackend {
 
         let result: Option<()> = pipe.query(&mut *self.conn).map_err(redis_err)?;
         result.ok_or(KvError::WriteConflict)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build(url: &str) -> Result<Box<dyn StorageAdapter>, ConfigError> {
+        let raw = serde_yaml::to_value(serde_json::json!({
+            "type": "redis",
+            "id": "r1",
+            "priority": 10,
+            "config": { "url": url },
+        }))
+        .map_err(|e| ConfigError::FactoryConfigInvalid(e.to_string()))?;
+        let entry = CustomAdapterConfig {
+            type_name: "redis".into(),
+            id: "r1".into(),
+            priority: 10,
+            raw,
+            capabilities: None,
+            depends_on: Vec::new(),
+        };
+        let ctx = AdapterBuildContext {
+            mappings: Default::default(),
+            upcasters: Arc::new(UpcasterRegistry::new()),
+            migration_policy: MigrationPolicy::default(),
+        };
+        factory(&entry, &ctx)
+    }
+
+    fn error_of(url: &str) -> String {
+        build(url).err().map(|e| e.to_string()).unwrap_or_default()
+    }
+
+    #[test]
+    fn factory_rejects_an_empty_url() {
+        assert!(error_of("").contains("`url` is empty"));
+    }
+
+    #[test]
+    fn factory_rejects_an_unparseable_url() {
+        let err = error_of("not a url");
+        assert!(err.contains("`url` does not parse"), "{err}");
+    }
+
+    #[test]
+    fn factory_builds_without_a_server_because_the_pool_connects_lazily() {
+        let adapter = build("redis://127.0.0.1:1/0");
+        assert!(adapter.is_ok());
+        assert_eq!(adapter.map(|a| a.kind()).ok(), Some(StorageKind::KeyValue));
     }
 }

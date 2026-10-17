@@ -17,4 +17,7 @@ pub fn register_default_backends(runtime: &mut KulyraxRuntime) {
 
     #[cfg(feature = "mysql")]
     runtime.register_adapter_factory("mysql", kulyrax_adapter_mysql::factory);
+
+    #[cfg(feature = "redis")]
+    runtime.register_adapter_factory("redis", kulyrax_adapter_redis::factory);
 }

@@ -1,4 +1,4 @@
-//! Phase 22.5: Redis backend integration scenarios.
+//! Redis backend integration scenarios.
 //!
 //! **Gated on `KULYRAX_REDIS_URL`** (`redis://[:password@]host:port[/db]`).
 //! When it is unset every test prints a skip line and returns `Ok` — the
@@ -10,10 +10,10 @@
 //! every scenario shares the same skip guard and fresh-namespace helper,
 //! rather than the five files the phase doc sketches.
 
+use kulyrax_adapter_redis::RedisAdapter;
 use kulyrax_core::adapter::AdapterOutcome;
 use kulyrax_core::adapter::StorageAdapter;
 use kulyrax_core::adapter::keyvalue::mapping::KvMapping;
-use kulyrax_core::adapter::keyvalue::redis::RedisAdapter;
 use kulyrax_core::adapter::keyvalue::runtime::KvRuntimeBuilder;
 use kulyrax_core::adapter::keyvalue::store::FileKvStore;
 use kulyrax_core::event::Event;

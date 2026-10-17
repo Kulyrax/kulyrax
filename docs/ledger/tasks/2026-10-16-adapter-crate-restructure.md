@@ -34,7 +34,7 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 
 1. Done: introduce `MappingSet` and `AdapterBuildContext`, change `AdapterFactory` to `Fn(&CustomAdapterConfig, &AdapterBuildContext)`, and add `CustomAdapterConfig::backend_config`. Port Postgres and Elasticsearch to it. The only API removal is `KulyraxRuntime::{sql,document,kv,graph}_mappings()`.
 2. Done: guard against the regressions the extraction would cause. Validation classifies first-party custom types (`postgres`, `mysql`, `mongodb`, `elasticsearch`, `redis`, `neo4j`) by storage kind via a name → kind table, so their mapping and capability checks still run; third-party types stay deferred. `KulyraxRuntime::build_adapters()` returns `PipelineError::AdapterBuild` when any custom adapter fails to build; every pipeline command and `kulyrax-ingest` call it at startup. This also restores both checks for Postgres, which lost them when it moved out.
-3. Extract MySQL (done), then Redis, then MongoDB, then Neo4j, one commit each. Remove each enum variant from `AdapterConfig` and move its `*_backend.rs` test.
+3. Extract MySQL (done), then Redis (done), then MongoDB, then Neo4j, one commit each. Remove each enum variant from `AdapterConfig` and move its `*_backend.rs` test.
 4. Done early, so new crates are created in place: move the adapter crates under `crates/adapters/`.
 5. Replace the four `loader.rs` files with one generic `load_mappings<M>`.
 6. Do the comment pass.
@@ -71,6 +71,12 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 | Step 3: MySQL factory | `cargo test -p kulyrax-adapter-mysql --lib` | 2 passed (empty and unparseable URL rejected) |
 | Step 3: final gates | clippy `-D warnings`; `cargo test --workspace`; `cargo fmt --check` | clean; 97 test binaries, 273 passed, 0 failed; exit 0 |
 
+| Step 3: Redis out of core | `cargo tree -p kulyrax-core -e normal --depth 1` | no `redis` or `r2d2`; still `mongodb`, `neo4rs`, `tokio` |
+| Step 3: Redis factory | `cargo test -p kulyrax-adapter-redis --lib` | 3 passed (empty URL, unparseable URL, valid URL builds without a server because the pool connects lazily) |
+| Step 3: Redis final gates | clippy `-D warnings`; `cargo test --workspace`; `cargo fmt --check` | clean; 99 test binaries, 277 passed, 0 failed; exit 0 |
+
+Not run: the `redis_backend` integration suite against a real Redis. It is gated on `KULYRAX_REDIS_URL` the same way.
+
 Not run: the `mysql_backend` integration suite against a real MySQL. Its 7 tests return early without `KULYRAX_MYSQL_URL` (they report "ok" in 0.00s), so they only show the moved file compiles. No database was available in this session.
 
 ## Risks and open questions
@@ -80,8 +86,8 @@ Not run: the `mysql_backend` integration suite against a real MySQL. Its 7 tests
 - If an embedder calls `execute_event*` in `lib.rs`, it uses an empty registry and will lose the networked backends. Those helpers need a registry parameter, or must be documented as core-only. `kulyrax-cli` and `kulyrax-ingest` are not affected: both build through `KulyraxRuntime` plus `register_default_backends` (verified with grep).
 - Resolved 2026-10-16: `docs/writing-a-backend.md` called keeping MySQL in core "a deliberate product decision", which contradicted `kulyrax-backends/Cargo.toml`. The owner chose to move all four backends out.
 - Behaviour change: an unregistered `type:` or a rejected factory entry now stops `run` / `dry-run` / `replay` / `ingest` at startup. Before, the CLI started and failed every event routed to that adapter. `docs/writing-a-backend.md` still describes the old per-event behaviour and must be updated in step 7.
-- **Merge order (agreed 2026-10-17):** this branch is based on `kulyrax-main` at 4d37922, which is 4 commits ahead of `kulyrax/main` and has uncommitted Phase 29.1 work (`ack_protocol_version`) in the main checkout. The order is: commit Phase 29.1 on `kulyrax-main`, push it to `kulyrax/main`, then rebase this branch onto it and open a PR. Expect conflicts in `kulyrax-ingest/src/lib.rs` (the one-line startup build check) and in `pg_backend.rs`, which this branch moved to `crates/adapters/`. Also expect `kulyrax-ingest`'s new Postgres/Elasticsearch dev-dependencies to need checking against the moved crates.
-- CI on `kulyrax/main` is red: run 38847664638 failed in `test (postgres)` with `SqlMappingNoSqlTarget` on `examples/postgres`, the false positive fixed in 49dc976, which is not pushed yet. CI only starts helping this branch once that push lands.
+- **Merge order (agreed 2026-10-17):** this branch is based on `kulyrax-main` at 4d37922, which is 4 commits ahead of `origin/main` (Kulyrax/kulyrax) and has uncommitted Phase 29.1 work (`ack_protocol_version`) in the main checkout. The order is: commit Phase 29.1 on `kulyrax-main`, push it to `origin/main` (Kulyrax/kulyrax), then rebase this branch onto it and open a PR. Expect conflicts in `kulyrax-ingest/src/lib.rs` (the one-line startup build check) and in `pg_backend.rs`, which this branch moved to `crates/adapters/`. Also expect `kulyrax-ingest`'s new Postgres/Elasticsearch dev-dependencies to need checking against the moved crates.
+- CI on `origin/main` (Kulyrax/kulyrax) is red: run 38847664638 failed in `test (postgres)` with `SqlMappingNoSqlTarget` on `examples/postgres`, the false positive fixed in 49dc976, which is not pushed yet. CI only starts helping this branch once that push lands.
 - The commits on this branch were authored as `naman <naman@slt.work>`. The repo identity is now `Panchauly <panchauly@gmail.com>`, so re-author them during the rebase (`--exec "git commit --amend --no-edit --reset-author"`).
 - The first-party name → kind table in `validation.rs` must be kept in sync with `kulyrax-backends`. A wrong entry would apply the wrong kind's checks to that type.
 

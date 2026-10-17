@@ -7,7 +7,6 @@ use crate::adapter::document::runtime::DocumentRuntimeBuilder;
 use crate::adapter::graph::neo4j::Neo4jAdapter;
 use crate::adapter::graph::runtime::GraphRuntimeBuilder;
 use crate::adapter::graph::store::GraphStore;
-use crate::adapter::keyvalue::redis::RedisAdapter;
 use crate::adapter::keyvalue::runtime::KvRuntimeBuilder;
 use crate::adapter::keyvalue::store::FileKvStore;
 use crate::adapter::sql::runtime::SqlRuntimeBuilder;
@@ -131,20 +130,6 @@ pub fn build_adapters_reporting_failures(
                 adapters.push(Box::new(GraphStore::new(
                     cfg.id.clone(),
                     cfg.config.root.clone().into(),
-                    cfg.priority,
-                    builder,
-                    Arc::clone(&ctx.upcasters),
-                    config.migration_policy,
-                )));
-            }
-
-            AdapterConfig::Redis(cfg) => {
-                let builder = KvRuntimeBuilder::new(ctx.mappings.kv.clone());
-                let url = crate::runtime::config::expand_env(&cfg.config.url);
-                adapters.push(Box::new(RedisAdapter::new(
-                    cfg.id.clone(),
-                    &url,
-                    cfg.config.pool_size.unwrap_or(4),
                     cfg.priority,
                     builder,
                     Arc::clone(&ctx.upcasters),

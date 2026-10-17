@@ -53,3 +53,8 @@ fn elasticsearch_resolves_through_its_factory() {
 fn mysql_resolves_through_its_factory() {
     assert_factory_ran("mysql", "{url: 'not a url'}");
 }
+
+#[test]
+fn redis_resolves_through_its_factory() {
+    assert_factory_ran("redis", "{url: 'not a url'}");
+}
