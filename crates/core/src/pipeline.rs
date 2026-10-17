@@ -25,6 +25,7 @@ use crate::runtime::config::{ConfigError, KulyraxConfig, SourceConfig};
 use crate::runtime::dry_run::DryRunReport;
 use crate::runtime::engine::KulyraxRuntime;
 use crate::runtime::factory::AdapterBuildFailure;
+use crate::runtime::reload::{FileReloader, ReloadOutcome};
 use crate::runtime::{
     ValidationReport, adapter_metadata_map, dependency_depth_exceeds_recommended,
     dependency_layers_grouped, dependency_layers_parallel, validate_projection_config,
@@ -32,7 +33,7 @@ use crate::runtime::{
 };
 pub use crate::scaffold::{InitError, init_project};
 use crate::source::directory::DirectorySource;
-use crate::source::runner::{SourceRunOptions, SourceRunReport};
+use crate::source::runner::{RunMode, SourceRunOptions, SourceRunReport};
 use crate::source::stdin::StdinSource;
 use crate::source::{EventSource, SourceError};
 use std::sync::atomic::AtomicBool;
@@ -353,18 +354,22 @@ pub fn list_sources(config_path: &Path) -> Result<Vec<(String, Option<String>)>,
         .collect())
 }
 
-/// Phase 17.3: load the project, build its sources, and run the
+/// Load the project, build its sources, and run the
 /// `poll → sort → dispatch → commit` loop until caught up (`RunMode::Once`),
 /// shut down (`stop`), or halted by a retry-exhausted batch.
+///
+/// In continuous mode the loop also answers `kulyrax reload` between batches
+/// (see [`crate::runtime::reload`]); `on_reload` is told each outcome.
 pub fn run_source_loop(
     config_path: &Path,
     mappings_dir: &Path,
     opts: &SourceRunOptions,
     stop: &AtomicBool,
-    register_backends: impl FnOnce(&mut KulyraxRuntime),
+    register_backends: impl Fn(&mut KulyraxRuntime) + Clone + 'static,
+    on_reload: impl FnMut(&ReloadOutcome) + 'static,
 ) -> Result<SourceRunReport, PipelineError> {
     let mut runtime =
-        KulyraxRuntime::load_with_backends(config_path, mappings_dir, register_backends)?;
+        KulyraxRuntime::load_with_backends(config_path, mappings_dir, register_backends.clone())?;
     runtime.build_adapters()?;
     let sources = build_sources(runtime.config(), config_path)?;
     if sources.is_empty() {
@@ -373,7 +378,30 @@ pub fn run_source_loop(
                 .to_string(),
         ));
     }
-    Ok(runtime.run_sources(sources, opts, stop)?)
+    if matches!(opts.mode, RunMode::Once) {
+        return Ok(runtime.run_sources(sources, opts, stop)?);
+    }
+    let mut reloader = FileReloader::new(
+        config_path,
+        mappings_dir,
+        runtime.config().sources.clone(),
+        register_backends,
+        runtime.upcasters(),
+        on_reload,
+    );
+    Ok(runtime.run_sources_with_reload(sources, opts, stop, &mut reloader)?)
+}
+
+/// Ask the process running with `config_path` to reload; see
+/// [`crate::runtime::reload`].
+pub fn request_reload(
+    config_path: &Path,
+    timeout: std::time::Duration,
+) -> Result<ReloadOutcome, PipelineError> {
+    Ok(crate::runtime::reload::request_reload(
+        config_path,
+        timeout,
+    )?)
 }
 
 /// Replay a directory/file of events through the full pipeline.

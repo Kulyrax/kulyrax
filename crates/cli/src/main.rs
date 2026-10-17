@@ -7,7 +7,7 @@ use kulyrax_core::pipeline;
 use kulyrax_core::replay::{ReplayReport, ReplayRunOptions};
 use kulyrax_core::routing::StorageKind;
 use kulyrax_core::runtime::{
-    DryRunOutcome, DryRunReport, PROJECTION_DEPTH_EXCEEDS_RECOMMENDED_WARNING,
+    DryRunOutcome, DryRunReport, PROJECTION_DEPTH_EXCEEDS_RECOMMENDED_WARNING, ReloadOutcome,
 };
 use kulyrax_core::source::runner::{RunMode, SourceRunOptions, SourceRunReport, StoppedReason};
 
@@ -33,6 +33,16 @@ enum OutputFormat {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Ask a running `run` or `ingest` process to re-read its config, routing and mappings
+    Reload {
+        /// The same config file the running process was started with.
+        #[arg(long)]
+        config: PathBuf,
+        /// Seconds to wait for the process to answer.
+        #[arg(long, default_value_t = 30)]
+        timeout_secs: u64,
+    },
+
     /// Create a runnable starter project (config, routing, a mapping, sample events)
     Init {
         /// Folder to create the project in; created if missing.
@@ -170,6 +180,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let exit_code = match cli.command {
         Commands::Init { dir } => init_cmd(dir)?,
+        Commands::Reload {
+            config,
+            timeout_secs,
+        } => reload_cmd(config, timeout_secs)?,
         Commands::Run {
             config,
             mappings,
@@ -290,6 +304,7 @@ fn run_cmd(
         &opts,
         &stop,
         kulyrax_backends::register_default_backends,
+        log_reload,
     )?;
     render_source_run_report(&report, output)?;
     Ok(match report.stopped_reason {
@@ -568,6 +583,45 @@ fn explain_cmd(
     }
 
     Ok(0)
+}
+
+// --------------------------------------------------
+// Reload (ask a running process to re-read its project)
+// --------------------------------------------------
+
+fn reload_cmd(config: PathBuf, timeout_secs: u64) -> Result<i32, Box<dyn std::error::Error>> {
+    let outcome = pipeline::request_reload(&config, Duration::from_secs(timeout_secs))?;
+    Ok(match outcome {
+        ReloadOutcome::Applied { message } => {
+            println!("reload applied: {message}");
+            0
+        }
+        ReloadOutcome::Rejected { reason } => {
+            eprintln!(
+                "reload rejected, still running the previous configuration:
+  {reason}"
+            );
+            1
+        }
+        ReloadOutcome::NotPickedUp => {
+            eprintln!(
+                "no running process answered within {timeout_secs}s. Is `kulyrax run` (without --once) or `kulyrax ingest` running with {}?",
+                config.display()
+            );
+            2
+        }
+    })
+}
+
+/// How a running process reports each reload on stderr.
+fn log_reload(outcome: &ReloadOutcome) {
+    match outcome {
+        ReloadOutcome::Applied { message } => eprintln!("kulyrax: reload applied ({message})"),
+        ReloadOutcome::Rejected { reason } => {
+            eprintln!("kulyrax: reload rejected, keeping the previous configuration: {reason}")
+        }
+        ReloadOutcome::NotPickedUp => {}
+    }
 }
 
 // --------------------------------------------------

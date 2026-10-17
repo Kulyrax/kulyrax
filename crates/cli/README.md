@@ -9,6 +9,7 @@ cargo install kulyrax-cli
 kulyrax init my-project                                         # runnable starter project
 kulyrax run --config config.yaml --mappings mappings/ --once   # drain configured sources once
 kulyrax sources --config config.yaml                            # list sources + committed positions
+kulyrax reload --config config.yaml                             # running process re-reads config/routing/mappings
 kulyrax ingest --config config.yaml --mappings mappings/ --listen tcp://0.0.0.0:50051
 kulyrax explain --config config.yaml --event event.json         # routing/dependency preview, no writes
 kulyrax dry-run  --config config.yaml --mappings mappings/ --event event.json   # writes it would make, no writes

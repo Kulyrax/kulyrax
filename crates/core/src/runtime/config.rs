@@ -386,7 +386,7 @@ pub fn expand_env(s: &str) -> String {
 // ------------------------------------------------------------
 
 /// A configured event source — the input-side mirror of [`AdapterConfig`].
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SourceConfig {
     /// Watches a directory for event files (`*.json` / `*.ndjson` / `*.jsonl`).
@@ -395,7 +395,7 @@ pub enum SourceConfig {
     Stdin(StdinSourceConfig),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct DirectorySourceConfig {
     pub id: String,
     /// Directory of event files, relative to the config file's directory.
@@ -404,7 +404,7 @@ pub struct DirectorySourceConfig {
     pub state_dir: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct StdinSourceConfig {
     pub id: String,
     pub state_dir: String,

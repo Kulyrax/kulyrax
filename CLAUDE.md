@@ -23,7 +23,7 @@ kulyrax/
 ├── RELEASES/                       — per-version release notes
 ├── examples/                       — runnable examples (excluded from the workspace)
 └── crates/
-    ├── cli/                        — kulyrax-cli: thin CLI (main.rs only): init, run, sources, ingest, explain, dry-run, replay
+    ├── cli/                        — kulyrax-cli: thin CLI (main.rs only): init, run, sources, ingest, reload, explain, dry-run, replay
     ├── ingest/                     — kulyrax-ingest: tonic gRPC server + GrpcSource (keeps tonic out of core)
     ├── client/                     — kulyrax-client: reference Rust producer client
     ├── backends/                   — kulyrax-backends: registers every networked backend, one Cargo feature each
@@ -72,6 +72,8 @@ kulyrax/
 4. **Sources** — an `EventSource` (`poll` / `commit` / `committed_position`) hands the run
    loop ordered batches with a resumable position. Commit happens only after a batch fully
    resolves. At-least-once source + idempotent sinks ⇒ effectively-once projection.
+   `kulyrax reload` swaps config, routing and adapters only at the top of the loop, after
+   every batch so far has committed (`source/runner.rs`, `runtime/reload.rs`).
 
 ## Coding Standards & Rules
 
@@ -94,6 +96,7 @@ cargo clippy --workspace --all-targets -- -D warnings # strict lint
 cargo fmt --check                                    # formatting
 cargo run -p kulyrax-cli -- run --config <c> --mappings <m> --once   # drain sources once
 cargo run -p kulyrax-cli -- sources --config <c>     # list sources + committed positions
+cargo run -p kulyrax-cli -- reload --config <c>      # running run/ingest re-reads config, routing, mappings
 cargo run -p kulyrax-cli -- ingest --config <c> --mappings <m> --listen tcp://0.0.0.0:50051
 ```
 

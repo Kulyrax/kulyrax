@@ -27,7 +27,10 @@ use crate::runtime::dependency_graph::{AdapterExecutionMeta, adapter_metadata_ma
 use crate::runtime::dry_run::{DryRunReport, dry_run_event};
 use crate::runtime::factory::build_adapters_reporting_failures;
 use crate::runtime::registry::{AdapterBuildContext, AdapterRegistry, MappingSet};
-use crate::source::runner::{SourceRunOptions, SourceRunReport, run_sources_with_adapters};
+use crate::source::runner::{
+    Reloaded, Reloader, SourceRunOptions, SourceRunReport, run_sources_with_adapters,
+    run_sources_with_reload,
+};
 use crate::source::{EventSource, SourceError};
 use crate::upcast::UpcasterRegistry;
 
@@ -216,6 +219,39 @@ impl KulyraxRuntime {
         let result = ctx.run_stream_with_options(events, opts);
         self.adapters = Some(ctx.into_adapters());
         result
+    }
+
+    /// [`Self::run_sources`] that asks `reloader` between batches whether to
+    /// switch to a new configuration (see [`run_sources_with_reload`]).
+    pub fn run_sources_with_reload(
+        &mut self,
+        sources: Vec<Box<dyn EventSource>>,
+        opts: &SourceRunOptions,
+        stop: &AtomicBool,
+        reloader: &mut dyn Reloader,
+    ) -> Result<SourceRunReport, SourceError> {
+        self.ensure_adapters_built();
+        let adapters = self.adapters.take().unwrap_or_default();
+        run_sources_with_reload(
+            &self.config,
+            self.routing_rules.clone(),
+            adapters,
+            sources,
+            opts,
+            stop,
+            Some(reloader),
+        )
+    }
+
+    /// Build the adapters and hand over everything a running loop needs to
+    /// switch to this runtime's configuration.
+    pub(crate) fn into_reloaded(mut self) -> Result<Reloaded, PipelineError> {
+        self.build_adapters()?;
+        Ok(Reloaded {
+            adapters: self.adapters.take().unwrap_or_default(),
+            routing_rules: self.routing_rules,
+            config: self.config,
+        })
     }
 
     /// Run the poll → sort → dispatch → commit loop until caught up, stopped,

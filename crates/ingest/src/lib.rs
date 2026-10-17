@@ -442,7 +442,7 @@ pub fn serve(
     mappings_dir: &std::path::Path,
     opts: &ServeOptions,
     stop: &std::sync::atomic::AtomicBool,
-    register_backends: impl FnOnce(&mut kulyrax_core::KulyraxRuntime),
+    register_backends: impl Fn(&mut kulyrax_core::KulyraxRuntime) + Clone + 'static,
 ) -> Result<kulyrax_core::SourceRunReport, ServeError> {
     let project = kulyrax_core::pipeline::load_project(config_path, mappings_dir)
         .map_err(ServeError::Pipeline)?;
@@ -454,7 +454,7 @@ pub fn serve(
         project.graph_mappings,
         project.routing_rules,
     );
-    register_backends(&mut runtime);
+    register_backends.clone()(&mut runtime);
     runtime.build_adapters().map_err(ServeError::Pipeline)?;
 
     let (server, source) = start("grpc", &opts.listen).map_err(ServeError::Ingest)?;
@@ -473,7 +473,25 @@ pub fn serve(
         dlq_dir: opts.dlq_dir.clone(),
     };
 
-    let result = runtime.run_sources(vec![Box::new(source)], &run_opts, stop);
+    // `kulyrax reload` swaps config, routing and mappings between batches.
+    let mut reloader = kulyrax_core::runtime::FileReloader::new(
+        config_path,
+        mappings_dir,
+        runtime.config().sources.clone(),
+        register_backends,
+        runtime.upcasters(),
+        |outcome| match outcome {
+            kulyrax_core::runtime::ReloadOutcome::Applied { message } => {
+                eprintln!("kulyrax ingest: reload applied ({message})")
+            }
+            kulyrax_core::runtime::ReloadOutcome::Rejected { reason } => eprintln!(
+                "kulyrax ingest: reload rejected, keeping the previous configuration: {reason}"
+            ),
+            kulyrax_core::runtime::ReloadOutcome::NotPickedUp => {}
+        },
+    );
+    let result =
+        runtime.run_sources_with_reload(vec![Box::new(source)], &run_opts, stop, &mut reloader);
 
     server.shutdown();
     result.map_err(ServeError::Source)

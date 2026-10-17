@@ -6,6 +6,7 @@ pub mod error;
 pub mod execute;
 pub mod factory;
 pub mod registry;
+pub mod reload;
 pub mod result;
 pub mod validation;
 
@@ -22,6 +23,7 @@ pub use factory::{
     AdapterBuildFailure, build_adapters_from_config, build_adapters_reporting_failures,
 };
 pub use registry::{AdapterBuildContext, AdapterFactory, AdapterRegistry, MappingSet};
+pub use reload::{FileReloader, ReloadOutcome, request_reload};
 pub use validation::{
     ValidationIssue, ValidationReport, validate_projection_config, validate_routing_adapter_ids,
     validate_routing_and_dependencies_for_event_type, validate_routing_for_event_type,

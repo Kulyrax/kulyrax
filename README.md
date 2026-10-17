@@ -77,6 +77,20 @@ transactional Postgres backend), `examples/embedded/` (call `kulyrax-core` as a 
 no CLI), `examples/grpc-producer/` (stream events into a long-lived `kulyrax ingest`
 service instead of reading a file).
 
+## Changing a running project
+
+Config, routing and mappings are read when a process starts. A long-running
+`kulyrax run` (without `--once`) or `kulyrax ingest` picks up edits when you ask:
+
+```sh
+kulyrax reload --config config.yaml
+```
+
+The process re-reads and validates everything between batches, builds the new
+adapters, and switches over. If anything is invalid it keeps running on the previous
+configuration and `reload` prints why (exit 1). Changing `sources:` needs a restart.
+Pass the same config file the process was started with.
+
 ## Why Kulyrax exists
 
 A single event often needs to reach a SQL table (transactions), a document store (read
