@@ -1700,6 +1700,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "kulyrax-adapter-neo4j"
+version = "0.8.0"
+dependencies = [
+ "kulyrax-core",
+ "neo4rs",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "kulyrax-adapter-postgres"
 version = "0.8.0"
 dependencies = [
@@ -1735,6 +1749,7 @@ dependencies = [
  "kulyrax-adapter-elasticsearch",
  "kulyrax-adapter-mongodb",
  "kulyrax-adapter-mysql",
+ "kulyrax-adapter-neo4j",
  "kulyrax-adapter-postgres",
  "kulyrax-adapter-redis",
  "kulyrax-core",
@@ -1769,14 +1784,12 @@ dependencies = [
 name = "kulyrax-core"
 version = "0.8.0"
 dependencies = [
- "neo4rs",
  "once_cell",
  "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml",
  "tempfile",
- "tokio",
 ]
 
 [[package]]

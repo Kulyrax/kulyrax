@@ -1,4 +1,4 @@
-//! Phase 24.6: Neo4j backend integration scenarios.
+//! Neo4j backend integration scenarios.
 //!
 //! **Gated on `KULYRAX_NEO4J_URI`** (`bolt://host:port`, plus
 //! `KULYRAX_NEO4J_USER`/`KULYRAX_NEO4J_PASSWORD`, defaulting to `neo4j`/
@@ -12,10 +12,10 @@
 //! `redis_backend.rs` (Phase 22.5), and `mongo_backend.rs` (Phase 23.5) —
 //! every scenario shares the same skip guard and fresh-label helper.
 
+use kulyrax_adapter_neo4j::Neo4jAdapter;
 use kulyrax_core::adapter::AdapterOutcome;
 use kulyrax_core::adapter::StorageAdapter;
 use kulyrax_core::adapter::graph::mapping::GraphMapping;
-use kulyrax_core::adapter::graph::neo4j::Neo4jAdapter;
 use kulyrax_core::adapter::graph::runtime::GraphRuntimeBuilder;
 use kulyrax_core::adapter::graph::store::GraphStore;
 use kulyrax_core::event::Event;

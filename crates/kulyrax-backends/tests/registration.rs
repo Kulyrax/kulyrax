@@ -63,3 +63,8 @@ fn redis_resolves_through_its_factory() {
 fn mongodb_resolves_through_its_factory() {
     assert_factory_ran("mongodb", "{url: 'not a url', database: db}");
 }
+
+#[test]
+fn neo4j_resolves_through_its_factory() {
+    assert_factory_ran("neo4j", "{uri: 'not a uri', user: neo4j, password: pw}");
+}

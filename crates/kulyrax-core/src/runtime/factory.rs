@@ -3,7 +3,6 @@ use std::sync::Arc;
 use crate::adapter::StorageAdapter;
 use crate::adapter::document::file::FileDocumentAdapter;
 use crate::adapter::document::runtime::DocumentRuntimeBuilder;
-use crate::adapter::graph::neo4j::Neo4jAdapter;
 use crate::adapter::graph::runtime::GraphRuntimeBuilder;
 use crate::adapter::graph::store::GraphStore;
 use crate::adapter::keyvalue::runtime::KvRuntimeBuilder;
@@ -129,23 +128,6 @@ pub fn build_adapters_reporting_failures(
                 adapters.push(Box::new(GraphStore::new(
                     cfg.id.clone(),
                     cfg.config.root.clone().into(),
-                    cfg.priority,
-                    builder,
-                    Arc::clone(&ctx.upcasters),
-                    config.migration_policy,
-                )));
-            }
-
-            AdapterConfig::Neo4j(cfg) => {
-                let builder = GraphRuntimeBuilder::new(ctx.mappings.graph.clone());
-                let uri = crate::runtime::config::expand_env(&cfg.config.uri);
-                let password = crate::runtime::config::expand_env(&cfg.config.password);
-                adapters.push(Box::new(Neo4jAdapter::new(
-                    cfg.id.clone(),
-                    &uri,
-                    &cfg.config.user,
-                    &password,
-                    cfg.config.database.clone(),
                     cfg.priority,
                     builder,
                     Arc::clone(&ctx.upcasters),

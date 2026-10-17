@@ -10,6 +10,7 @@ members = [
     "crates/adapters/kulyrax-adapter-mysql",
     "crates/adapters/kulyrax-adapter-redis",
     "crates/adapters/kulyrax-adapter-mongodb",
+    "crates/adapters/kulyrax-adapter-neo4j",
     "crates/kulyrax-backends",
 ]
 # examples/ are standalone Cargo projects (each depends on the engine via a
@@ -35,4 +36,5 @@ kulyrax-adapter-elasticsearch = { path = "crates/adapters/kulyrax-adapter-elasti
 kulyrax-adapter-mysql = { path = "crates/adapters/kulyrax-adapter-mysql", version = "0.8.0" }
 kulyrax-adapter-redis = { path = "crates/adapters/kulyrax-adapter-redis", version = "0.8.0" }
 kulyrax-adapter-mongodb = { path = "crates/adapters/kulyrax-adapter-mongodb", version = "0.8.0" }
+kulyrax-adapter-neo4j = { path = "crates/adapters/kulyrax-adapter-neo4j", version = "0.8.0" }
 kulyrax-backends = { path = "crates/kulyrax-backends", version = "0.8.0" }

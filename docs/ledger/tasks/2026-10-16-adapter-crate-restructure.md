@@ -12,10 +12,10 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 
 ## Acceptance criteria
 
-- [ ] `kulyrax-core` depends on no networked driver (`mysql`, `redis`, `mongodb`, `neo4rs`) and no `tokio`.
-- [ ] Every networked backend lives in `crates/adapters/kulyrax-adapter-<name>/`, with its tests in that crate.
-- [ ] `kulyrax-backends` registers all of them behind one Cargo feature each; `default = ["all"]`.
-- [ ] Existing configs keep working unchanged (`type: mysql|redis|mongodb|neo4j|postgres|elasticsearch`).
+- [x] `kulyrax-core` depends on no networked driver (`mysql`, `redis`, `mongodb`, `neo4rs`) and no `tokio`.
+- [x] Every networked backend lives in `crates/adapters/kulyrax-adapter-<name>/`, with its tests in that crate.
+- [x] `kulyrax-backends` registers all of them behind one Cargo feature each; `default = ["all"]`.
+- [x] Existing configs keep working unchanged (`type: mysql|redis|mongodb|neo4j|postgres|elasticsearch`).
 - [x] Adapter factories receive mappings, upcasters and migration policy through one context value instead of capturing them at registration time.
 - [ ] The four copy-pasted `loader.rs` files are replaced by one generic loader.
 - [ ] No `// Phase N:` history comments remain in `crates/*/src`; comments that explain an invariant or a reason are kept.
@@ -34,7 +34,7 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 
 1. Done: introduce `MappingSet` and `AdapterBuildContext`, change `AdapterFactory` to `Fn(&CustomAdapterConfig, &AdapterBuildContext)`, and add `CustomAdapterConfig::backend_config`. Port Postgres and Elasticsearch to it. The only API removal is `KulyraxRuntime::{sql,document,kv,graph}_mappings()`.
 2. Done: guard against the regressions the extraction would cause. Validation classifies first-party custom types (`postgres`, `mysql`, `mongodb`, `elasticsearch`, `redis`, `neo4j`) by storage kind via a name → kind table, so their mapping and capability checks still run; third-party types stay deferred. `KulyraxRuntime::build_adapters()` returns `PipelineError::AdapterBuild` when any custom adapter fails to build; every pipeline command and `kulyrax-ingest` call it at startup. This also restores both checks for Postgres, which lost them when it moved out.
-3. Extract MySQL (done), then Redis (done), then MongoDB (done), then Neo4j, one commit each. Remove each enum variant from `AdapterConfig` and move its `*_backend.rs` test.
+3. Done: extract MySQL, Redis, MongoDB and Neo4j, one commit each. Remove each enum variant from `AdapterConfig` and move its `*_backend.rs` test.
 4. Done early, so new crates are created in place: move the adapter crates under `crates/adapters/`.
 5. Replace the four `loader.rs` files with one generic `load_mappings<M>`.
 6. Do the comment pass.
@@ -83,6 +83,14 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 | Step 3: MongoDB factory | `cargo test -p kulyrax-adapter-mongodb --lib` | 4 passed (empty URL, empty database, unparseable URL, valid URL builds without a server) |
 | Step 3: MongoDB final gates | `cargo test -p kulyrax-backends --test registration`; clippy `-D warnings`; `cargo test --workspace`; `cargo fmt --check` | 5/5 registration tests; clean; 101 test binaries, 285 passed, 0 failed; exit 0 |
 
+| Step 3: Neo4j out of core | `cargo tree -p kulyrax-core -e normal` piped to `grep -c` for mysql/redis/r2d2/mongodb/neo4rs/tokio | 0 matches: core has no networked driver and no tokio |
+| Step 3: Neo4j URI check | first run of the factory and registration tests | **failed**: `neo4rs::ConfigBuilder::build()` accepts `"not a uri"`. Reading neo4rs 0.8 source shows `build()` only checks that fields are present; the URI is parsed in `connection.rs` at connect time. So the pre-branch load-time check never rejected a malformed URI either. Fixed with `check_bolt_uri`, which mirrors neo4rs's `NeoUrl::parse` plus its scheme match |
+| Step 3: Neo4j factory | `cargo test -p kulyrax-adapter-neo4j --lib` | 4 passed (empty, unparseable, unsupported scheme; six valid forms accepted, including scheme-less `host:port`) |
+| Step 3: Neo4j final gates | registration test (6/6); clippy `-D warnings`; `cargo test --workspace --no-fail-fast`; `cargo fmt --check` | clean; 103 test binaries, 290 passed, 0 failed; exit 0 |
+| Configs unchanged | `kulyrax-backends/tests/registration.rs` parses a YAML entry for each of the six `type:` names and reaches that backend's own factory | 6/6 pass |
+
+Not run: the `neo4j_backend` integration suite against a real Neo4j (gated on `KULYRAX_NEO4J_URI`).
+
 Not run: the `mongo_backend` integration suite against a real MongoDB (gated on `KULYRAX_MONGO_URL`).
 
 Not run: the `redis_backend` integration suite against a real Redis. It is gated on `KULYRAX_REDIS_URL` the same way.
@@ -99,7 +107,9 @@ Not run: the `mysql_backend` integration suite against a real MySQL. Its 7 tests
 - **Merge order (agreed 2026-10-17, done the same day):** this branch was based on `kulyrax-main` at 4d37922, which is 4 commits ahead of `origin/main` (Kulyrax/kulyrax) and has uncommitted Phase 29.1 work (`ack_protocol_version`) in the main checkout. The order is: commit Phase 29.1 on `kulyrax-main`, push it to `origin/main` (Kulyrax/kulyrax), then rebase this branch onto it and open a PR. Expect conflicts in `kulyrax-ingest/src/lib.rs` (the one-line startup build check) and in `pg_backend.rs`, which this branch moved to `crates/adapters/`. Also expect `kulyrax-ingest`'s new Postgres/Elasticsearch dev-dependencies to need checking against the moved crates.
 - CI on `origin/main` (Kulyrax/kulyrax) is red: run 38847664638 failed in `test (postgres)` with `SqlMappingNoSqlTarget` on `examples/postgres`, the false positive fixed in 49dc976, which is not pushed yet. CI only starts helping this branch once that push lands.
 - The commits on this branch were authored as `naman <naman@slt.work>`. The repo identity is now `Panchauly <panchauly@gmail.com>`, so re-author them during the rebase (`--exec "git commit --amend --no-edit --reset-author"`).
-- The first-party name → kind table in `validation.rs` must be kept in sync with `kulyrax-backends`. A wrong entry would apply the wrong kind's checks to that type.
+- The first-party name → kind table in `validation.rs` must be kept in sync with `kulyrax-backends`.
+- Neo4j connects eagerly when its adapter is built, because `neo4rs` has no lazy connect. Adapters are now built at startup, so that connection attempt moves from the first event to startup. A connection failure is still stored and reported per event, as before; only the timing changed.
+- Neo4j's factory now rejects a malformed URI or unsupported scheme at startup. Before this branch such a config passed validation and failed on every event. Behaviour change, in the safe direction. A wrong entry would apply the wrong kind's checks to that type.
 
 ## Outcome
 

@@ -23,4 +23,7 @@ pub fn register_default_backends(runtime: &mut KulyraxRuntime) {
 
     #[cfg(feature = "mongodb")]
     runtime.register_adapter_factory("mongodb", kulyrax_adapter_mongodb::factory);
+
+    #[cfg(feature = "neo4j")]
+    runtime.register_adapter_factory("neo4j", kulyrax_adapter_neo4j::factory);
 }

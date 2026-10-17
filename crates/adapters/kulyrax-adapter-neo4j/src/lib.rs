@@ -1,28 +1,18 @@
-//! Phase 24.2–24.4: the Neo4j graph backend.
+//! Neo4j graph backend over core's `GraphBackend` seam. Registers as
+//! `type: neo4j` via [`factory`].
 //!
-//! Same `GraphMapping` / `decide()` / guard model as the file-backed store —
-//! this file supplies only what a driver genuinely owns: a Bolt connection
-//! (`neo4rs`, async-only — wrapped in a small internal `tokio::runtime::Runtime`
-//! so the adapter path stays synchronous, the same pattern Phase 19.2 used
-//! for the sync `postgres` crate over `tokio-postgres`), Cypher generation,
-//! and an optimistic CAS via a `WHERE`-conditioned `SET` inside one
-//! transaction per event — Neo4j's per-node write locks alone don't prevent
-//! a transaction from writing stale data it read earlier (unlike MongoDB's
-//! snapshot-isolated transactions, Phase 23.3), so the CAS check here is
-//! the actual correctness mechanism, not a redundant belt-and-suspenders.
+//! `neo4rs` is async-only, so the adapter wraps it in a small internal tokio
+//! runtime and dispatch stays synchronous.
 //!
-//! **Post-release correctness fix:** the CAS originally read `g.last_sequence`
-//! in a `WHERE` clause with no write lock held on `g` yet (Cypher only takes
-//! one at the point of an actual write), so two concurrent transactions could
-//! both pass the check against the same stale value and whichever committed
-//! last in real time won — independent of sequence order. A 20-concurrent-
-//! writer stress test (not part of the committed suite; see
-//! `tests/stress_concurrent_writers.rs` if present locally) reproduced a lost
-//! update in roughly 7 of 10 runs. `cas_write` now forces the write lock
-//! immediately after `MERGE` (a same-value `SET g.kind = $kind`, a write that
-//! does nothing to the data but everything to the lock) *before* the `WHERE`
-//! reads `last_sequence` — see that function's doc comment for the full
-//! mechanism. The same stress test showed 0 failures in 30 runs after the fix.
+//! **Concurrency.** Neo4j's per-node write locks alone do not stop a
+//! transaction from writing stale data it read earlier, so the
+//! compare-and-set on the guard node is the actual correctness mechanism. A
+//! Cypher `WHERE` takes no lock, so two transactions could both pass the
+//! check against the same stale `last_sequence`, and the last to commit would
+//! win regardless of sequence order. `cas_write` therefore takes the write
+//! lock immediately after `MERGE`, with a same-value `SET g.kind = $kind`,
+//! *before* the `WHERE` reads `last_sequence`. See that function's doc
+//! comment.
 //!
 //! Guard placement: one `__ConduitGuard` node per `(kind, target, entity_key,
 //! facet)` — `kind` is `"node"` or `"edge"` (disambiguating a node label and
@@ -36,20 +26,90 @@
 use std::sync::{Arc, Mutex};
 
 use neo4rs::{BoltList, BoltMap, BoltType, ConfigBuilder, Graph, Neo4jErrorKind, Query, Row, Txn};
+use serde::Deserialize;
 use serde_json::Value;
 use tokio::runtime::Runtime;
 
-use super::adapter::GraphError;
-use super::exec::{
+use kulyrax_core::adapter::graph::adapter::GraphError;
+use kulyrax_core::adapter::graph::exec::{
     self, EdgePlan, GraphBackend, GraphFacetGuard, GraphGuard, GraphOutcome, NodePlan,
 };
-use super::mapping::{ResolvedRecord, canonical_edge_key};
-use super::runtime::GraphRuntimeBuilder;
-use crate::adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter};
-use crate::event::Event;
-use crate::routing::StorageKind;
-use crate::runtime::config::MigrationPolicy;
-use crate::upcast::UpcasterRegistry;
+use kulyrax_core::adapter::graph::mapping::{ResolvedRecord, canonical_edge_key};
+use kulyrax_core::adapter::graph::runtime::GraphRuntimeBuilder;
+use kulyrax_core::adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter};
+use kulyrax_core::event::Event;
+use kulyrax_core::routing::StorageKind;
+use kulyrax_core::runtime::AdapterBuildContext;
+use kulyrax_core::runtime::config::{
+    ConfigError, CustomAdapterConfig, MigrationPolicy, expand_env,
+};
+use kulyrax_core::upcast::UpcasterRegistry;
+
+/// The `config:` block of a `type: neo4j` adapter entry.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Neo4jConfig {
+    /// Bolt URI (`bolt://host:port` or `neo4j://host:port`); `${ENV_VAR}`
+    /// references are expanded.
+    pub uri: String,
+    pub user: String,
+    /// `${ENV_VAR}` references are expanded, so credentials can stay out of
+    /// the committed config.
+    pub password: String,
+    /// Neo4j's default database when omitted.
+    #[serde(default)]
+    pub database: Option<String>,
+}
+
+/// Registry factory for `type: neo4j`.
+pub fn factory(
+    entry: &CustomAdapterConfig,
+    ctx: &AdapterBuildContext,
+) -> Result<Box<dyn StorageAdapter>, ConfigError> {
+    let id = entry.id.clone();
+    let cfg: Neo4jConfig = entry.backend_config()?;
+    let uri = expand_env(&cfg.uri);
+    let password = expand_env(&cfg.password);
+    if uri.trim().is_empty() {
+        return Err(ConfigError::FactoryConfigInvalid(format!(
+            "neo4j adapter {id:?}: `uri` is empty"
+        )));
+    }
+    if let Err(reason) = check_bolt_uri(&uri) {
+        return Err(ConfigError::FactoryConfigInvalid(format!(
+            "neo4j adapter {id:?}: `uri` {reason}: {uri}"
+        )));
+    }
+    Ok(Box::new(Neo4jAdapter::new(
+        id,
+        &uri,
+        &cfg.user,
+        &password,
+        cfg.database,
+        entry.priority,
+        GraphRuntimeBuilder::new(ctx.mappings.graph.clone()),
+        Arc::clone(&ctx.upcasters),
+        ctx.migration_policy,
+    )))
+}
+
+/// Mirrors the parse `neo4rs` performs when it connects (`NeoUrl::parse` and
+/// its scheme match in neo4rs 0.8 `connection.rs`): a URI without a host is
+/// retried with `bolt://` prepended, and only the Bolt and Neo4j schemes are
+/// accepted. `neo4rs`'s own `ConfigBuilder::build` checks only that a URI is
+/// present, so without this a typo would surface only on the first event.
+fn check_bolt_uri(uri: &str) -> Result<(), &'static str> {
+    let parsed = match url::Url::parse(uri) {
+        Ok(u) if u.has_host() => u,
+        Ok(_) | Err(url::ParseError::RelativeUrlWithoutBase) => {
+            url::Url::parse(&format!("bolt://{uri}")).map_err(|_| "does not parse")?
+        }
+        Err(_) => return Err("does not parse"),
+    };
+    match parsed.scheme() {
+        "bolt" | "bolt+s" | "bolt+ssc" | "neo4j" | "neo4j+s" | "neo4j+ssc" => Ok(()),
+        _ => Err("has an unsupported scheme"),
+    }
+}
 
 const MAX_ATTEMPTS: u32 = 5;
 const GUARD_CONSTRAINT: &str = "CREATE CONSTRAINT IF NOT EXISTS FOR (g:__ConduitGuard) \
@@ -119,18 +179,15 @@ fn lane_fields(guard: &GraphGuard, facet: &str) -> (u64, String, bool, bool) {
     }
 }
 
-/// Neo4j graph adapter (Phase 24). Genuinely ACID via a client transaction
-/// per event, like Postgres (19) and MongoDB (23) — but the CAS check is
-/// explicit (a `WHERE`-conditioned `SET`), not implicit in the transaction's
-/// own isolation, per the module doc comment above.
+/// One client transaction per event; the CAS check is an explicit
+/// `WHERE`-conditioned `SET`, not implied by transaction isolation (see the
+/// module docs).
 pub struct Neo4jAdapter {
     id: String,
     priority: u32,
-    /// `Err` (a stored message) when connecting failed — every `handle()`
-    /// then fails cleanly rather than the factory being fallible. Unlike
-    /// Postgres/Redis/Mongo's lazy pooled connect, `neo4rs::Graph::connect`
-    /// has no documented lazy/unchecked variant, so this connects eagerly at
-    /// construction (still inside `new()`, not at config-parse time).
+    /// `Err` when connecting failed; every `handle()` then fails cleanly.
+    /// `neo4rs` has no lazy connect, so unlike the other networked backends
+    /// this connects when the adapter is built.
     conn: Result<(Runtime, Graph), String>,
     builder: GraphRuntimeBuilder,
     upcasters: Arc<UpcasterRegistry>,
@@ -688,7 +745,7 @@ impl GraphBackend for Neo4jBackend<'_> {
         }
 
         // Statement D: native DETACH DELETE — removes the node and every
-        // incident relationship in one primitive (Phase 24.4).
+        // incident relationship in one primitive.
         let q = Query::new(format!("MATCH (n:`{label}` {{id: $id}}) DETACH DELETE n"))
             .param("id", node_id);
         self.run(q)
@@ -715,5 +772,72 @@ impl GraphBackend for Neo4jBackend<'_> {
             &write_extra,
             vec![("edge_key", BoltType::from(key))],
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Only rejection paths: they return before `Neo4jAdapter::new`, which
+    // would otherwise try to connect.
+    fn error_of(uri: &str) -> String {
+        let raw = serde_yaml::to_value(serde_json::json!({
+            "type": "neo4j",
+            "id": "n1",
+            "priority": 10,
+            "config": { "uri": uri, "user": "neo4j", "password": "pw" },
+        }));
+        let Ok(raw) = raw else {
+            return "test yaml did not serialize".into();
+        };
+        let entry = CustomAdapterConfig {
+            type_name: "neo4j".into(),
+            id: "n1".into(),
+            priority: 10,
+            raw,
+            capabilities: None,
+            depends_on: Vec::new(),
+        };
+        let ctx = AdapterBuildContext {
+            mappings: Default::default(),
+            upcasters: Arc::new(UpcasterRegistry::new()),
+            migration_policy: MigrationPolicy::default(),
+        };
+        factory(&entry, &ctx)
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn factory_rejects_an_empty_uri() {
+        assert!(error_of("").contains("`uri` is empty"));
+    }
+
+    #[test]
+    fn factory_rejects_an_unparseable_uri() {
+        let err = error_of("not a uri");
+        assert!(err.contains("`uri` does not parse"), "{err}");
+    }
+
+    #[test]
+    fn factory_rejects_an_unsupported_scheme() {
+        let err = error_of("http://localhost:7687");
+        assert!(err.contains("unsupported scheme"), "{err}");
+    }
+
+    #[test]
+    fn uri_check_accepts_what_neo4rs_accepts() {
+        for uri in [
+            "bolt://localhost:7687",
+            "neo4j://db.example.com",
+            "neo4j+s://db.example.com:7687",
+            "bolt+ssc://10.0.0.5:7687",
+            "localhost:7687",
+            "127.0.0.1:7687",
+        ] {
+            assert_eq!(check_bolt_uri(uri), Ok(()), "{uri}");
+        }
     }
 }

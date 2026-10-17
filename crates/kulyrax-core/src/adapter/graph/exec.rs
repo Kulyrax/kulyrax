@@ -92,7 +92,7 @@ impl GraphGuard {
 ///   write-to-temp-then-rename, with an explicit incident-edge index kept
 ///   alongside (Phase 16.2) since the filesystem has no graph structure of
 ///   its own to query.
-/// - **Neo4j** ([`super::neo4j`]): one client-session transaction per event,
+/// - **Neo4j** (`kulyrax-adapter-neo4j`): one client-session transaction per event,
 ///   with an **explicit optimistic CAS** — a `WHERE`-conditioned `SET` on
 ///   the guard, re-checked against the *current* stored sequence at write
 ///   time — because Neo4j's per-node write locks alone do **not** prevent a

@@ -36,11 +36,6 @@ pub enum ValidationIssue {
         event: String,
         reason: String,
     },
-    /// Phase 24.5: a Neo4j adapter's connection config is unusable.
-    InvalidNeo4jConfig {
-        adapter_id: String,
-        reason: String,
-    },
     UnknownAdapter {
         event_type: String,
         adapter_id: String,
@@ -177,13 +172,6 @@ impl fmt::Display for ValidationIssue {
             }
             ValidationIssue::InvalidGraphMapping { event, reason } => {
                 write!(f, "invalid graph mapping for event {:?}: {}", event, reason)
-            }
-            ValidationIssue::InvalidNeo4jConfig { adapter_id, reason } => {
-                write!(
-                    f,
-                    "invalid neo4j adapter {:?} config: {}",
-                    adapter_id, reason
-                )
             }
             ValidationIssue::UnknownAdapter {
                 event_type,
@@ -488,7 +476,7 @@ fn storage_kind(a: &AdapterConfig) -> Option<StorageKind> {
         AdapterConfig::Sqlite(_) => Some(StorageKind::Sql),
         AdapterConfig::File(_) => Some(StorageKind::Document),
         AdapterConfig::KeyValue(_) => Some(StorageKind::KeyValue),
-        AdapterConfig::Graph(_) | AdapterConfig::Neo4j(_) => Some(StorageKind::Graph),
+        AdapterConfig::Graph(_) => Some(StorageKind::Graph),
         AdapterConfig::Custom(c) => first_party_backend_kind(&c.type_name),
     }
 }
@@ -771,37 +759,6 @@ pub fn validate_projection_config(
 
     // Connection settings of registry-resolved backends are checked by each
     // backend's factory when adapters are built, not here.
-
-    // Phase 24.5: a Neo4j adapter's `uri` must be non-empty and parse (via
-    // the same `ConfigBuilder` the adapter itself uses, without connecting).
-    //
-    // Same deliberate omission as Phase 23.4: no live replica/connectivity
-    // warning here either, for the identical "no new validation mechanism"
-    // reason.
-    for a in &config.adapters {
-        if let AdapterConfig::Neo4j(cfg) = a {
-            let uri = crate::runtime::config::expand_env(&cfg.config.uri);
-            let password = crate::runtime::config::expand_env(&cfg.config.password);
-            if uri.trim().is_empty() {
-                report.push(ValidationIssue::InvalidNeo4jConfig {
-                    adapter_id: cfg.id.clone(),
-                    reason: "`uri` is empty".into(),
-                });
-            } else {
-                let built = ::neo4rs::ConfigBuilder::new()
-                    .uri(&uri)
-                    .user(&cfg.config.user)
-                    .password(&password)
-                    .build();
-                if built.is_err() {
-                    report.push(ValidationIssue::InvalidNeo4jConfig {
-                        adapter_id: cfg.id.clone(),
-                        reason: format!("`uri` does not parse: {uri}"),
-                    });
-                }
-            }
-        }
-    }
 
     for (event_type, adapter_ids) in routing {
         let mut seen_route: HashSet<&str> = HashSet::new();
