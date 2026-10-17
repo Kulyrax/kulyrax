@@ -10,12 +10,17 @@ identity/body fields differ (`table`+`primary_key`+`columns` vs.
 `collection`+`id`+`document` vs. `namespace`+`key`+`value` vs. the graph
 `kind`-tagged node/edge fields).
 
-Mapping files live directly in `mappings/<kind>/` (`sql`, `document`,
-`keyvalue`, `graph`) and must end in `.yaml`. Files with any other extension,
-including `.yml`, and subdirectories are ignored. An event that routing sends
-to an adapter but that has no loaded mapping fails validation at startup with
-`Missing<Kind>Mapping`, so a misnamed file stops the run rather than
-projecting nothing.
+Mapping files live under `mappings/<kind>/` (`sql`, `document`, `keyvalue`,
+`graph`) and end in `.yaml` or `.yml`. Group them into subfolders however you
+like, for example `mappings/sql/orders/order_created.yaml`: the folder layout
+has no meaning, because each file names its own `event`. The storage kind comes
+from the top-level folder only. Anything whose name starts with `.` is skipped,
+as are files with other extensions. Two files for the same event in one kind
+fail loading, and the error names both files.
+
+`sql/` and `document/` must exist (they may be empty); `keyvalue/` and `graph/`
+are optional. An event that routing sends to an adapter but that has no loaded
+mapping fails validation at startup with `Missing<Kind>Mapping`.
 
 ## Shared fields
 
@@ -29,7 +34,7 @@ projecting nothing.
 | `facet` | no | none (default facet) | names an independent partial-update lane on the same entity (see [Facets](concepts.md#facets)). Omit for the mapping that owns the whole entity. |
 | `requires_capabilities` | no | `[]` | list of `write` / `idempotent` / `upsert` / `transactions` / `delete` — validated at startup against the adapter this mapping routes to; a missing capability fails config validation, not a runtime write. |
 
-## SQL (`mappings/sql/*.yaml`)
+## SQL (`mappings/sql/`)
 
 | field | required | meaning |
 |---|---|---|
@@ -74,7 +79,7 @@ columns:
   id: payload.id
 ```
 
-## Document (`mappings/document/*.yaml`)
+## Document (`mappings/document/`)
 
 The identical mapping file routes to either document backend — `file`
 (file-backed) or `mongodb` — chosen by which adapter
@@ -113,7 +118,7 @@ document:
   bio: payload.bio
 ```
 
-## Key-value (`mappings/keyvalue/*.yaml`)
+## Key-value (`mappings/keyvalue/`)
 
 The identical mapping file routes to either KV backend — `keyvalue` (file-backed)
 or `redis` — chosen by which adapter `routing.json` points the event
@@ -135,7 +140,7 @@ value:
   started_at: payload.started_at
 ```
 
-## Graph (`mappings/graph/*.yaml`)
+## Graph (`mappings/graph/`)
 
 A graph mapping is a `kind`-tagged union: exactly one of `node` or `edge`
 per mapping file. The identical mapping file routes to either graph backend
