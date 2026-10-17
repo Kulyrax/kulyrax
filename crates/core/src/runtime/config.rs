@@ -546,7 +546,7 @@ mod source_tests {
         let yaml = r#"
 version: 1
 routing:
-  file: routing.json
+  file: routing.yaml
 adapters:
   - type: sqlite
     id: sql-primary
@@ -572,7 +572,7 @@ sources:
     fn rejects_duplicate_source_id() {
         let yaml = r#"
 version: 1
-routing: { file: routing.json }
+routing: { file: routing.yaml }
 adapters:
   - type: sqlite
     id: s
@@ -591,7 +591,7 @@ sources:
     fn config_without_sources_is_valid() {
         let yaml = r#"
 version: 1
-routing: { file: routing.json }
+routing: { file: routing.yaml }
 adapters:
   - type: sqlite
     id: s
@@ -639,7 +639,7 @@ mod phase19_tests {
     fn postgres_type_falls_through_to_custom() {
         let yaml = r#"
 version: 1
-routing: { file: routing.json }
+routing: { file: routing.yaml }
 adapters:
   - type: postgres
     id: pg-primary

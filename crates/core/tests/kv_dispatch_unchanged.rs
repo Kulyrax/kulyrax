@@ -40,7 +40,7 @@ fn test_routing() -> HashMap<String, Vec<AdapterId>> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
-        .join("routing.json");
+        .join("routing.yaml");
 
     load_routing(path).expect("routing fixture loads")
 }
@@ -71,7 +71,7 @@ fn kv_adapter_runs_after_its_sql_dependency_via_ordinary_dispatch() {
         }),
     ];
 
-    // routing.json routes "UserCacheSynced" to ["sql-primary", "kv-cache"];
+    // routing.yaml routes "UserCacheSynced" to ["sql-primary", "kv-cache"];
     // kv-cache depends_on sql-primary.
     let meta: HashMap<AdapterId, AdapterExecutionMeta> = HashMap::from([
         (

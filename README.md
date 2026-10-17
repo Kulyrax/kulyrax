@@ -39,7 +39,7 @@ kulyrax run --config config.yaml --mappings mappings --once
 - **`config.yaml`** points at a `sqlite` adapter and a `directory` event source.
 - **`mappings/sql/user_registered.yaml`** and **`user_email_changed.yaml`** map
   `event_type` → SQL columns, one file per event type.
-- **`routing.json`** says which adapters each event type reaches.
+- **`routing.yaml`** says which adapters each event type reaches.
 - **`events/events.ndjson`** is the input — three NDJSON events.
 
 Same event, three other storage kinds, one call each: `examples/postgres/` (a real

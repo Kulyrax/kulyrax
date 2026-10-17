@@ -4,7 +4,7 @@
 version: 1
 
 routing:
-  file: routing.json
+  file: routing.yaml
 
 adapters:
   - type: sqlite

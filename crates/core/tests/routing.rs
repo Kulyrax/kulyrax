@@ -7,7 +7,7 @@ fn test_routing() -> HashMap<String, Vec<AdapterId>> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
-        .join("routing.json");
+        .join("routing.yaml");
 
     load_routing(path).expect("routing fixture loads")
 }
@@ -57,5 +57,49 @@ fn unknown_event_routes_to_document_by_default() {
     assert!(
         targets.is_empty(),
         "Unknown events must not route to any adapter"
+    );
+}
+
+#[test]
+fn json_routing_file_is_rejected_with_conversion_guidance() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("routing.json");
+    std::fs::write(&path, r#"{"UserCreated": ["sql-primary"]}"#).expect("write");
+
+    let err = load_routing(&path).expect_err("JSON routing is rejected");
+    assert!(err.contains("no longer supported"), "{err}");
+    assert!(err.contains("routing.yaml"), "{err}");
+}
+
+#[test]
+fn routing_file_must_be_yaml() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("routing.txt");
+    std::fs::write(&path, "UserCreated: [sql-primary]\n").expect("write");
+
+    let err = load_routing(&path).expect_err("non-YAML extension is rejected");
+    assert!(err.contains("must end in .yaml or .yml"), "{err}");
+}
+
+#[test]
+fn yml_routing_file_loads() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("routing.yml");
+    std::fs::write(&path, "UserCreated: [sql-primary, doc-readmodel]\n").expect("write");
+
+    let rules = load_routing(&path).expect("loads");
+    assert_eq!(rules["UserCreated"], ["sql-primary", "doc-readmodel"]);
+}
+
+#[test]
+fn invalid_routing_yaml_names_the_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("routing.yaml");
+    std::fs::write(&path, "UserCreated: sql-primary\n").expect("write");
+
+    let err = load_routing(&path).expect_err("a scalar instead of a list is rejected");
+    assert!(
+        err.starts_with("Invalid routing file") && err.contains("routing.yaml"),
+        "{err}"
     );
 }

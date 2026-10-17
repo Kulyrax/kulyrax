@@ -76,7 +76,7 @@ services:
       KULYRAX_ELASTICSEARCH_URL: http://elasticsearch:9200
     volumes:
       - ./config.yaml:/app/config.yaml:ro
-      - ./routing.json:/app/routing.json:ro
+      - ./routing.yaml:/app/routing.yaml:ro
       - ./mappings:/app/mappings:ro
       - ./data/dlq:/app/dlq
     ports:

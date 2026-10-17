@@ -57,7 +57,7 @@ fn config_with_one_custom_adapter(type_name: &str) -> KulyraxConfig {
     KulyraxConfig {
         version: 1,
         routing: RoutingConfig {
-            file: "routing.json".into(),
+            file: "routing.yaml".into(),
         },
         adapters: vec![AdapterConfig::Custom(CustomAdapterConfig {
             type_name: type_name.into(),

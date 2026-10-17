@@ -1,0 +1,3 @@
+# event_type: [adapter ids it reaches]
+UserRegistered: [sql-primary]
+UserEmailChanged: [sql-primary]

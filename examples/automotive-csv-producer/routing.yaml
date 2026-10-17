@@ -1,0 +1,5 @@
+# event_type: [adapter ids it reaches]
+VehicleCreated: [sql-vehicles, mongo-vehicles, es-vehicles]
+VehiclePriceChanged: [sql-vehicles, mongo-vehicles, es-vehicles]
+VehicleUpdated: [sql-vehicles, mongo-vehicles, es-vehicles]
+VehicleSold: [sql-vehicles, mongo-vehicles, es-vehicles]

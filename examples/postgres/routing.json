@@ -1,5 +1,0 @@
-{
-  "UserRegistered": ["pg-primary"],
-  "ProfileUpdated": ["pg-primary"],
-  "StatsRecomputed": ["pg-primary"]
-}
