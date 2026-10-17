@@ -16,7 +16,7 @@ use std::time::Duration;
 
 #[derive(Parser)]
 #[command(name = "kulyrax")]
-#[command(about = "Event-first projection engine")]
+#[command(about = "Event-first projection engine", version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

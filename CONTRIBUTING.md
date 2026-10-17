@@ -73,6 +73,22 @@ CI runs all five on every PR regardless of what you tested locally.
 - A behavior change should come with a short explanation in the PR description of what
   changed and why, alongside the test that proves it.
 
+## Cutting a release
+
+1. Set `version` under `[workspace.package]` in the root `Cargo.toml`.
+2. Write the notes in `RELEASES/v<version>.md`.
+3. Once that is merged into `main`, tag the merge commit and push the tag:
+
+   ```sh
+   git tag v<version>
+   git push upstream v<version>
+   ```
+
+The `Release` workflow (`.github/workflows/release.yml`) refuses a tag that doesn't
+match the workspace version. It builds `kulyrax` for Linux x86_64, macOS (Apple Silicon
+and Intel) and Windows x86_64, and publishes a GitHub release with those archives,
+their SHA-256 files, and the notes file.
+
 ## Reporting issues
 
 Include: what you ran, what you expected, what happened, and your `kulyrax --version` /
