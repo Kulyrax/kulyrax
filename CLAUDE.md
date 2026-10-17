@@ -23,7 +23,7 @@ kulyrax/
 ├── RELEASES/                       — per-version release notes
 ├── examples/                       — runnable examples (excluded from the workspace)
 └── crates/
-    ├── cli/                        — kulyrax-cli: thin CLI (main.rs only): run, sources, ingest, explain, dry-run, replay
+    ├── cli/                        — kulyrax-cli: thin CLI (main.rs only): init, run, sources, ingest, explain, dry-run, replay
     ├── ingest/                     — kulyrax-ingest: tonic gRPC server + GrpcSource (keeps tonic out of core)
     ├── client/                     — kulyrax-client: reference Rust producer client
     ├── backends/                   — kulyrax-backends: registers every networked backend, one Cargo feature each

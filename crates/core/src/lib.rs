@@ -6,6 +6,7 @@ pub mod pipeline;
 pub mod replay;
 pub mod routing;
 pub mod runtime;
+pub mod scaffold;
 pub mod source;
 pub mod upcast;
 

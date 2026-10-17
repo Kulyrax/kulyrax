@@ -27,6 +27,18 @@ cargo install --git https://github.com/Kulyrax/kulyrax kulyrax-cli
 That installs one binary, `kulyrax`, with every backend included. No `protoc` install
 is needed; it is vendored.
 
+## Start your own project
+
+```sh
+kulyrax init my-project
+cd my-project
+kulyrax run --config config.yaml --mappings mappings --once
+```
+
+`init` writes a config, a routing file, one mapping and two sample events, all
+commented. It projects into JSON files under `./out` so it runs with no database;
+the config shows how to add SQLite. It refuses to overwrite existing files.
+
 ## Quickstart
 
 ```sh

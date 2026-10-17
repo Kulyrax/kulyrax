@@ -30,6 +30,7 @@ use crate::runtime::{
     dependency_layers_grouped, dependency_layers_parallel, validate_projection_config,
     validate_routing_and_dependencies_for_event_type,
 };
+pub use crate::scaffold::{InitError, init_project};
 use crate::source::directory::DirectorySource;
 use crate::source::runner::{SourceRunOptions, SourceRunReport};
 use crate::source::stdin::StdinSource;

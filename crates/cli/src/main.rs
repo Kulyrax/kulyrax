@@ -33,6 +33,13 @@ enum OutputFormat {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Create a runnable starter project (config, routing, a mapping, sample events)
+    Init {
+        /// Folder to create the project in; created if missing.
+        #[arg(default_value = ".")]
+        dir: PathBuf,
+    },
+
     /// Run a single event (`--event`) or the continuous source loop (config `sources:`).
     Run {
         #[arg(long)]
@@ -162,6 +169,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     let exit_code = match cli.command {
+        Commands::Init { dir } => init_cmd(dir)?,
         Commands::Run {
             config,
             mappings,
@@ -559,6 +567,32 @@ fn explain_cmd(
         }
     }
 
+    Ok(0)
+}
+
+// --------------------------------------------------
+// Init (starter project)
+// --------------------------------------------------
+
+fn init_cmd(dir: PathBuf) -> Result<i32, Box<dyn std::error::Error>> {
+    let written = match pipeline::init_project(&dir) {
+        Ok(written) => written,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return Ok(1);
+        }
+    };
+    println!("Created a Kulyrax project in {}:", dir.display());
+    for path in &written {
+        println!("  {}", path.display());
+    }
+    println!();
+    println!("Next:");
+    if dir != std::path::Path::new(".") {
+        println!("  cd {}", dir.display());
+    }
+    println!("  kulyrax run --config config.yaml --mappings mappings --once");
+    println!("  # then look in ./out/users/");
     Ok(0)
 }
 
