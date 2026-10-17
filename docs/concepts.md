@@ -85,7 +85,7 @@ Only `ack_protocol_version >= 1` licenses this guarantee:
 
 A producer that cannot confirm `ack_protocol_version >= 1` must not treat
 `dlq_events == 0` — or any other field of an unverified `Ack` — as proof of
-success. See [`kulyrax-client`](../crates/kulyrax-client/src/lib.rs)'s
+success. See [`kulyrax-client`](../crates/client/src/lib.rs)'s
 `Ack::outcome()` for the reference classification (`Confirmed` /
 `DeadLettered` / `Unverified`).
 

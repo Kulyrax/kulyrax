@@ -17,10 +17,10 @@ for free. This is Kulyrax's public extension point: you do not fork
 
 | Your target looks like… | Implement | Orchestration function | Built-in examples |
 |---|---|---|---|
-| A SQL table | [`SqlTxn`](../crates/kulyrax-core/src/adapter/sql/exec.rs) | `sql::exec::project` | SQLite, Postgres, MySQL |
-| A key-value store (one blob per key) | [`KvBackend`](../crates/kulyrax-core/src/adapter/keyvalue/exec.rs) | `keyvalue::exec::project` | file-backed, Redis |
-| A document store (one document per entity, optional named facets) | [`DocumentBackend`](../crates/kulyrax-core/src/adapter/document/exec.rs) | `document::exec::project` | file-backed, MongoDB |
-| A graph store (nodes + edges) | [`GraphBackend`](../crates/kulyrax-core/src/adapter/graph/exec.rs) | `graph::exec::project_node` / `project_edge` | file-backed, Neo4j |
+| A SQL table | [`SqlTxn`](../crates/core/src/adapter/sql/exec.rs) | `sql::exec::project` | SQLite, Postgres, MySQL |
+| A key-value store (one blob per key) | [`KvBackend`](../crates/core/src/adapter/keyvalue/exec.rs) | `keyvalue::exec::project` | file-backed, Redis |
+| A document store (one document per entity, optional named facets) | [`DocumentBackend`](../crates/core/src/adapter/document/exec.rs) | `document::exec::project` | file-backed, MongoDB |
+| A graph store (nodes + edges) | [`GraphBackend`](../crates/core/src/adapter/graph/exec.rs) | `graph::exec::project_node` / `project_edge` | file-backed, Neo4j |
 
 Each trait is small — five to eight methods — because it only owns what a
 driver genuinely must: opening a transaction/session, running a read or
@@ -68,7 +68,7 @@ update, exactly the bug class idempotency guards exist to prevent.
 Every backend has to answer one question before writing: "what sequence,
 delete, and permanence state did this entity's `(target, entity_key, facet)`
 lane last see?" `kulyrax-core` gives you a canonical answer for that
-question, [`GuardState`](../crates/kulyrax-core/src/adapter/mod.rs):
+question, [`GuardState`](../crates/core/src/adapter/mod.rs):
 
 ```rust
 pub struct GuardState {
@@ -137,8 +137,8 @@ let mut runtime = KulyraxRuntime::load(&config_path, &mappings_dir)?;
 runtime.register_adapter_factory("mydb", factory);
 ```
 
-The [`kulyrax-adapter-postgres`](../crates/adapters/kulyrax-adapter-postgres/src/lib.rs)
-and [`kulyrax-adapter-elasticsearch`](../crates/adapters/kulyrax-adapter-elasticsearch/src/lib.rs)
+The [`kulyrax-adapter-postgres`](../crates/adapters/postgres/src/lib.rs)
+and [`kulyrax-adapter-elasticsearch`](../crates/adapters/elasticsearch/src/lib.rs)
 factories are complete real examples.
 
 Call this **before** the runtime resolves adapters (i.e. before the first
@@ -156,25 +156,27 @@ The registry is owned by the `KulyraxRuntime` you register on, not a
 process-wide global, so two runtimes in one process never see each other's
 registrations.
 
-If `type:` names something nobody registered, that adapter becomes an
-always-fails placeholder rather than crashing config loading — every other
-adapter in the config still builds and runs, and the missing registration
-shows up the first time an event actually routes to it. This is deliberate:
-`build_adapters_from_config` has an infallible signature and the "zero
-panic" rule in `kulyrax-core` means registration typos surface as a normal
-per-event failure, not a startup crash.
+If `type:` names something nobody registered, or your factory returns an
+error (a bad URL, a missing field), `run` / `dry-run` / `replay` / `ingest`
+stop at startup with `PipelineError::AdapterBuild`, naming every adapter that
+failed. They do this by calling `KulyraxRuntime::build_adapters` before the
+first event. An embedder that skips that call gets the lower-level
+behaviour instead: the failed adapter becomes a placeholder that fails every
+event routed to it, while the rest of the config still runs.
 
 There is no dynamic loading here — no `dlopen`, no FFI. This is Rust's
 ordinary compile-time extension model: implement the trait, depend on
 `kulyrax-core`, call `register_adapter_factory` on your runtime.
-`kulyrax-cli` as shipped has no community backends registered; getting one
-into a binary means building a small custom binary that builds its own
-`KulyraxRuntime` — a few lines beyond what `kulyrax-cli`'s own `main.rs`
-already does, consistent with the Thin CLI Pattern.
+`kulyrax-cli` as shipped registers the first-party backends through
+`kulyrax_backends::register_default_backends` and nothing else; getting a
+community backend into a binary means building a small custom binary that
+builds its own `KulyraxRuntime` and registers it — a few lines beyond what
+`kulyrax-cli`'s own `main.rs` already does, consistent with the Thin CLI
+Pattern.
 
 ## Worked example: the MySQL backend
 
-[`kulyrax-adapter-mysql`](../crates/adapters/kulyrax-adapter-mysql/src/lib.rs)
+[`kulyrax-adapter-mysql`](../crates/adapters/mysql/src/lib.rs)
 implements `SqlTxn` for MySQL in its own crate, exactly as an out-of-tree
 backend would:
 
@@ -200,7 +202,7 @@ backend would:
   `tests/mysql_backend.rs`'s `mysql_type_coercion` test for exactly what it
   does and doesn't handle (a temporal column needs MySQL's own
   `YYYY-MM-DD HH:MM:SS` form, not RFC 3339).
-- **Test coverage:** `crates/adapters/kulyrax-adapter-mysql/tests/mysql_backend.rs` runs the
+- **Test coverage:** `crates/adapters/mysql/tests/mysql_backend.rs` runs the
   same scenario suite as `pg_backend.rs` — out-of-order upsert, delete
   lifecycle, disjoint facets, a missing-column rejection, type coercion,
   cross-backend convergence with SQLite, and concurrent writers under the

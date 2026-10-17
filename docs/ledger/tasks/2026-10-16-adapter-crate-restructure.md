@@ -13,10 +13,11 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 ## Acceptance criteria
 
 - [x] `kulyrax-core` depends on no networked driver (`mysql`, `redis`, `mongodb`, `neo4rs`) and no `tokio`.
-- [x] Every networked backend lives in `crates/adapters/kulyrax-adapter-<name>/`, with its tests in that crate.
+- [x] Every networked backend lives in `crates/adapters/<name>/`, with its tests in that crate.
 - [x] `kulyrax-backends` registers all of them behind one Cargo feature each; `default = ["all"]`.
 - [x] Existing configs keep working unchanged (`type: mysql|redis|mongodb|neo4j|postgres|elasticsearch`).
 - [x] Adapter factories receive mappings, upcasters and migration policy through one context value instead of capturing them at registration time.
+- [x] Crate directories drop the `kulyrax-` prefix (`crates/core`, `crates/adapters/postgres`, …); package names, `-p` flags and `use kulyrax_*` paths are unchanged.
 - [ ] The four copy-pasted `loader.rs` files are replaced by one generic loader.
 - [ ] No `// Phase N:` history comments remain in `crates/*/src`; comments that explain an invariant or a reason are kept.
 - [ ] CLAUDE.md, architecture.md and docs/writing-a-backend.md describe the real layout.
@@ -25,8 +26,8 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 ## Constraints and assumptions
 
 - Constraint: Zero Panic Rule and Thin CLI Pattern (CLAUDE.md).
-- Constraint: the main checkout has 14 uncommitted modified files (ingest, client, postgres tests, examples). Work happens on branch `refactor/adapter-crates` in worktree `.claude/worktrees/adapter-restructure`, based on 4d37922, so those files stay untouched. Merging back may conflict in `kulyrax-adapter-postgres/tests/pg_backend.rs` and `kulyrax-ingest/src/lib.rs`.
-- Assumption (owner said "start" without answering): the pre-1.0 API break is accepted, and SQLite plus the file-backed document / KV / graph adapters stay in core. They are the reference backends most of `crates/kulyrax-core/tests/` runs against, and they need no network.
+- Constraint: work happens on branch `refactor/adapter-crates` (PR #1), now checked out in the main checkout; the worktree was removed on 2026-10-17.
+- Assumption (owner said "start" without answering): the pre-1.0 API break is accepted, and SQLite plus the file-backed document / KV / graph adapters stay in core. They are the reference backends most of `crates/core/tests/` runs against, and they need no network.
 - Constraint: the networked backend tests (`*_backend.rs`) return early unless `KULYRAX_<DB>_URL` is set. Without live databases they prove only that the code compiles.
 - Assumption: the unmerged branch `claude/phase-28-mysql-crate` (d8de7bf, still using the old `conduit-*` names) can serve as a reference for the MySQL extraction. It cannot be merged as is.
 
@@ -36,14 +37,16 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 2. Done: guard against the regressions the extraction would cause. Validation classifies first-party custom types (`postgres`, `mysql`, `mongodb`, `elasticsearch`, `redis`, `neo4j`) by storage kind via a name → kind table, so their mapping and capability checks still run; third-party types stay deferred. `KulyraxRuntime::build_adapters()` returns `PipelineError::AdapterBuild` when any custom adapter fails to build; every pipeline command and `kulyrax-ingest` call it at startup. This also restores both checks for Postgres, which lost them when it moved out.
 3. Done: extract MySQL, Redis, MongoDB and Neo4j, one commit each. Remove each enum variant from `AdapterConfig` and move its `*_backend.rs` test.
 4. Done early, so new crates are created in place: move the adapter crates under `crates/adapters/`.
-5. Replace the four `loader.rs` files with one generic `load_mappings<M>`.
-6. Do the comment pass.
-7. Update the docs.
+5. Done (owner request, 2026-10-17): drop the `kulyrax-` prefix from crate directories and fix every path reference in docs, examples, proto comments and the ledger's current-state lines. Also fixed while checking the docs: the `CLAUDE.md` tree and overview, the startup-failure paragraph in `docs/writing-a-backend.md`, and three stale example README lines.
+6. Replace the four `loader.rs` files with one generic `load_mappings<M>`.
+7. Do the comment pass.
+8. Re-check the docs against the final layout.
 
 ## Decisions
 
 - [Networked backends live in their own crates and resolve through the registry](../decisions/2026-10-16-backends-out-of-core.md)
 - Use a parameter object (`AdapterBuildContext`) rather than a DI container: it removes 16 `#[allow(clippy::too_many_arguments)]` and the closure-capture boilerplate in `kulyrax-backends`, and adds no new runtime machinery.
+- Rename crate directories, not packages. A package named `core` would shadow Rust's built-in `core` crate, and `cli` / `client` / `ingest` are not usable names on crates.io. Keeping package names also leaves `-p kulyrax-*` in CI, `use kulyrax_*` in code and `Cargo.lock` untouched. Directory-only naming is common in Rust workspaces.
 
 ## Verification
 
@@ -89,6 +92,12 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 | Step 3: Neo4j final gates | registration test (6/6); clippy `-D warnings`; `cargo test --workspace --no-fail-fast`; `cargo fmt --check` | clean; 103 test binaries, 290 passed, 0 failed; exit 0 |
 | Configs unchanged | `kulyrax-backends/tests/registration.rs` parses a YAML entry for each of the six `type:` names and reaches that backend's own factory | 6/6 pass |
 
+| Step 5: rename safety survey | grep for cross-crate relative paths in `crates/`, `-p`/`--package` in `.github/`, path deps in `examples/`; crates.io API for `kulyrax-core` / `kulyrax-cli` | no relative paths across crates; CI selects by package name only; 2 example path deps; both crates 404 (unpublished) |
+| Step 5: no stale paths | grep for `crates/(adapters/)?kulyrax-` and `kulyrax-<crate>/<path>` outside `target/`, `ledger/`, `RELEASES/`; existence check of every `crates/…` path in `*.md` / `*.proto` / `*.toml` / `*.cs` | 0 left; one dangling path found (`pg_backend.rs` still pointed into core) and fixed |
+| Step 5: doc claim on startup failure | read `KulyraxRuntime::build_adapters` (`crates/core/src/runtime/engine.rs:150`) and its call sites in `crates/core/src/pipeline.rs` and `crates/ingest/src/lib.rs` | returns `PipelineError::AdapterBuild` before the first event; `docs/writing-a-backend.md` rewritten to match |
+| Step 5: final gates | `cargo fmt --check`; clippy `-D warnings`; `cargo test --workspace --no-fail-fast`; `git diff Cargo.lock` | clean; clean; 103 test binaries, 290 passed, 0 failed; root lockfile unchanged |
+| Step 5: examples outside the workspace | `cargo check --manifest-path` for `examples/embedded` and `examples/grpc-producer/producer` | both finish. `examples/embedded/Cargo.lock` lost about 3,100 lines: it was stale since core dropped its network drivers, and the regenerated file is kept |
+
 Not run: the `neo4j_backend` integration suite against a real Neo4j (gated on `KULYRAX_NEO4J_URI`).
 
 Not run: the `mongo_backend` integration suite against a real MongoDB (gated on `KULYRAX_MONGO_URL`).
@@ -103,7 +112,7 @@ Not run: the `mysql_backend` integration suite against a real MySQL. Its 7 tests
 - Validation previously gave a false positive for adapters resolved through the registry (commit 49dc976). Each extraction must re-check `validation.rs` for arms specific to a storage kind.
 - If an embedder calls `execute_event*` in `lib.rs`, it uses an empty registry and will lose the networked backends. Those helpers need a registry parameter, or must be documented as core-only. `kulyrax-cli` and `kulyrax-ingest` are not affected: both build through `KulyraxRuntime` plus `register_default_backends` (verified with grep).
 - Resolved 2026-10-16: `docs/writing-a-backend.md` called keeping MySQL in core "a deliberate product decision", which contradicted `kulyrax-backends/Cargo.toml`. The owner chose to move all four backends out.
-- Behaviour change: an unregistered `type:` or a rejected factory entry now stops `run` / `dry-run` / `replay` / `ingest` at startup. Before, the CLI started and failed every event routed to that adapter. `docs/writing-a-backend.md` still describes the old per-event behaviour and must be updated in step 7.
+- Behaviour change: an unregistered `type:` or a rejected factory entry now stops `run` / `dry-run` / `replay` / `ingest` at startup. Before, the CLI started and failed every event routed to that adapter. `docs/writing-a-backend.md` now describes this (step 5).
 - **Merge order (agreed 2026-10-17, done the same day):** this branch was based on `kulyrax-main` at 4d37922, which is 4 commits ahead of `origin/main` (Kulyrax/kulyrax) and has uncommitted Phase 29.1 work (`ack_protocol_version`) in the main checkout. The order is: commit Phase 29.1 on `kulyrax-main`, push it to `origin/main` (Kulyrax/kulyrax), then rebase this branch onto it and open a PR. Expect conflicts in `kulyrax-ingest/src/lib.rs` (the one-line startup build check) and in `pg_backend.rs`, which this branch moved to `crates/adapters/`. Also expect `kulyrax-ingest`'s new Postgres/Elasticsearch dev-dependencies to need checking against the moved crates.
 - CI on `origin/main` (Kulyrax/kulyrax) is red: run 38847664638 failed in `test (postgres)` with `SqlMappingNoSqlTarget` on `examples/postgres`, the false positive fixed in 49dc976, which is not pushed yet. CI only starts helping this branch once that push lands.
 - The commits on this branch were authored as `naman <naman@slt.work>`. The repo identity is now `Panchauly <panchauly@gmail.com>`, so re-author them during the rebase (`--exec "git commit --amend --no-edit --reset-author"`).

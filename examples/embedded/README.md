@@ -19,7 +19,7 @@ projected: users.u1.name = "Ada"
 `execute_event` takes routing rules as an explicit `&HashMap<String, Vec<AdapterId>>`
 argument — no config file, env var, or global state involved. This example builds
 the map in-process; a real host would more likely load it once at startup via
-[`kulyrax_core::routing::load_routing`](../../crates/kulyrax-core/src/routing.rs)
+[`kulyrax_core::routing::load_routing`](../../crates/core/src/routing.rs)
 and reuse it across calls.
 
 ## Next

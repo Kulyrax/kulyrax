@@ -5,5 +5,5 @@ edition = "2024"
 publish = false
 
 [dependencies]
-kulyrax-client = { path = "../../../crates/kulyrax-client" }
+kulyrax-client = { path = "../../../crates/client" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

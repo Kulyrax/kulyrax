@@ -2,27 +2,37 @@
 
 ## System Overview
 
-Kulyrax is a multi-crate Rust workspace (`kulyrax-cli`, `kulyrax-core`) implementing a
-deterministic, **projection-only** engine for CQRS / Event Sourcing architectures. It
-consumes an event log it does not own and projects each event into one or more storage
-models (SQL, Document, Key-Value, Graph). It does not produce, buffer, or store events.
+Kulyrax is a multi-crate Rust workspace implementing a deterministic, **projection-only**
+engine for CQRS / Event Sourcing architectures. It consumes an event log it does not own
+and projects each event into one or more storage models (SQL, Document, Key-Value,
+Graph). It does not produce, buffer, or store events.
 
-Phases 1–18 are complete — see `kulyrax/phases.md`.
+What's built and what's open: `ROADMAP.md`. Release notes: `RELEASES/`.
 
 ## Workspace Structure
+
+Directories drop the `kulyrax-` prefix; package names keep it (`crates/core` is the
+package `kulyrax-core`, so `cargo test -p kulyrax-core` and `use kulyrax_core::…`).
 
 ```
 kulyrax/
 ├── Cargo.toml, Cargo.lock          — workspace root (virtual manifest, resolver = "3")
-├── README.md, architecture.md, phases.md
-├── phases/                         — per-phase specs, design-principles.md, producer-contract.md
-├── proto/kulyrax/v1/ingest.proto   — the gRPC ingestion contract (Phase 20; the cross-language SDK)
-├── RELEASES/v0.5.0-alpha.md, RELEASES/v0.6.0.md
+├── README.md, architecture.md, ROADMAP.md, CONTRIBUTING.md
+├── docs/                           — concepts, mapping-reference, producer-contract, writing-a-backend, ledger/
+├── proto/kulyrax/v1/ingest.proto   — the gRPC ingestion contract (the cross-language SDK)
+├── RELEASES/                       — per-version release notes
+├── examples/                       — runnable examples (excluded from the workspace)
 └── crates/
-    ├── kulyrax-cli/                — thin CLI (main.rs only): run, sources, ingest, explain, dry-run, replay
-    ├── kulyrax-ingest/             — the tonic gRPC server + GrpcSource (keeps tonic out of core)
-    ├── kulyrax-client/             — reference Rust producer client
-    └── kulyrax-core/               — engine
+    ├── cli/                        — kulyrax-cli: thin CLI (main.rs only): run, sources, ingest, explain, dry-run, replay
+    ├── ingest/                     — kulyrax-ingest: tonic gRPC server + GrpcSource (keeps tonic out of core)
+    ├── client/                     — kulyrax-client: reference Rust producer client
+    ├── backends/                   — kulyrax-backends: registers every networked backend, one Cargo feature each
+    ├── adapters/                   — kulyrax-adapter-<name>: one crate per networked backend
+    │   ├── postgres/, mysql/       — SqlTxn
+    │   ├── redis/                  — KvBackend
+    │   ├── mongodb/, elasticsearch/ — DocumentBackend
+    │   └── neo4j/                  — GraphBackend
+    └── core/                       — kulyrax-core: the engine (no network drivers, no tokio)
         ├── src/
         │   ├── lib.rs              — public API & crate exports
         │   ├── event.rs            — Event envelope (event_id, event_type, payload, metadata, version, sequence)
@@ -30,16 +40,16 @@ kulyrax/
         │   ├── dispatch.rs         — synchronous dependency-ordered dispatcher
         │   ├── replay.rs           — catch-up replay (sequence-ordered)
         │   ├── pipeline.rs         — high-level orchestration for front ends
-        │   ├── upcast.rs           — Phase 10 payload upcasters
+        │   ├── upcast.rs           — payload upcasters
         │   ├── adapter/
         │   │   ├── mod.rs          — StorageAdapter trait, AdapterOutcome, SkipReason, decide()
-        │   │   ├── sql/            — SQLite + Postgres backends behind SqlTxn / exec.rs (Phase 19)
-        │   │   ├── document/       — file-backed document adapter
-        │   │   ├── keyvalue/       — file-backed key-value adapter (Phase 14)
-        │   │   └── graph/          — file-backed graph adapter (Phase 16)
+        │   │   ├── sql/            — SqlTxn / exec.rs + the SQLite backend
+        │   │   ├── document/       — DocumentBackend + the file-backed document adapter
+        │   │   ├── keyvalue/       — KvBackend + the file-backed key-value adapter
+        │   │   └── graph/          — GraphBackend + the file-backed graph adapter
         │   ├── execution/          — ExecutionReport / AdapterExecutionReport, virtual time
-        │   ├── source/             — Phase 17: EventSource trait, directory/stdin sources, checkpoint, runner
-        │   └── runtime/            — config.rs, factory.rs, dependency_graph.rs, validation.rs, error.rs
+        │   ├── source/             — EventSource trait, directory/stdin sources, checkpoint, runner
+        │   └── runtime/            — config, factory, registry (AdapterRegistry), dependency_graph, validation, error
         └── tests/                  — integration tests + tests/common/ + tests/fixtures/
 ```
 
@@ -70,7 +80,7 @@ kulyrax/
 - **Thin CLI Pattern** — `kulyrax-cli` is argument parsing (clap) + rendering only; every
   engine call goes through `kulyrax_core::pipeline`.
 - **Test Coverage** — every engine feature is backed by a unit or integration test under
-  `crates/kulyrax-core/tests/` (fixtures in `tests/fixtures/`, shared helpers in `tests/common/`).
+  `crates/core/tests/` (fixtures in `tests/fixtures/`, shared helpers in `tests/common/`).
 - **No behaviour change without a phase** — the four quality gates below must be clean at
   every phase boundary.
 
@@ -87,7 +97,8 @@ cargo run -p kulyrax-cli -- sources --config <c>     # list sources + committed 
 cargo run -p kulyrax-cli -- ingest --config <c> --mappings <m> --listen tcp://0.0.0.0:50051
 ```
 
-The `postgres`/`tokio` build is heavier since Phase 19; `kulyrax-ingest` needs a
+The networked adapter crates (`tokio`, database drivers) make up most of the build;
+`cargo test -p kulyrax-core` alone stays light. `kulyrax-ingest` needs a
 `protoc` (vendored via `protoc-bin-vendored` in `build.rs` — no system install).
 
 There is no `validate` subcommand — validation runs inside `run` / `dry-run` / `replay`.

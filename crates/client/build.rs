@@ -10,7 +10,7 @@ fn main() {
     }
 
     // Use this crate's own copy (`proto/`) — see the note in
-    // `kulyrax-ingest/build.rs` and atop the workspace-root `.proto` file.
+    // `crates/ingest/build.rs` and atop the workspace-root `.proto` file.
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let proto = manifest_dir.join("proto/kulyrax/v1/ingest.proto");
     let include = manifest_dir.join("proto");

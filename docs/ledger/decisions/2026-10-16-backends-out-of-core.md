@@ -25,7 +25,7 @@ Backends are reached through two different mechanisms. SQLite, file, KV, graph, 
 
 ## Decision
 
-Option 1. SQLite and the file-backed adapters stay in core as reference implementations. All networked backends move to `crates/adapters/kulyrax-adapter-<name>/`. Factories receive an `AdapterBuildContext`, so they no longer depend on being registered after mappings load.
+Option 1. SQLite and the file-backed adapters stay in core as reference implementations. All networked backends move to `crates/adapters/<name>/`. Factories receive an `AdapterBuildContext`, so they no longer depend on being registered after mappings load.
 
 ## Trade-offs accepted
 

@@ -6,7 +6,7 @@ syntax = "proto3";
 // get `kulyrax/v2`.
 //
 // This file is the canonical copy — the SDK artifact referenced from the
-// docs. `crates/kulyrax-ingest/proto/` and `crates/kulyrax-client/proto/`
+// docs. `crates/ingest/proto/` and `crates/client/proto/`
 // each carry an identical copy so `cargo publish` packages a self-contained
 // crate (Cargo cannot include files from outside a crate's own directory).
 // Keep all three in sync by hand (Phase 21.1) until a `v2` contract forces a
