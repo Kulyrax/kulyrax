@@ -10,6 +10,13 @@ identity/body fields differ (`table`+`primary_key`+`columns` vs.
 `collection`+`id`+`document` vs. `namespace`+`key`+`value` vs. the graph
 `kind`-tagged node/edge fields).
 
+Mapping files live directly in `mappings/<kind>/` (`sql`, `document`,
+`keyvalue`, `graph`) and must end in `.yaml`. Files with any other extension,
+including `.yml`, and subdirectories are ignored. An event that routing sends
+to an adapter but that has no loaded mapping fails validation at startup with
+`Missing<Kind>Mapping`, so a misnamed file stops the run rather than
+projecting nothing.
+
 ## Shared fields
 
 | field | required | default | meaning |
