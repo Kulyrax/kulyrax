@@ -1,0 +1,31 @@
+[package]
+name = "kulyrax-backends"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Thin wiring crate: registers Kulyrax's optional networked-backend factories (Postgres, Elasticsearch, MySQL, Redis, MongoDB, Neo4j) onto a KulyraxRuntime, one Cargo feature per backend."
+
+[dependencies]
+kulyrax-core = { workspace = true }
+kulyrax-adapter-postgres = { workspace = true, optional = true }
+kulyrax-adapter-elasticsearch = { workspace = true, optional = true }
+kulyrax-adapter-mysql = { workspace = true, optional = true }
+kulyrax-adapter-redis = { workspace = true, optional = true }
+kulyrax-adapter-mongodb = { workspace = true, optional = true }
+kulyrax-adapter-neo4j = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_yaml = "0.9"
+
+[features]
+postgres = ["dep:kulyrax-adapter-postgres"]
+elasticsearch = ["dep:kulyrax-adapter-elasticsearch"]
+mysql = ["dep:kulyrax-adapter-mysql"]
+redis = ["dep:kulyrax-adapter-redis"]
+mongodb = ["dep:kulyrax-adapter-mongodb"]
+neo4j = ["dep:kulyrax-adapter-neo4j"]
+all = ["postgres", "elasticsearch", "mysql", "redis", "mongodb", "neo4j"]
+default = ["all"]

@@ -34,7 +34,7 @@ And two standards specific to this codebase (see `CLAUDE.md` for the full list):
 - **Zero-panic rule.** No `unwrap()` / `expect()` / `panic!()` / `unreachable!()` in
   `kulyrax-core` library code. Return an explicit error type — every existing adapter
   and the `runtime::error` module are the pattern to follow.
-- **Every engine feature is backed by a test** under `crates/kulyrax-core/tests/`
+- **Every engine feature is backed by a test** under `crates/core/tests/`
   (fixtures in `tests/fixtures/`, shared helpers in `tests/common/`). A behavior
   change with no test to show it is not landing.
 

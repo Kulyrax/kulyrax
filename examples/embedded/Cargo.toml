@@ -5,6 +5,6 @@ edition = "2024"
 publish = false
 
 [dependencies]
-kulyrax-core = { path = "../../crates/kulyrax-core" }
+kulyrax-core = { path = "../../crates/core" }
 serde_yaml = "0.9"
 rusqlite = { version = "0.32", features = ["bundled"] }

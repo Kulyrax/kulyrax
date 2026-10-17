@@ -15,10 +15,10 @@ code was written, established by reading the repository (not assumed):
 | Capability | Finding |
 |---|---|
 | Event contract | `EventEnvelope` (`proto/kulyrax/v1/ingest.proto`): `event_type`, `payload` (JSON string), `metadata`, `version`, `sequence` (monotonic **per entity**, gates every write), `position` (per-feed resume token), `event_id` (optional, non-load-bearing). |
-| Event submission | **Existing and real.** Bidirectional gRPC `Ingest.Stream`, demonstrated end-to-end in `examples/grpc-producer/` and tested in `kulyrax-ingest/tests/grpc_integration.rs`. A C# producer is a normal `Grpc.Tools`-generated client against the same `.proto` — no new service was needed. |
+| Event submission | **Existing and real.** Bidirectional gRPC `Ingest.Stream`, demonstrated end-to-end in `examples/grpc-producer/` and tested in `crates/ingest/tests/grpc_integration.rs`. A C# producer is a normal `Grpc.Tools`-generated client against the same `.proto` — no new service was needed. |
 | Idempotency | Sequence-gated per `(target, entity_key, facet)`. A redelivered event with a sequence ≤ the stored one is silently dropped, never double-applied. Entity-keyed, not event-id-keyed (`event_id` is observability only). |
 | PostgreSQL projection | **Existing, real.** `kulyrax-adapter-postgres`, pessimistic locking, real multi-writer safety. |
-| MongoDB projection | **Existing, real.** Built into `kulyrax-core`, session-transaction based. |
+| MongoDB projection | **Existing, real.** `kulyrax-adapter-mongodb`, session-transaction based. |
 | Elasticsearch projection | **Missing entirely** before this example — only named in a doc-comment as a hypothetical. **New work**: `kulyrax-adapter-elasticsearch`, a real `DocumentBackend` implementation (see "New Kulyrax capabilities" below). |
 | Integration gaps | The gRPC `Ack` carried only `position` + an unlabeled `batch_events` count — a batch is acked whether every event in it succeeded or some were dead-lettered after exhausting Kulyrax's own retry budget. There was no way for a producer to tell those two cases apart. **New work**: an additive `Ack.dlq_events` field (see below). |
 

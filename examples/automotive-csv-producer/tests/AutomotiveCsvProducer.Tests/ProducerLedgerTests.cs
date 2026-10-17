@@ -9,7 +9,7 @@ namespace AutomotiveCsvProducer.Tests;
 /// Gated on <c>AUTOMOTIVE_LEDGER_URL</c> (a Postgres connection string). When
 /// unset, every test prints a skip line and returns — mirroring the
 /// skip-if-unset convention the Rust side of this repo uses throughout
-/// (<c>crates/kulyrax-core/tests/*_backend.rs</c>), rather than failing CI
+/// (<c>crates/adapters/*/tests/*_backend.rs</c>), rather than failing CI
 /// over a database it never promised to provide.
 /// </summary>
 public class ProducerLedgerTests : IAsyncLifetime

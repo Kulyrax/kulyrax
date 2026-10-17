@@ -3,7 +3,7 @@
 [`kulyrax/v1/ingest.proto`](kulyrax/v1/ingest.proto) is Kulyrax's technology-agnostic
 producer contract: one bidirectional streaming RPC. A producer in any
 `protoc`/`buf`-supported language streams `EventEnvelope`s in and reads `Ack`s back —
-nothing about the wire format is Rust-specific. [`kulyrax-client`](../crates/kulyrax-client/)
+nothing about the wire format is Rust-specific. [`kulyrax-client`](../crates/client/)
 is the reference implementation; this file is the language-agnostic entry point for
 everyone else.
 
@@ -80,5 +80,5 @@ The two fields worth getting right:
 
 See [`docs/producer-contract.md`](../docs/producer-contract.md) for the complete set
 of ordering and delivery assumptions, and
-[`crates/kulyrax-client/src/lib.rs`](../crates/kulyrax-client/src/lib.rs) for a full,
+[`crates/client/src/lib.rs`](../crates/client/src/lib.rs) for a full,
 real implementation of the same five steps in Rust.

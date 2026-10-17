@@ -4,7 +4,7 @@ The gRPC ingestion deployment mode: run `kulyrax ingest` as a long-lived
 service and stream events into it from any producer over
 `proto/kulyrax/v1/ingest.proto`, instead of feeding it files through a
 directory or stdin source. This example's producer is
-[`kulyrax-client`](../../crates/kulyrax-client/), the reference Rust SDK —
+[`kulyrax-client`](../../crates/client/), the reference Rust SDK —
 the same ~20 lines of glue any `protoc`-generated client reproduces.
 
 ```sh

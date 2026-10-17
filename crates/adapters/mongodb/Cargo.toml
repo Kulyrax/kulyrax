@@ -1,0 +1,24 @@
+[package]
+name = "kulyrax-adapter-mongodb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "MongoDB document backend for Kulyrax — a StorageAdapter/DocumentBackend extension crate."
+keywords = ["cqrs", "event-sourcing", "mongodb"]
+categories = ["database"]
+
+[dependencies]
+kulyrax-core = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# `sync` gives a blocking API to match the synchronous dispatch path.
+# `Client` is internally pooled, so no r2d2 pool is needed.
+mongodb = { version = "3", features = ["sync"] }
+
+[dev-dependencies]
+tempfile = "3"

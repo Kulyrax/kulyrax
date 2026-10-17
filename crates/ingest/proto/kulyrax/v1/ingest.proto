@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+// Kulyrax's technology-agnostic producer contract (Phase 20). A producer in
+// any language runs `protoc` / `buf` over this file to get a client, streams
+// events, and gets back a durable position ack. Versioned: breaking changes
+// get `kulyrax/v2`.
+//
+// This file is the canonical copy — the SDK artifact referenced from the
+// docs. `crates/ingest/proto/` and `crates/client/proto/`
+// each carry an identical copy so `cargo publish` packages a self-contained
+// crate (Cargo cannot include files from outside a crate's own directory).
+// Keep all three in sync by hand (Phase 21.1) until a `v2` contract forces a
+// deliberate divergence.
+package kulyrax.v1;
+
+service Ingest {
+  // Bidirectional: the producer streams events, Kulyrax streams position acks.
+  // One `Stream` call is one logical producer session. Concurrent sessions are
+  // allowed but must own disjoint entity sets (see producer-contract.md).
+  rpc Stream(stream EventEnvelope) returns (stream Ack);
+}
+
+// Maps 1:1 onto a Kulyrax `Event` — decode is the same path as an NDJSON line.
+message EventEnvelope {
+  string event_type = 1;
+  // JSON, exactly as the file sources carry it.
+  string payload = 2;
+  map<string, string> metadata = 3;
+  // Payload schema version (Phase 10). Defaults to 1 when 0.
+  uint32 version = 4;
+  // Monotonic PER ENTITY (not per feed): the identity resolved by the target
+  // mapping's `primary_key`/`id`/`key`, not this stream or connection. Gates
+  // every write — a value that is not strictly greater than that entity's
+  // last-seen sequence is a stale-and-dropped redelivery, never an error. Do
+  // not confuse this with `position` below. See docs/concepts.md and
+  // producer-contract.md §1.
+  uint64 sequence = 5;
+  // Opaque, producer-defined resume token for this FEED (not per entity) — a
+  // Kafka offset map, an outbox row id, an event-store revision. Kulyrax
+  // never interprets it, only durably records and echoes back the highest
+  // one whose batch has committed, in an `Ack`. Two different entities'
+  // events share the same position stream; each still needs its own
+  // `sequence` above. See docs/concepts.md.
+  string position = 6;
+  // Optional. Recorded on the guard row and in the execution report / DLQ
+  // filename. When empty Kulyrax derives one from `position` (or
+  // `event_type + sequence`) — it is not load-bearing for gating.
+  string event_id = 7;
+}
+
+message Ack {
+  // The highest `position` whose batch's guards are now committed. The producer
+  // resumes from here after a disconnect; anything it re-sends is absorbed by
+  // the idempotent sinks.
+  string position = 1;
+  // Events dispatched in the batch this ack covers (created + updated + deleted
+  // + skipped + dlq). Observability only.
+  uint32 batch_events = 2;
+  // How many of `batch_events` were dead-lettered rather than genuinely
+  // projected to every adapter they were routed to. The position still
+  // advances past a DLQ'd event (it will not be redelivered), so this is the
+  // only signal that distinguishes "every event in this batch was actually
+  // projected" from "this batch is done with, but N events didn't make it."
+  // `dlq_events == 0` is the only condition under which every event this ack
+  // covers reached every adapter it was routed to without a hard failure.
+  uint32 dlq_events = 3;
+  // Compatibility signal for `dlq_events` (Phase 29.1). `0` (the default a
+  // pre-Phase-29.1 server sends, since old code never sets this field) means
+  // the producer has NOT established that this server populates `dlq_events`
+  // accurately — treat `dlq_events` as unverified even when it reads 0.
+  // `>= 1` means `dlq_events` is populated per the guarantee documented in
+  // producer-contract.md: a committed batch's `dlq_events` correctly counts
+  // every one of `batch_events` that was dead-lettered rather than genuinely
+  // projected to every adapter it was routed to.
+  uint32 ack_protocol_version = 4;
+}

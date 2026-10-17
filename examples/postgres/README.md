@@ -7,7 +7,7 @@ export DATABASE_URL=postgres://user:pass@localhost:5432/dbname   # or accept the
 bash run.sh
 ```
 
-This mirrors the scenarios in `crates/kulyrax-core/tests/pg_backend.rs`, and the shared
+This mirrors the scenarios in `crates/adapters/postgres/tests/pg_backend.rs`, and the shared
 `exec::project` write path, which behaves identically on SQLite and Postgres by
 construction. CI's `test-postgres` job (`.github/workflows/ci.yml`) runs this against a
 real Postgres service container on every push.
