@@ -1,0 +1,17 @@
+event: VehicleCreated
+collection: vehicles
+version: 1
+id: payload.provider_vehicle_id
+on_existing: replace
+document:
+  provider_vehicle_id: payload.provider_vehicle_id
+  vin: payload.vin
+  make: payload.make
+  model: payload.model
+  year: payload.year
+  price: payload.price
+  mileage: payload.mileage
+  condition: payload.condition
+  location: payload.location
+  listing_status: payload.listing_status
+  sold: payload.sold

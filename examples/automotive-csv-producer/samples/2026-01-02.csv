@@ -1,0 +1,5 @@
+provider_vehicle_id,vin,make,model,year,price,mileage,condition,location,listing_status
+v1001,1HGCM82633A004352,Honda,City,2021,1150000.00,15000,Used,Mumbai,Active
+v1002,2T1BURHE0JC123456,Toyota,Corolla,2022,1550000.00,8500,Used,Pune,Active
+v1003,WVWZZZ1KZ6W123456,Volkswagen,Polo,2020,750000.00,32000,Used,Bengaluru,Active
+v1005,MH4CS1GE0JJ123456,Hyundai,Creta,2023,1850000.00,4000,Used,Hyderabad,Active

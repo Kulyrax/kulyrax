@@ -1,0 +1,109 @@
+name: automotive-csv-producer
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - ./postgres-init:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  mongo:
+    image: mongo:7
+    command: ["--replSet", "rs0"]
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping')\""]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  mongo-init:
+    image: mongo:7
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: "no"
+    entrypoint:
+      - mongosh
+      - --host
+      - mongo
+      - --quiet
+      - --eval
+      - |
+        try {
+          rs.status();
+        } catch (e) {
+          rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "mongo:27017" }] });
+        }
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200 >/dev/null"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  kulyrax-ingest:
+    build:
+      context: ../..
+      dockerfile: examples/automotive-csv-producer/Dockerfile.kulyrax
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      KULYRAX_PG_URL: postgres://postgres:postgres@postgres:5432/kulyrax
+      KULYRAX_MONGO_URL: mongodb://mongo:27017/?replicaSet=rs0
+      KULYRAX_ELASTICSEARCH_URL: http://elasticsearch:9200
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./routing.json:/app/routing.json:ro
+      - ./mappings:/app/mappings:ro
+      - ./data/dlq:/app/dlq
+    ports:
+      - "50051:50051"
+    command:
+      [
+        "ingest",
+        "--config", "/app/config.yaml",
+        "--mappings", "/app/mappings",
+        "--dlq", "/app/dlq",
+        "--listen", "tcp://0.0.0.0:50051",
+      ]
+
+  producer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kulyrax-ingest:
+        condition: service_started
+    environment:
+      Producer__InputDirectory: /data/incoming
+      Producer__ArchiveDirectory: /data/archive
+      Producer__FailedDirectory: /data/failed
+      Producer__KulyraxEndpoint: http://kulyrax-ingest:50051
+      Producer__LedgerConnectionString: "Host=postgres;Port=5432;Database=producer_ledger;Username=postgres;Password=postgres"
+    volumes:
+      - ./data:/data

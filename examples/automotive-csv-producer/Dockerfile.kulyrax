@@ -1,0 +1,25 @@
+# Builds the real `kulyrax` CLI binary (its `ingest` subcommand is what this
+# example runs) from the workspace this file lives in — there is no
+# separate Kulyrax HTTP/Docker service to invent; `kulyrax ingest` already
+# is a long-lived gRPC server process (Phase 20), this just containerizes
+# the existing binary. Build context must be the repo root (see
+# docker-compose.yml's `context: ../..`), since a Cargo workspace build
+# needs the whole workspace, not just this one crate.
+FROM rust:1.88-slim AS build
+WORKDIR /workspace
+
+# protoc for the ingest.proto build (kulyrax-ingest/kulyrax-client's
+# build.rs vendors it via protoc-bin-vendored, so no system install needed
+# here — just the usual C toolchain several transitive deps want).
+RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+
+RUN cargo build --release -p kulyrax-cli
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=build /workspace/target/release/kulyrax /usr/local/bin/kulyrax
+WORKDIR /app
+ENTRYPOINT ["/usr/local/bin/kulyrax"]

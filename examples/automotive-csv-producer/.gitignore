@@ -1,0 +1,7 @@
+# .NET build artifacts
+bin/
+obj/
+
+# Runtime data the producer reads/writes during a local demo run — never
+# checked in; the committed fixtures live in samples/ instead.
+data/
