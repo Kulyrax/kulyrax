@@ -23,6 +23,7 @@ use crate::replay::{ReplayLoadError, ReplayReport, ReplayRunOptions, events_from
 use crate::routing::{AdapterId, load_routing, route_with_rules};
 use crate::runtime::config::{ConfigError, KulyraxConfig, SourceConfig};
 use crate::runtime::engine::KulyraxRuntime;
+use crate::runtime::factory::AdapterBuildFailure;
 use crate::runtime::{
     ValidationReport, adapter_metadata_map, dependency_depth_exceeds_recommended,
     dependency_layers_grouped, dependency_layers_parallel, validate_projection_config,
@@ -49,6 +50,7 @@ pub enum PipelineError {
     EventParse(String),
     Replay(ReplayLoadError),
     Source(SourceError),
+    AdapterBuild(Vec<AdapterBuildFailure>),
 }
 
 impl fmt::Display for PipelineError {
@@ -63,6 +65,13 @@ impl fmt::Display for PipelineError {
             PipelineError::EventParse(msg) => write!(f, "failed to parse event: {}", msg),
             PipelineError::Replay(e) => write!(f, "{}", e),
             PipelineError::Source(e) => write!(f, "{}", e),
+            PipelineError::AdapterBuild(failures) => {
+                write!(f, "{} adapter(s) could not be built:", failures.len())?;
+                for failure in failures {
+                    write!(f, "\n  - {:?}: {}", failure.adapter_id, failure.reason)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -226,6 +235,7 @@ pub fn run(
 ) -> Result<ExecutionReport, PipelineError> {
     let mut runtime =
         KulyraxRuntime::load_with_backends(config_path, mappings_dir, register_backends)?;
+    runtime.build_adapters()?;
     let event = load_event(event_path)?;
     Ok(runtime.run_once(event))
 }
@@ -239,6 +249,7 @@ pub fn dry_run(
 ) -> Result<ExecutionReport, PipelineError> {
     let mut runtime =
         KulyraxRuntime::load_with_backends(config_path, mappings_dir, register_backends)?;
+    runtime.build_adapters()?;
     let event = load_event(event_path)?;
     Ok(runtime.dry_run_once(event))
 }
@@ -354,6 +365,7 @@ pub fn run_source_loop(
 ) -> Result<SourceRunReport, PipelineError> {
     let mut runtime =
         KulyraxRuntime::load_with_backends(config_path, mappings_dir, register_backends)?;
+    runtime.build_adapters()?;
     let sources = build_sources(runtime.config(), config_path)?;
     if sources.is_empty() {
         return Err(PipelineError::Mapping(
@@ -374,6 +386,7 @@ pub fn replay(
 ) -> Result<ReplayReport, PipelineError> {
     let mut runtime =
         KulyraxRuntime::load_with_backends(config_path, mappings_dir, register_backends)?;
+    runtime.build_adapters()?;
     let mut iter = events_from_path(events_path)?;
     Ok(runtime.replay(&mut iter, opts)?)
 }

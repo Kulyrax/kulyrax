@@ -24,7 +24,7 @@ use crate::replay::{ReplayContext, ReplayLoadError, ReplayReport, ReplayRunOptio
 use crate::routing::AdapterId;
 use crate::runtime::config::{ConfigError, CustomAdapterConfig, KulyraxConfig};
 use crate::runtime::dependency_graph::{AdapterExecutionMeta, adapter_metadata_map};
-use crate::runtime::factory::build_adapters_from_config;
+use crate::runtime::factory::build_adapters_reporting_failures;
 use crate::runtime::registry::{AdapterBuildContext, AdapterRegistry, MappingSet};
 use crate::source::runner::{SourceRunOptions, SourceRunReport, run_sources_with_adapters};
 use crate::source::{EventSource, SourceError};
@@ -143,18 +143,31 @@ impl KulyraxRuntime {
         self
     }
 
-    // Returns `()` rather than a borrow so callers can then use
-    // `self.adapters` alongside other fields without a borrow conflict.
-    fn ensure_adapters_built(&mut self) {
+    /// Build the adapters now and fail if any custom adapter could not be
+    /// built, so a bad URL or an unregistered `type:` stops startup instead of
+    /// failing every event routed to it. Optional: the run methods build on
+    /// first use either way.
+    pub fn build_adapters(&mut self) -> Result<(), PipelineError> {
         if self.adapters.is_none() {
-            let adapters = build_adapters_from_config(
+            let (adapters, failures) = build_adapters_reporting_failures(
                 &self.config,
                 self.mappings.take().unwrap_or_default(),
                 Arc::clone(&self.upcasters),
                 &self.registry,
             );
             self.adapters = Some(adapters);
+            if !failures.is_empty() {
+                return Err(PipelineError::AdapterBuild(failures));
+            }
         }
+        Ok(())
+    }
+
+    // Returns `()` rather than a borrow so callers can then use
+    // `self.adapters` alongside other fields without a borrow conflict.
+    // Build failures are already represented by failing placeholder adapters.
+    fn ensure_adapters_built(&mut self) {
+        let _ = self.build_adapters();
     }
 
     pub fn run_once(&mut self, event: Event) -> ExecutionReport {

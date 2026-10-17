@@ -8,7 +8,7 @@ use crate::adapter::graph::mapping::GraphMapping;
 use crate::adapter::keyvalue::mapping::KvMapping;
 use crate::adapter::sql::mapping::SqlMapping;
 use crate::adapter::{OnExisting, Operation};
-use crate::routing::AdapterId;
+use crate::routing::{AdapterId, StorageKind};
 use crate::runtime::config::{AdapterCapability, AdapterConfig, KulyraxConfig};
 use crate::runtime::dependency_graph::{
     AdapterExecutionMeta, DependencyOrderError, adapter_metadata_map, execution_order_for_routed,
@@ -503,53 +503,53 @@ fn build_adapter_by_id<'a>(
     map
 }
 
-/// Any in-tree-typed SQL backend — SQLite or MySQL. All consume `SqlMapping`s
-/// and share the mapping-coverage / capability rules. Phase 28: Postgres
-/// moved to `kulyrax-adapter-postgres` and resolves via `AdapterConfig::Custom`
-/// instead of a typed variant here, so it no longer participates in this
-/// pre-flight kind check — a kind mismatch for it surfaces at dispatch/build
-/// time instead (see the phase's design note on this trade-off).
+/// Storage kind of the first-party backends that ship as their own
+/// `kulyrax-adapter-*` crates. Validation runs before the registry resolves
+/// any custom type, so without this table their mappings and capabilities
+/// would go unchecked.
+fn first_party_backend_kind(type_name: &str) -> Option<StorageKind> {
+    match type_name {
+        "postgres" | "mysql" => Some(StorageKind::Sql),
+        "mongodb" | "elasticsearch" => Some(StorageKind::Document),
+        "redis" => Some(StorageKind::KeyValue),
+        "neo4j" => Some(StorageKind::Graph),
+        _ => None,
+    }
+}
+
+/// `None` for a third-party custom type, whose kind is unknown until its
+/// factory runs; its kind-specific checks are deferred to build time.
+fn storage_kind(a: &AdapterConfig) -> Option<StorageKind> {
+    match a {
+        AdapterConfig::Sqlite(_) | AdapterConfig::MySql(_) => Some(StorageKind::Sql),
+        AdapterConfig::File(_) | AdapterConfig::MongoDb(_) => Some(StorageKind::Document),
+        AdapterConfig::KeyValue(_) | AdapterConfig::Redis(_) => Some(StorageKind::KeyValue),
+        AdapterConfig::Graph(_) | AdapterConfig::Neo4j(_) => Some(StorageKind::Graph),
+        AdapterConfig::Custom(c) => first_party_backend_kind(&c.type_name),
+    }
+}
+
 fn is_sql(a: &AdapterConfig) -> bool {
-    matches!(a, AdapterConfig::Sqlite(_) | AdapterConfig::MySql(_))
+    storage_kind(a) == Some(StorageKind::Sql)
 }
 
-/// Any document backend (Phase 23) — the file-backed store or MongoDB. Both
-/// consume `DocumentMapping`s and share the mapping-coverage / capability
-/// rules, mirroring `is_sql` (SQLite + MySQL) and `is_keyvalue`
-/// (file-backed + Redis).
 fn is_document(a: &AdapterConfig) -> bool {
-    matches!(a, AdapterConfig::File(_) | AdapterConfig::MongoDb(_))
+    storage_kind(a) == Some(StorageKind::Document)
 }
 
-/// Any key-value backend (Phase 22) — the file-backed store or Redis. Both
-/// consume `KvMapping`s and share the mapping-coverage / capability rules.
 fn is_keyvalue(a: &AdapterConfig) -> bool {
-    matches!(a, AdapterConfig::KeyValue(_) | AdapterConfig::Redis(_))
+    storage_kind(a) == Some(StorageKind::KeyValue)
 }
 
-/// Any graph backend (Phase 24) — the file-backed store or Neo4j. Both
-/// consume `GraphMapping`s and share the mapping-coverage / capability
-/// rules, mirroring `is_sql`/`is_keyvalue`/`is_document`.
 fn is_graph(a: &AdapterConfig) -> bool {
-    matches!(a, AdapterConfig::Graph(_) | AdapterConfig::Neo4j(_))
+    storage_kind(a) == Some(StorageKind::Graph)
 }
 
-/// A registry-resolved adapter (Phase 25.2/28: Postgres, and any
-/// third-party or future split-out backend) whose real kind this module
-/// cannot know before the registry actually resolves it — the resolution
-/// only happens later, at `build_adapters_from_config` time. Used only to
-/// stop the four "this mapping's route has at least one adapter of my
-/// kind" checks below from rejecting a route whose only adapter happens to
-/// be a `Custom` one that genuinely is the right kind (Postgres is SQL;
-/// nothing here can tell). The per-route capability check a few lines up
-/// already defers a `Custom` adapter's capability mismatch to dispatch/build
-/// time for the same reason — this extends that same deferral to the
-/// coarser existence check instead of only the capability one, which is
-/// the part Phase 28's `is_sql` doc-comment didn't fully cover (a config
-/// that a registered Postgres factory would resolve correctly should not
-/// fail validation before ever reaching the registry).
-fn is_custom(a: &AdapterConfig) -> bool {
-    matches!(a, AdapterConfig::Custom(_))
+/// A route whose only target is an unknown custom type may well be the right
+/// kind, so the "mapping has a target of its kind" checks give it the benefit
+/// of the doubt.
+fn kind_unknown(a: &AdapterConfig) -> bool {
+    storage_kind(a).is_none()
 }
 
 fn is_scalar_path(p: &str) -> bool {
@@ -1336,7 +1336,7 @@ pub fn validate_projection_config(
             adapters_by_id
                 .get(id.as_str())
                 .copied()
-                .map(|a| is_sql(a) || is_custom(a))
+                .map(|a| is_sql(a) || kind_unknown(a))
                 .unwrap_or(false)
         });
         if !has_sqlite {
@@ -1357,7 +1357,7 @@ pub fn validate_projection_config(
             adapters_by_id
                 .get(id.as_str())
                 .copied()
-                .map(|a| is_document(a) || is_custom(a))
+                .map(|a| is_document(a) || kind_unknown(a))
                 .unwrap_or(false)
         });
         if !has_document_target {
@@ -1378,7 +1378,7 @@ pub fn validate_projection_config(
             adapters_by_id
                 .get(id.as_str())
                 .copied()
-                .map(|a| is_keyvalue(a) || is_custom(a))
+                .map(|a| is_keyvalue(a) || kind_unknown(a))
                 .unwrap_or(false)
         });
         if !has_keyvalue {
@@ -1399,7 +1399,7 @@ pub fn validate_projection_config(
             adapters_by_id
                 .get(id.as_str())
                 .copied()
-                .map(|a| is_graph(a) || is_custom(a))
+                .map(|a| is_graph(a) || kind_unknown(a))
                 .unwrap_or(false)
         });
         if !has_graph {

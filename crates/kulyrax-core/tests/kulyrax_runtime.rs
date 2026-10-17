@@ -17,7 +17,7 @@ use kulyrax_core::execution::{AdapterOutcome, ExecutionStatus};
 use kulyrax_core::routing::StorageKind;
 use kulyrax_core::runtime::KulyraxRuntime;
 use kulyrax_core::runtime::config::{
-    AdapterConfig, CustomAdapterConfig, KulyraxConfig, RoutingConfig,
+    AdapterConfig, ConfigError, CustomAdapterConfig, KulyraxConfig, RoutingConfig,
 };
 
 struct CountingAdapter {
@@ -166,5 +166,56 @@ fn two_runtimes_with_the_same_type_name_do_not_share_factories() {
     assert!(
         msg.contains(type_name),
         "runtime_b must fail with an unregistered-type error, not reuse runtime_a's factory: {msg}"
+    );
+}
+
+fn runtime_with_one_custom_adapter(type_name: &str) -> KulyraxRuntime {
+    KulyraxRuntime::from_parts(
+        config_with_one_custom_adapter(type_name),
+        HashMap::new(),
+        HashMap::new(),
+        HashMap::new(),
+        HashMap::new(),
+        routing_to_sql_primary(),
+    )
+}
+
+#[test]
+fn build_adapters_reports_an_unregistered_type_up_front() {
+    let mut runtime = runtime_with_one_custom_adapter("test-never-registered");
+    let err = runtime.build_adapters().err().map(|e| e.to_string());
+    let msg = err.unwrap_or_default();
+    assert!(msg.contains("\"sql-primary\""), "{msg}");
+    assert!(msg.contains("test-never-registered"), "{msg}");
+}
+
+#[test]
+fn build_adapters_reports_a_factory_rejection_up_front() {
+    let mut runtime = runtime_with_one_custom_adapter("test-rejecting");
+    runtime.register_adapter_factory("test-rejecting", |_entry, _ctx| {
+        Err(ConfigError::FactoryConfigInvalid("`url` is empty".into()))
+    });
+    let msg = runtime
+        .build_adapters()
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default();
+    assert!(msg.contains("`url` is empty"), "{msg}");
+}
+
+#[test]
+fn build_adapters_succeeds_when_every_adapter_builds() {
+    let mut runtime = runtime_with_one_custom_adapter("test-ok");
+    runtime.register_adapter_factory("test-ok", |entry, _ctx| {
+        Ok(Box::new(CountingAdapter {
+            id: entry.id.clone(),
+            priority: entry.priority,
+            calls: Arc::new(AtomicUsize::new(0)),
+        }) as Box<dyn StorageAdapter>)
+    });
+    assert!(runtime.build_adapters().is_ok());
+    assert_eq!(
+        runtime.run_once(user_created_event()).status,
+        ExecutionStatus::Succeeded
     );
 }

@@ -3,8 +3,8 @@
 use kulyrax_core::adapter::document::mapping::DocumentMapping;
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::runtime::config::{
-    AdapterCapability, AdapterConfig, FileAdapterConfig, FileConfig, KulyraxConfig, RoutingConfig,
-    SqliteAdapterConfig, SqliteConfig,
+    AdapterCapability, AdapterConfig, CustomAdapterConfig, FileAdapterConfig, FileConfig,
+    KulyraxConfig, RoutingConfig, SqliteAdapterConfig, SqliteConfig,
 };
 use kulyrax_core::{
     ValidationIssue, ValidationReport, validate_projection_config,
@@ -845,4 +845,57 @@ fn phase15_rejects_facet_identity_that_differs_from_the_entity() {
             .contains("differs from the entity's primary key"),
         "{r}"
     );
+}
+
+fn config_with_custom_adapter(type_name: &str) -> KulyraxConfig {
+    KulyraxConfig {
+        version: 1,
+        routing: RoutingConfig {
+            file: "routing.json".into(),
+        },
+        adapters: vec![AdapterConfig::Custom(CustomAdapterConfig {
+            type_name: type_name.into(),
+            id: "custom".into(),
+            priority: 10,
+            raw: serde_yaml::Value::Null,
+            capabilities: None,
+            depends_on: vec![],
+        })],
+        failure_policy: Default::default(),
+        migration_policy: Default::default(),
+        sources: Vec::new(),
+    }
+}
+
+fn routing_to_custom() -> HashMap<String, Vec<String>> {
+    HashMap::from([("UserCreated".to_string(), vec!["custom".to_string()])])
+}
+
+#[test]
+fn first_party_custom_type_is_validated_as_its_storage_kind() {
+    let config = config_with_custom_adapter("postgres");
+    let r = validate_projection_config(
+        &config,
+        &routing_to_custom(),
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap_err();
+    assert!(r.to_string().contains("no SQL mapping"), "{r}");
+}
+
+#[test]
+fn third_party_custom_type_defers_kind_checks_to_build_time() {
+    let config = config_with_custom_adapter("some-community-store");
+    let result = validate_projection_config(
+        &config,
+        &routing_to_custom(),
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+    );
+    assert!(result.is_ok(), "{:?}", result.err().map(|r| r.to_string()));
 }

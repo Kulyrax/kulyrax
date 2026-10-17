@@ -16,7 +16,9 @@ pub use dependency_graph::{
 };
 pub use engine::KulyraxRuntime;
 pub use error::RuntimeError;
-pub use factory::build_adapters_from_config;
+pub use factory::{
+    AdapterBuildFailure, build_adapters_from_config, build_adapters_reporting_failures,
+};
 pub use registry::{AdapterBuildContext, AdapterFactory, AdapterRegistry, MappingSet};
 pub use validation::{
     ValidationIssue, ValidationReport, validate_projection_config, validate_routing_adapter_ids,

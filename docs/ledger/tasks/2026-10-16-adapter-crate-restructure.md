@@ -33,11 +33,12 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 ## Plan
 
 1. Done: introduce `MappingSet` and `AdapterBuildContext`, change `AdapterFactory` to `Fn(&CustomAdapterConfig, &AdapterBuildContext)`, and add `CustomAdapterConfig::backend_config`. Port Postgres and Elasticsearch to it. The only API removal is `KulyraxRuntime::{sql,document,kv,graph}_mappings()`.
-2. Extract MySQL, then Redis, then MongoDB, then Neo4j, one commit each. Remove each enum variant from `AdapterConfig` and move its `*_backend.rs` test.
-3. Move all adapter crates under `crates/adapters/`.
-4. Replace the four `loader.rs` files with one generic `load_mappings<M>`.
-5. Do the comment pass.
-6. Update the docs.
+2. Done: guard against the regressions the extraction would cause. Validation classifies first-party custom types (`postgres`, `mysql`, `mongodb`, `elasticsearch`, `redis`, `neo4j`) by storage kind via a name → kind table, so their mapping and capability checks still run; third-party types stay deferred. `KulyraxRuntime::build_adapters()` returns `PipelineError::AdapterBuild` when any custom adapter fails to build; every pipeline command and `kulyrax-ingest` call it at startup. This also restores both checks for Postgres, which lost them when it moved out.
+3. Extract MySQL, then Redis, then MongoDB, then Neo4j, one commit each. Remove each enum variant from `AdapterConfig` and move its `*_backend.rs` test.
+4. Move all adapter crates under `crates/adapters/`.
+5. Replace the four `loader.rs` files with one generic `load_mappings<M>`.
+6. Do the comment pass.
+7. Update the docs.
 
 ## Decisions
 
@@ -60,13 +61,19 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 | Step 1: factory context | `cargo fmt --check` | exit 0 |
 | Step 1: `backend_config` | `cargo test -p kulyrax-core --lib registry` | 5 passed, including `backend_config_reads_the_config_block` and `backend_config_errors_name_the_type_and_id` |
 | Step 1: final gates | `cargo clippy … -D warnings`; `cargo test --workspace`; `cargo fmt --check` | clean; 94 test binaries, 263 passed, 0 failed; exit 0 |
+| Step 2: new behaviour | `cargo test -p kulyrax-core --test validation --test kulyrax_runtime` | 5 new tests pass: `first_party_custom_type_is_validated_as_its_storage_kind`, `third_party_custom_type_defers_kind_checks_to_build_time`, and three `build_adapters_*` tests |
+| Step 2: final gates | clippy `-D warnings`; `cargo test --workspace`; `cargo fmt --check` | clean; 94 test binaries, 268 passed, 0 failed; exit 0 |
+| Step 2: example configs still validate | `kulyrax explain --mappings …` on `examples/postgres` and `examples/automotive-csv-producer` (the latter with dummy `KULYRAX_*_URL` values that parse) | both exit 0 |
+| Step 2: startup failure end to end | `DATABASE_URL="not a url" kulyrax dry-run` on `examples/postgres` | exit 1 at startup: `AdapterBuild([… "pg-primary" … \`url\` does not parse: not a url])` |
 
 ## Risks and open questions
 
 - Removing `AdapterConfig::{MySql, Redis, MongoDb, Neo4j}` and changing the `AdapterFactory` signature breaks the public API for embedders. That is acceptable before 1.0 but needs a release note. The owner must accept it.
 - Validation previously gave a false positive for adapters resolved through the registry (commit 49dc976). Each extraction must re-check `validation.rs` for arms specific to a storage kind.
 - If an embedder calls `execute_event*` in `lib.rs`, it uses an empty registry and will lose the networked backends. Those helpers need a registry parameter, or must be documented as core-only. `kulyrax-cli` and `kulyrax-ingest` are not affected: both build through `KulyraxRuntime` plus `register_default_backends` (verified with grep).
-- **Open, owner decision needed before step 2:** `docs/writing-a-backend.md` says "MySQL ships inside `kulyrax-core` itself (a deliberate product decision)". `kulyrax-backends/Cargo.toml` and the unmerged MySQL branch say the opposite. Extracting MySQL, Redis, MongoDB and Neo4j reverses whichever decision is current.
+- Resolved 2026-10-16: `docs/writing-a-backend.md` called keeping MySQL in core "a deliberate product decision", which contradicted `kulyrax-backends/Cargo.toml`. The owner chose to move all four backends out.
+- Behaviour change: an unregistered `type:` or a rejected factory entry now stops `run` / `dry-run` / `replay` / `ingest` at startup. Before, the CLI started and failed every event routed to that adapter. `docs/writing-a-backend.md` still describes the old per-event behaviour and must be updated in step 7.
+- The first-party name → kind table in `validation.rs` must be kept in sync with `kulyrax-backends`. A wrong entry would apply the wrong kind's checks to that type.
 
 ## Outcome
 
