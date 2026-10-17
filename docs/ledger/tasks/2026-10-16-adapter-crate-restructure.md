@@ -18,7 +18,7 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 - [x] Existing configs keep working unchanged (`type: mysql|redis|mongodb|neo4j|postgres|elasticsearch`).
 - [x] Adapter factories receive mappings, upcasters and migration policy through one context value instead of capturing them at registration time.
 - [x] Crate directories drop the `kulyrax-` prefix (`crates/core`, `crates/adapters/postgres`, …); package names, `-p` flags and `use kulyrax_*` paths are unchanged.
-- [ ] Waived by the owner on 2026-10-17: the four copy-pasted `loader.rs` files are replaced by one generic loader. Not done; the four files remain.
+- [ ] Waived by the owner on 2026-10-17: the four copy-pasted `loader.rs` files are replaced by one generic loader. Not done, and no longer planned: see Decisions.
 - [ ] Waived by the owner on 2026-10-17: no `// Phase N:` history comments remain in `crates/*/src`. Not done; 296 lines still match (361 at the survey).
 - [x] CLAUDE.md, architecture.md and docs/writing-a-backend.md describe the real layout.
 - [x] `cargo build`, `test`, `clippy -D warnings` and `fmt --check` all pass for the workspace at every step.
@@ -38,7 +38,7 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 3. Done: extract MySQL, Redis, MongoDB and Neo4j, one commit each. Remove each enum variant from `AdapterConfig` and move its `*_backend.rs` test.
 4. Done early, so new crates are created in place: move the adapter crates under `crates/adapters/`.
 5. Done (owner request, 2026-10-17): drop the `kulyrax-` prefix from crate directories and fix every path reference in docs, examples, proto comments and the ledger's current-state lines. Also fixed while checking the docs: the `CLAUDE.md` tree and overview, the startup-failure paragraph in `docs/writing-a-backend.md`, and three stale example README lines.
-6. Not done (waived): replace the four `loader.rs` files with one generic `load_mappings<M>`.
+6. Dropped: replace the four `loader.rs` files with one generic `load_mappings<M>`.
 7. Not done (waived): the comment pass.
 8. Covered by step 5: the docs were checked against the final layout, which steps 6 and 7 would not have changed.
 
@@ -47,6 +47,7 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 - [Networked backends live in their own crates and resolve through the registry](../decisions/2026-10-16-backends-out-of-core.md)
 - Use a parameter object (`AdapterBuildContext`) rather than a DI container: it removes 16 `#[allow(clippy::too_many_arguments)]` and the closure-capture boilerplate in `kulyrax-backends`, and adds no new runtime machinery.
 - Rename crate directories, not packages. A package named `core` would shadow Rust's built-in `core` crate, and `cli` / `client` / `ingest` are not usable names on crates.io. Keeping package names also leaves `-p kulyrax-*` in CI, `use kulyrax_*` in code and `Cargo.lock` untouched. Directory-only naming is common in Rust workspaces.
+- Keep the four `loader.rs` files; don't build a generic loader yet (owner agreed, 2026-10-17). They total 158 lines, each has one caller in `pipeline.rs`, and no commit has changed loader behaviour since the rebrand. A generic version needs a trait to read each mapping's event name (graph's mapping is an enum), plus four impls and an error label, so it saves about 100 lines at the cost of one more indirection. Revisit when loader behaviour has to change, for example to accept `.yml` (all four silently skip it), to read subfolders, or to return typed errors. At that point one generic loader avoids making the same edit four times.
 
 ## Verification
 
@@ -124,10 +125,10 @@ Not run: the `mysql_backend` integration suite against a real MySQL. Its 7 tests
 
 ## Outcome
 
-Completed on 2026-10-17 and merged as PR #1 (`e02c744`). The owner declared the work complete and waived the generic loader and the comment pass. Every networked backend now lives in `crates/adapters/<name>/` and resolves through the registry. `kulyrax-core` has no network driver and no tokio. Crate directories drop the `kulyrax-` prefix, and adapters that fail to build stop startup.
+Completed on 2026-10-17 and merged as PR #1 (`e02c744`). The owner declared the work complete and waived the comment pass. The generic loader was dropped (see Decisions). Every networked backend now lives in `crates/adapters/<name>/` and resolves through the registry. `kulyrax-core` has no network driver and no tokio. Crate directories drop the `kulyrax-` prefix, and adapters that fail to build stop startup.
 
 Follow-ups, not started:
-- Replace the four `loader.rs` files with one generic loader.
+- Not planned: a generic mapping loader. Revisit with the first change to how mappings load, such as `.yml` support.
 - Remove the 296 `Phase N` history comments that are left.
 - Write the release note for the public API break (removed `AdapterConfig` variants, new `AdapterFactory` signature).
 - Give `execute_event*` a registry parameter, or document them as core-only.
