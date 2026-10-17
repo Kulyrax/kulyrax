@@ -25,7 +25,9 @@ use kulyrax_core::runtime::build_adapters_from_config;
 use kulyrax_core::runtime::config::{
     AdapterConfig, CustomAdapterConfig, FileAdapterConfig, FileConfig, KulyraxConfig, RoutingConfig,
 };
-use kulyrax_core::runtime::{AdapterExecutionMeta, AdapterRegistry, adapter_metadata_map};
+use kulyrax_core::runtime::{
+    AdapterExecutionMeta, AdapterRegistry, MappingSet, adapter_metadata_map,
+};
 
 fn test_routing() -> HashMap<String, Vec<AdapterId>> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -89,21 +91,12 @@ fn registered_adapter_participates_identically_in_dependency_order_and_dispatch(
     let invoked = Arc::new(AtomicBool::new(false));
     let invoked_in_factory = Arc::clone(&invoked);
     let mut registry = AdapterRegistry::new();
-    registry.register(type_name, move |raw| {
+    registry.register(type_name, move |entry, _ctx| {
         invoked_in_factory.store(true, Ordering::SeqCst);
-        // The registry hands the factory the *entire* raw adapter entry
-        // (id/priority/type/config/...), not just a `config:` sub-block —
-        // enough for the factory to build a self-describing adapter.
-        let id = raw
-            .get("id")
-            .and_then(|v| v.as_str())
-            .expect("id present in raw entry")
-            .to_string();
-        let priority = raw
-            .get("priority")
-            .and_then(|v| v.as_u64())
-            .expect("priority present in raw entry") as u32;
-        Ok(Box::new(MockAdapter { id, priority }) as Box<dyn StorageAdapter>)
+        Ok(Box::new(MockAdapter {
+            id: entry.id.clone(),
+            priority: entry.priority,
+        }) as Box<dyn StorageAdapter>)
     });
 
     let tmp = tempfile::tempdir().unwrap();
@@ -149,10 +142,10 @@ fn registered_adapter_participates_identically_in_dependency_order_and_dispatch(
 
     let mut adapters = build_adapters_from_config(
         &config,
-        HashMap::new(),
-        doc_mappings,
-        HashMap::new(),
-        HashMap::new(),
+        MappingSet {
+            document: doc_mappings,
+            ..Default::default()
+        },
         Arc::new(kulyrax_core::UpcasterRegistry::new()),
         &registry,
     );
@@ -208,10 +201,7 @@ fn unregistered_custom_type_becomes_a_failed_placeholder_not_a_panic() {
 
     let mut adapters = build_adapters_from_config(
         &config,
-        HashMap::new(),
-        HashMap::new(),
-        HashMap::new(),
-        HashMap::new(),
+        MappingSet::default(),
         Arc::new(kulyrax_core::UpcasterRegistry::new()),
         &AdapterRegistry::new(),
     );

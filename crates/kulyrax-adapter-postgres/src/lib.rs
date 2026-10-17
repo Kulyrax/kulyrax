@@ -26,12 +26,12 @@ use kulyrax_core::adapter::sql::adapter::SqlError;
 use kulyrax_core::adapter::sql::exec::{
     self, GuardRow, Placeholders, SqlOutcome, SqlPlan, SqlTxn, SqlWrite,
 };
-use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use kulyrax_core::adapter::{AdapterError, AdapterResult, GuardState, SkipReason, StorageAdapter};
 use kulyrax_core::event::Event;
 use kulyrax_core::routing::StorageKind;
-use kulyrax_core::runtime::config::{ConfigError, MigrationPolicy};
+use kulyrax_core::runtime::AdapterBuildContext;
+use kulyrax_core::runtime::config::{ConfigError, CustomAdapterConfig, MigrationPolicy};
 use kulyrax_core::upcast::UpcasterRegistry;
 
 type PgPool = r2d2::Pool<PostgresConnectionManager<NoTls>>;
@@ -581,51 +581,16 @@ impl SqlTxn for PostgresTxn<'_> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Registry factory (Phase 28)
-// ---------------------------------------------------------------------------
-
-/// Build a [`PostgresAdapter`] from a `Custom` adapter entry's raw YAML value
-/// plus the pieces only a [`kulyrax_core::KulyraxRuntime`] can supply
-/// (`sql_mappings`/`upcasters`/`migration_policy` — the registry's own
-/// factory signature only carries `raw`). `kulyrax-backends` adapts this
-/// richer signature into the registry's `Fn(serde_yaml::Value) -> ...` shape
-/// via closure capture; see that crate for the wiring.
+/// Registry factory for `type: postgres`.
 pub fn factory(
-    raw: serde_yaml::Value,
-    sql_mappings: HashMap<String, SqlMapping>,
-    upcasters: Arc<UpcasterRegistry>,
-    migration_policy: MigrationPolicy,
+    entry: &CustomAdapterConfig,
+    ctx: &AdapterBuildContext,
 ) -> Result<Box<dyn StorageAdapter>, ConfigError> {
-    let id = raw
-        .get("id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| ConfigError::FactoryConfigInvalid("postgres adapter missing `id`".into()))?
-        .to_string();
-    let priority = raw
-        .get("priority")
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| {
-            ConfigError::FactoryConfigInvalid("postgres adapter missing `priority`".into())
-        })? as u32;
-    let cfg: PostgresConfig = raw
-        .get("config")
-        .cloned()
-        .ok_or_else(|| {
-            ConfigError::FactoryConfigInvalid(format!("postgres adapter {id:?} missing `config`"))
-        })
-        .and_then(|v| {
-            serde_yaml::from_value(v).map_err(|e| {
-                ConfigError::FactoryConfigInvalid(format!(
-                    "postgres adapter {id:?}: invalid `config`: {e}"
-                ))
-            })
-        })?;
+    let id = entry.id.clone();
+    let cfg: PostgresConfig = entry.backend_config()?;
 
-    // Phase 19.5's pre-flight URL check, relocated here since Postgres no
-    // longer has a typed `AdapterConfig` variant for `validate_projection_config`
-    // to match on — the check still happens, just at build time instead of
-    // config-validate time (see the phase's design note on this trade-off).
+    // Checked here rather than in config validation, which cannot see
+    // registry-resolved types.
     let url = kulyrax_core::runtime::config::expand_env(&cfg.url);
     if url.trim().is_empty() {
         return Err(ConfigError::FactoryConfigInvalid(format!(
@@ -638,15 +603,14 @@ pub fn factory(
         )));
     }
 
-    let builder = SqlRuntimeBuilder::new(sql_mappings);
     Ok(Box::new(PostgresAdapter::new(
         id,
         &url,
         cfg.pool_size.unwrap_or(4),
-        priority,
-        builder,
-        upcasters,
-        migration_policy,
+        entry.priority,
+        SqlRuntimeBuilder::new(ctx.mappings.sql.clone()),
+        Arc::clone(&ctx.upcasters),
+        ctx.migration_policy,
     )))
 }
 
@@ -746,12 +710,20 @@ mod tests {
             "config": { "url": "" },
         }))
         .unwrap();
-        let result = factory(
+        let entry = CustomAdapterConfig {
+            type_name: "postgres".into(),
+            id: "pg1".into(),
+            priority: 10,
             raw,
-            HashMap::new(),
-            Arc::new(UpcasterRegistry::new()),
-            MigrationPolicy::default(),
-        );
+            capabilities: None,
+            depends_on: Vec::new(),
+        };
+        let ctx = AdapterBuildContext {
+            mappings: Default::default(),
+            upcasters: Arc::new(UpcasterRegistry::new()),
+            migration_policy: MigrationPolicy::default(),
+        };
+        let result = factory(&entry, &ctx);
         assert!(matches!(result, Err(ConfigError::FactoryConfigInvalid(_))));
     }
 }

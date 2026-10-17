@@ -65,7 +65,7 @@ pub use runtime::{
 /// instance-scoped [`AdapterRegistry`], and (once built) the resolved
 /// adapters, exposing `run_once`/`dry_run_once`/`replay`/`run_sources` as
 /// methods instead of free functions that each re-thread the same bundle.
-pub use runtime::{AdapterRegistry, KulyraxRuntime};
+pub use runtime::{AdapterBuildContext, AdapterRegistry, KulyraxRuntime, MappingSet};
 
 /// Execution report types (also at [crate root](crate) for convenience).
 pub mod report {
@@ -137,10 +137,12 @@ pub fn execute_event_with_upcasters(
 ) -> ExecutionReport {
     let mut adapters = build_adapters_from_config(
         config,
-        sql_mappings,
-        document_mappings,
-        kv_mappings,
-        graph_mappings,
+        crate::runtime::MappingSet {
+            sql: sql_mappings,
+            document: document_mappings,
+            kv: kv_mappings,
+            graph: graph_mappings,
+        },
         upcasters,
         &runtime::AdapterRegistry::new(),
     );
@@ -181,10 +183,12 @@ pub fn execute_event_with_mode(
         crate::execution::ExecutionMode::DryRun => {
             let mut adapters = build_adapters_from_config(
                 config,
-                sql_mappings,
-                document_mappings,
-                kv_mappings,
-                graph_mappings,
+                crate::runtime::MappingSet {
+                    sql: sql_mappings,
+                    document: document_mappings,
+                    kv: kv_mappings,
+                    graph: graph_mappings,
+                },
                 Arc::new(UpcasterRegistry::new()),
                 &runtime::AdapterRegistry::new(),
             );

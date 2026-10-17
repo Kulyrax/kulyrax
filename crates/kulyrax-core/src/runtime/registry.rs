@@ -1,41 +1,48 @@
-//! Phase 25.2 / 27: the adapter factory registry — the mechanism behind
-//! `AdapterConfig::Custom`. Register a factory for an unrecognized `type:`
-//! string on an owned [`AdapterRegistry`] (typically via
-//! [`crate::runtime::engine::KulyraxRuntime::register_adapter_factory`])
-//! before adapters are built; from that point on `type: mysql` (or any other
-//! name) in the YAML config resolves through here exactly like a built-in
-//! adapter type resolves through a fixed `match` arm.
+//! Adapter factory registry: how a `type:` that core does not build in (e.g.
+//! `postgres`) becomes a [`StorageAdapter`]. Extension is compile-time only —
+//! a backend crate exposes a factory and an embedder registers it on its
+//! runtime. Dynamic loading is a deliberate non-goal.
 //!
-//! **No dynamic loading.** This is Rust's ordinary compile-time extension
-//! model — implement [`crate::adapter::StorageAdapter`] (directly, or via one
-//! of the four public backend seams), depend on `kulyrax-core`, register a
-//! factory on the runtime you build. `dlopen`/FFI plugin loading is a
-//! deliberate non-goal (see the phase doc).
-//!
-//! **Phase 27:** this used to be a process-wide `static Lazy<Mutex<...>>` —
-//! two engines in one process shared (and could stomp) each other's
-//! registrations, and tests could only avoid collisions by convention
-//! (globally-unique type-name strings). It is now a plain owned value with no
-//! `Mutex`/`Send + Sync` requirement of its own — those were only ever needed
-//! because the old registry was a global.
+//! The registry is owned per runtime, never global, so two runtimes in one
+//! process cannot see each other's registrations.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::adapter::StorageAdapter;
-use crate::runtime::config::ConfigError;
+use crate::adapter::document::mapping::DocumentMapping;
+use crate::adapter::graph::mapping::GraphMapping;
+use crate::adapter::keyvalue::mapping::KvMapping;
+use crate::adapter::sql::mapping::SqlMapping;
+use crate::runtime::config::{ConfigError, CustomAdapterConfig, MigrationPolicy};
+use crate::upcast::UpcasterRegistry;
 
-/// A registered adapter factory: the adapter's entire raw YAML list entry in
-/// (`type`, `id`, `priority`, `config`, `capabilities`, `depends_on` — see
-/// [`crate::runtime::config::CustomAdapterConfig`]'s doc comment for why the
-/// whole entry rather than just `config:`), a fully built adapter out.
-pub type AdapterFactory =
-    Arc<dyn Fn(serde_yaml::Value) -> Result<Box<dyn StorageAdapter>, ConfigError> + Send + Sync>;
+/// Every loaded projection mapping, one table per storage kind.
+#[derive(Debug, Clone, Default)]
+pub struct MappingSet {
+    pub sql: HashMap<String, SqlMapping>,
+    pub document: HashMap<String, DocumentMapping>,
+    pub kv: HashMap<String, KvMapping>,
+    pub graph: HashMap<String, GraphMapping>,
+}
 
-/// An instance-owned table of adapter-type factories. Each [`KulyraxRuntime`](
-/// crate::runtime::engine::KulyraxRuntime) owns its own, so two runtimes in
-/// one process (or two tests in one binary) never see each other's
-/// registrations.
+/// What a factory needs beyond its own config entry. Handed over at build
+/// time, so a factory can be registered before or after mappings load.
+pub struct AdapterBuildContext {
+    pub mappings: MappingSet,
+    pub upcasters: Arc<UpcasterRegistry>,
+    pub migration_policy: MigrationPolicy,
+}
+
+pub type AdapterFactory = Arc<
+    dyn Fn(
+            &CustomAdapterConfig,
+            &AdapterBuildContext,
+        ) -> Result<Box<dyn StorageAdapter>, ConfigError>
+        + Send
+        + Sync,
+>;
+
 #[derive(Default, Clone)]
 pub struct AdapterRegistry {
     factories: HashMap<String, AdapterFactory>,
@@ -46,13 +53,14 @@ impl AdapterRegistry {
         Self::default()
     }
 
-    /// Register a factory for adapter `type: <type_name>`. Call this before
-    /// the owning runtime resolves adapters. Registering the same
-    /// `type_name` twice replaces the earlier factory.
+    /// Registering the same `type_name` twice replaces the earlier factory.
     pub fn register(
         &mut self,
         type_name: &str,
-        factory: impl Fn(serde_yaml::Value) -> Result<Box<dyn StorageAdapter>, ConfigError>
+        factory: impl Fn(
+            &CustomAdapterConfig,
+            &AdapterBuildContext,
+        ) -> Result<Box<dyn StorageAdapter>, ConfigError>
         + Send
         + Sync
         + 'static,
@@ -61,23 +69,22 @@ impl AdapterRegistry {
             .insert(type_name.to_string(), Arc::new(factory));
     }
 
-    /// Look up and invoke the factory for `type_name`. `None` means nothing is
-    /// registered under that name; `Some(Err(_))` means the factory itself
-    /// rejected the config.
+    /// `None` means nothing is registered for the entry's type; `Some(Err(_))`
+    /// means the factory rejected the entry.
     pub(crate) fn build(
         &self,
-        type_name: &str,
-        config: serde_yaml::Value,
+        entry: &CustomAdapterConfig,
+        ctx: &AdapterBuildContext,
     ) -> Option<Result<Box<dyn StorageAdapter>, ConfigError>> {
-        let factory = self.factories.get(type_name)?.clone();
-        Some(factory(config))
+        let factory = self.factories.get(&entry.type_name)?;
+        Some(factory(entry, ctx))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapter::{AdapterResult, StorageAdapter};
+    use crate::adapter::AdapterResult;
     use crate::event::Event;
     use crate::routing::StorageKind;
 
@@ -97,38 +104,91 @@ mod tests {
         }
     }
 
-    #[test]
-    fn unregistered_type_resolves_to_none() {
-        let registry = AdapterRegistry::new();
-        assert!(
-            registry
-                .build("definitely-not-registered-xyz", serde_yaml::Value::Null)
-                .is_none()
-        );
+    fn entry(type_name: &str, raw: serde_yaml::Value) -> CustomAdapterConfig {
+        CustomAdapterConfig {
+            type_name: type_name.to_string(),
+            id: "a".to_string(),
+            priority: 0,
+            raw,
+            capabilities: None,
+            depends_on: Vec::new(),
+        }
+    }
+
+    fn ctx() -> AdapterBuildContext {
+        AdapterBuildContext {
+            mappings: MappingSet::default(),
+            upcasters: Arc::new(UpcasterRegistry::new()),
+            migration_policy: MigrationPolicy::default(),
+        }
     }
 
     #[test]
-    fn registered_factory_is_invoked_with_its_config_block() {
+    fn unregistered_type_resolves_to_none() {
+        let registry = AdapterRegistry::new();
+        let e = entry("definitely-not-registered-xyz", serde_yaml::Value::Null);
+        assert!(registry.build(&e, &ctx()).is_none());
+    }
+
+    #[test]
+    fn registered_factory_is_invoked_with_its_entry() {
         let mut registry = AdapterRegistry::new();
-        registry.register("test-noop-registry", |cfg| {
-            assert_eq!(cfg.as_str(), Some("hello"));
+        registry.register("test-noop-registry", |entry, _ctx| {
+            assert_eq!(entry.raw.as_str(), Some("hello"));
             Ok(Box::new(Noop) as Box<dyn StorageAdapter>)
         });
-        let result = registry.build(
+        let e = entry(
             "test-noop-registry",
             serde_yaml::Value::String("hello".into()),
         );
-        assert!(matches!(result, Some(Ok(_))));
+        assert!(matches!(registry.build(&e, &ctx()), Some(Ok(_))));
     }
 
     #[test]
     fn two_registries_do_not_see_each_others_registrations() {
         let mut a = AdapterRegistry::new();
-        a.register("shared-name", |_| {
+        a.register("shared-name", |_, _| {
             Ok(Box::new(Noop) as Box<dyn StorageAdapter>)
         });
         let b = AdapterRegistry::new();
-        assert!(a.build("shared-name", serde_yaml::Value::Null).is_some());
-        assert!(b.build("shared-name", serde_yaml::Value::Null).is_none());
+        let e = entry("shared-name", serde_yaml::Value::Null);
+        assert!(a.build(&e, &ctx()).is_some());
+        assert!(b.build(&e, &ctx()).is_none());
+    }
+
+    #[derive(serde::Deserialize)]
+    struct UrlConfig {
+        url: String,
+    }
+
+    #[test]
+    fn backend_config_reads_the_config_block() {
+        let raw = serde_yaml::from_str("{type: mydb, id: a, priority: 0, config: {url: x}}")
+            .unwrap_or(serde_yaml::Value::Null);
+        let cfg: UrlConfig = entry("mydb", raw).backend_config().unwrap();
+        assert_eq!(cfg.url, "x");
+    }
+
+    #[test]
+    fn backend_config_errors_name_the_type_and_id() {
+        let missing = serde_yaml::from_str("{type: mydb, id: a, priority: 0}")
+            .unwrap_or(serde_yaml::Value::Null);
+        let err = entry("mydb", missing)
+            .backend_config::<UrlConfig>()
+            .err()
+            .map(|e| e.to_string());
+        assert_eq!(err.as_deref(), Some("mydb adapter \"a\" missing `config`"));
+
+        let invalid = serde_yaml::from_str("{type: mydb, id: a, priority: 0, config: {}}")
+            .unwrap_or(serde_yaml::Value::Null);
+        let err = entry("mydb", invalid)
+            .backend_config::<UrlConfig>()
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default();
+        assert!(
+            err.starts_with("mydb adapter \"a\": invalid `config`"),
+            "{err}"
+        );
     }
 }

@@ -17,10 +17,7 @@ pub use dependency_graph::{
 pub use engine::KulyraxRuntime;
 pub use error::RuntimeError;
 pub use factory::build_adapters_from_config;
-/// Phase 27: the adapter-factory registry type, now instance-owned. Construct
-/// one directly for a bare `build_adapters_from_config` call, or use
-/// [`KulyraxRuntime::register_adapter_factory`] on a runtime.
-pub use registry::AdapterRegistry;
+pub use registry::{AdapterBuildContext, AdapterFactory, AdapterRegistry, MappingSet};
 pub use validation::{
     ValidationIssue, ValidationReport, validate_projection_config, validate_routing_adapter_ids,
     validate_routing_and_dependencies_for_event_type, validate_routing_for_event_type,

@@ -94,7 +94,7 @@ fn registered_factory_resolves_through_run_once_and_builds_adapters_once() {
         HashMap::new(),
         routing_to_sql_primary(),
     );
-    runtime.register_adapter_factory(type_name, move |_raw| {
+    runtime.register_adapter_factory(type_name, move |_entry, _ctx| {
         build_calls_in_factory.fetch_add(1, Ordering::SeqCst);
         Ok(Box::new(CountingAdapter {
             id: "sql-primary".to_string(),
@@ -138,7 +138,7 @@ fn two_runtimes_with_the_same_type_name_do_not_share_factories() {
         HashMap::new(),
         routing_to_sql_primary(),
     );
-    runtime_a.register_adapter_factory(type_name, |_raw| {
+    runtime_a.register_adapter_factory(type_name, |_entry, _ctx| {
         Ok(Box::new(CountingAdapter {
             id: "sql-primary".to_string(),
             priority: 10,

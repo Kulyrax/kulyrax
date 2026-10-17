@@ -30,7 +30,6 @@
 //! pattern, or `docs/writing-a-backend.md` for the extension pattern this
 //! crate is itself a worked example of.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -43,7 +42,10 @@ use kulyrax_core::adapter::document::{DocumentBackend, DocumentOutcome, Document
 use kulyrax_core::adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter};
 use kulyrax_core::event::Event;
 use kulyrax_core::routing::StorageKind;
-use kulyrax_core::runtime::config::{ConfigError, MigrationPolicy, expand_env};
+use kulyrax_core::runtime::AdapterBuildContext;
+use kulyrax_core::runtime::config::{
+    ConfigError, CustomAdapterConfig, MigrationPolicy, expand_env,
+};
 use kulyrax_core::upcast::UpcasterRegistry;
 
 /// Bounded retry budget for an optimistic-concurrency conflict (HTTP 409) —
@@ -460,47 +462,13 @@ fn urlencoding(s: &str) -> String {
     out
 }
 
-// ---------------------------------------------------------------------------
-// Registry factory (Phase 25.2 extension pattern)
-// ---------------------------------------------------------------------------
-
-/// Build an [`ElasticsearchAdapter`] from a raw `type: elasticsearch` config
-/// entry — the same shape [`kulyrax_adapter_postgres::factory`] uses, wired
-/// up by `kulyrax-backends`.
+/// Registry factory for `type: elasticsearch`.
 pub fn factory(
-    raw: serde_yaml::Value,
-    document_mappings: HashMap<String, kulyrax_core::adapter::document::mapping::DocumentMapping>,
-    upcasters: Arc<UpcasterRegistry>,
-    migration_policy: MigrationPolicy,
+    entry: &CustomAdapterConfig,
+    ctx: &AdapterBuildContext,
 ) -> Result<Box<dyn StorageAdapter>, ConfigError> {
-    let id = raw
-        .get("id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            ConfigError::FactoryConfigInvalid("elasticsearch adapter missing `id`".into())
-        })?
-        .to_string();
-    let priority = raw
-        .get("priority")
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| {
-            ConfigError::FactoryConfigInvalid("elasticsearch adapter missing `priority`".into())
-        })? as u32;
-    let cfg: ElasticsearchConfig = raw
-        .get("config")
-        .cloned()
-        .ok_or_else(|| {
-            ConfigError::FactoryConfigInvalid(format!(
-                "elasticsearch adapter {id:?} missing `config`"
-            ))
-        })
-        .and_then(|v| {
-            serde_yaml::from_value(v).map_err(|e| {
-                ConfigError::FactoryConfigInvalid(format!(
-                    "elasticsearch adapter {id:?}: invalid `config`: {e}"
-                ))
-            })
-        })?;
+    let id = entry.id.clone();
+    let cfg: ElasticsearchConfig = entry.backend_config()?;
 
     let url = expand_env(&cfg.url);
     if url.trim().is_empty() {
@@ -518,15 +486,14 @@ pub fn factory(
         _ => None,
     };
 
-    let builder = DocumentRuntimeBuilder::new(document_mappings);
     Ok(Box::new(ElasticsearchAdapter::new(
         id,
         &url,
         auth,
         cfg.timeout_ms.unwrap_or(10_000),
-        priority,
-        builder,
-        upcasters,
-        migration_policy,
+        entry.priority,
+        DocumentRuntimeBuilder::new(ctx.mappings.document.clone()),
+        Arc::clone(&ctx.upcasters),
+        ctx.migration_policy,
     )))
 }

@@ -111,21 +111,35 @@ of the four traits above plus its orchestration function), make it available
 under a `type:` name in the YAML config:
 
 ```rust
+use kulyrax_core::adapter::StorageAdapter;
+use kulyrax_core::runtime::AdapterBuildContext;
+use kulyrax_core::runtime::config::{ConfigError, CustomAdapterConfig};
 use kulyrax_core::KulyraxRuntime;
 
+pub fn factory(
+    entry: &CustomAdapterConfig,
+    ctx: &AdapterBuildContext,
+) -> Result<Box<dyn StorageAdapter>, ConfigError> {
+    // `entry.id` / `entry.priority` are already parsed; `backend_config`
+    // deserializes your own `config:` block with a uniform error message.
+    let cfg: MyDbConfig = entry.backend_config()?;
+    Ok(Box::new(MyDbAdapter::new(
+        entry.id.clone(),
+        entry.priority,
+        &cfg,
+        ctx.mappings.document.clone(), // the mapping table for your storage kind
+        ctx.upcasters.clone(),
+        ctx.migration_policy,
+    )))
+}
+
 let mut runtime = KulyraxRuntime::load(&config_path, &mappings_dir)?;
-runtime.register_adapter_factory("mydb", |raw_config: serde_yaml::Value| {
-    // `raw_config` is the *entire* adapter list entry — `type`, `id`,
-    // `priority`, `config`, `capabilities`, `depends_on`, all of it, exactly
-    // as the user wrote it under `adapters:`. Pull out what your adapter
-    // needs (typically at least `id` and `priority`, so your adapter's
-    // `id()`/`priority()` match the config) and build it.
-    let id = raw_config["id"].as_str().unwrap().to_string();
-    let priority = raw_config["priority"].as_u64().unwrap() as u32;
-    // ... parse your own `config:` block, open a connection pool, etc.
-    Ok(Box::new(MyDbAdapter::new(id, priority /* , ... */)) as Box<dyn kulyrax_core::adapter::StorageAdapter>)
-});
+runtime.register_adapter_factory("mydb", factory);
 ```
+
+The [`kulyrax-adapter-postgres`](../crates/kulyrax-adapter-postgres/src/lib.rs)
+and [`kulyrax-adapter-elasticsearch`](../crates/kulyrax-adapter-elasticsearch/src/lib.rs)
+factories are complete real examples.
 
 Call this **before** the runtime resolves adapters (i.e. before the first
 `run_once`/`dry_run_once`/`replay`/`run_sources` call) — typically right after
@@ -138,10 +152,9 @@ same dependency-order and routing treatment, same dispatch. Nothing in
 `dispatch.rs` or `runtime/dependency_graph.rs` distinguishes a registered
 adapter from a built-in one.
 
-**Phase 27:** the registry is owned by the `KulyraxRuntime` you register on,
-not a process-wide global — two runtimes (two engines in one process, or two
-tests in one binary) never see each other's registrations, and there's no
-need for globally-unique type-name conventions to avoid cross-test collision.
+The registry is owned by the `KulyraxRuntime` you register on, not a
+process-wide global, so two runtimes in one process never see each other's
+registrations.
 
 If `type:` names something nobody registered, that adapter becomes an
 always-fails placeholder rather than crashing config loading — every other

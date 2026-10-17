@@ -1,20 +1,15 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::adapter::StorageAdapter;
 use crate::adapter::document::file::FileDocumentAdapter;
-use crate::adapter::document::mapping::DocumentMapping;
 use crate::adapter::document::mongo::MongoDbAdapter;
 use crate::adapter::document::runtime::DocumentRuntimeBuilder;
-use crate::adapter::graph::mapping::GraphMapping;
 use crate::adapter::graph::neo4j::Neo4jAdapter;
 use crate::adapter::graph::runtime::GraphRuntimeBuilder;
 use crate::adapter::graph::store::GraphStore;
-use crate::adapter::keyvalue::mapping::KvMapping;
 use crate::adapter::keyvalue::redis::RedisAdapter;
 use crate::adapter::keyvalue::runtime::KvRuntimeBuilder;
 use crate::adapter::keyvalue::store::FileKvStore;
-use crate::adapter::sql::mapping::SqlMapping;
 use crate::adapter::sql::mysql::MySqlAdapter;
 use crate::adapter::sql::runtime::SqlRuntimeBuilder;
 use crate::adapter::sql::sqlite::SqliteAdapter;
@@ -24,16 +19,11 @@ use crate::routing::StorageKind;
 use crate::upcast::UpcasterRegistry;
 
 use crate::runtime::config::{AdapterConfig, ConfigError, KulyraxConfig};
-use crate::runtime::registry::AdapterRegistry;
+use crate::runtime::registry::{AdapterBuildContext, AdapterRegistry, MappingSet};
 
-/// Phase 25.2: pushed in place of a real adapter when an `AdapterConfig::Custom`'s
-/// `type:` has no factory registered (or the registered factory itself
-/// errored) at build time. Mirrors the existing "store the error, surface it
-/// on first `handle()`" pattern every connectable built-in backend already
-/// uses for a bad URL (`PostgresAdapter`, `RedisAdapter`, `MongoDbAdapter`,
-/// `Neo4jAdapter`, `MySqlAdapter`) — kept here instead of making
-/// `build_adapters_from_config` fallible, preserving both its own infallible
-/// signature and the Zero Panic Rule (CLAUDE.md).
+/// Stands in for a custom adapter whose type is unregistered or whose factory
+/// rejected its entry. Every other adapter still builds, and the error
+/// surfaces on this adapter's first `handle()`, so building stays infallible.
 struct FailedAdapter {
     id: String,
     priority: u32,
@@ -59,89 +49,75 @@ impl StorageAdapter for FailedAdapter {
     }
 }
 
-/// Build all adapters from config. Each SQL adapter gets a **clone** of `sql_mappings`; each file
-/// adapter gets a **clone** of `document_mappings`; each key-value adapter gets a **clone** of
-/// `kv_mappings` — so one event type can route to many targets (e.g. `pgsql_master`,
-/// `pgsql_slave`) with the same projection definitions.
-///
-/// `upcasters` is shared (via `Arc`) across every adapter instance; `config.migration_policy`
-/// governs how each adapter reacts when no upcaster chain exists to its mapping's target version.
-///
-/// **Phase 25.2:** `AdapterConfig::Custom` (an unrecognized `type:`) is
-/// resolved against `registry` here, at build time — not at parse time, so a
-/// factory registered after config parsing but before this call still
-/// resolves. An unregistered type, or a factory that itself returns `Err`,
-/// becomes a [`FailedAdapter`] placeholder rather than making this function
-/// fallible: every other adapter in the config still builds and runs.
-///
-/// **Phase 27:** `registry` is caller-owned (e.g.
-/// [`crate::runtime::engine::KulyraxRuntime`]) rather than a process-wide
-/// global — pass [`AdapterRegistry::new`] for a call site with no custom
-/// adapter types.
-#[allow(clippy::too_many_arguments)]
+/// Build every configured adapter, sorted by priority. Each adapter gets its
+/// own clone of the mapping table for its kind, so one event type can route
+/// to many targets with the same projection definitions. Pass
+/// [`AdapterRegistry::new`] when no custom adapter types are registered.
 pub fn build_adapters_from_config(
     config: &KulyraxConfig,
-    sql_mappings: HashMap<String, SqlMapping>,
-    document_mappings: HashMap<String, DocumentMapping>,
-    kv_mappings: HashMap<String, KvMapping>,
-    graph_mappings: HashMap<String, GraphMapping>,
+    mappings: MappingSet,
     upcasters: Arc<UpcasterRegistry>,
     registry: &AdapterRegistry,
 ) -> Vec<Box<dyn StorageAdapter>> {
+    let ctx = AdapterBuildContext {
+        mappings,
+        upcasters,
+        migration_policy: config.migration_policy,
+    };
     let mut adapters: Vec<Box<dyn StorageAdapter>> = Vec::new();
 
     for adapter in &config.adapters {
         match adapter {
             AdapterConfig::Sqlite(cfg) => {
-                let builder = SqlRuntimeBuilder::new(sql_mappings.clone());
+                let builder = SqlRuntimeBuilder::new(ctx.mappings.sql.clone());
                 adapters.push(Box::new(SqliteAdapter::new(
                     cfg.id.clone(),
                     cfg.config.path.clone(),
                     cfg.priority,
                     builder,
-                    Arc::clone(&upcasters),
+                    Arc::clone(&ctx.upcasters),
                     config.migration_policy,
                 )));
             }
 
             AdapterConfig::File(cfg) => {
-                let builder = DocumentRuntimeBuilder::new(document_mappings.clone());
+                let builder = DocumentRuntimeBuilder::new(ctx.mappings.document.clone());
                 adapters.push(Box::new(FileDocumentAdapter::new(
                     cfg.id.clone(),
                     cfg.config.root.clone().into(),
                     cfg.priority,
                     builder,
-                    Arc::clone(&upcasters),
+                    Arc::clone(&ctx.upcasters),
                     config.migration_policy,
                 )));
             }
 
             AdapterConfig::KeyValue(cfg) => {
-                let builder = KvRuntimeBuilder::new(kv_mappings.clone());
+                let builder = KvRuntimeBuilder::new(ctx.mappings.kv.clone());
                 adapters.push(Box::new(FileKvStore::new(
                     cfg.id.clone(),
                     cfg.config.root.clone().into(),
                     cfg.priority,
                     builder,
-                    Arc::clone(&upcasters),
+                    Arc::clone(&ctx.upcasters),
                     config.migration_policy,
                 )));
             }
 
             AdapterConfig::Graph(cfg) => {
-                let builder = GraphRuntimeBuilder::new(graph_mappings.clone());
+                let builder = GraphRuntimeBuilder::new(ctx.mappings.graph.clone());
                 adapters.push(Box::new(GraphStore::new(
                     cfg.id.clone(),
                     cfg.config.root.clone().into(),
                     cfg.priority,
                     builder,
-                    Arc::clone(&upcasters),
+                    Arc::clone(&ctx.upcasters),
                     config.migration_policy,
                 )));
             }
 
             AdapterConfig::Redis(cfg) => {
-                let builder = KvRuntimeBuilder::new(kv_mappings.clone());
+                let builder = KvRuntimeBuilder::new(ctx.mappings.kv.clone());
                 let url = crate::runtime::config::expand_env(&cfg.config.url);
                 adapters.push(Box::new(RedisAdapter::new(
                     cfg.id.clone(),
@@ -149,13 +125,13 @@ pub fn build_adapters_from_config(
                     cfg.config.pool_size.unwrap_or(4),
                     cfg.priority,
                     builder,
-                    Arc::clone(&upcasters),
+                    Arc::clone(&ctx.upcasters),
                     config.migration_policy,
                 )));
             }
 
             AdapterConfig::MongoDb(cfg) => {
-                let builder = DocumentRuntimeBuilder::new(document_mappings.clone());
+                let builder = DocumentRuntimeBuilder::new(ctx.mappings.document.clone());
                 let url = crate::runtime::config::expand_env(&cfg.config.url);
                 adapters.push(Box::new(MongoDbAdapter::new(
                     cfg.id.clone(),
@@ -164,13 +140,13 @@ pub fn build_adapters_from_config(
                     cfg.config.pool_size.unwrap_or(4),
                     cfg.priority,
                     builder,
-                    Arc::clone(&upcasters),
+                    Arc::clone(&ctx.upcasters),
                     config.migration_policy,
                 )));
             }
 
             AdapterConfig::Neo4j(cfg) => {
-                let builder = GraphRuntimeBuilder::new(graph_mappings.clone());
+                let builder = GraphRuntimeBuilder::new(ctx.mappings.graph.clone());
                 let uri = crate::runtime::config::expand_env(&cfg.config.uri);
                 let password = crate::runtime::config::expand_env(&cfg.config.password);
                 adapters.push(Box::new(Neo4jAdapter::new(
@@ -181,13 +157,13 @@ pub fn build_adapters_from_config(
                     cfg.config.database.clone(),
                     cfg.priority,
                     builder,
-                    Arc::clone(&upcasters),
+                    Arc::clone(&ctx.upcasters),
                     config.migration_policy,
                 )));
             }
 
             AdapterConfig::MySql(cfg) => {
-                let builder = SqlRuntimeBuilder::new(sql_mappings.clone());
+                let builder = SqlRuntimeBuilder::new(ctx.mappings.sql.clone());
                 let url = crate::runtime::config::expand_env(&cfg.config.url);
                 adapters.push(Box::new(MySqlAdapter::new(
                     cfg.id.clone(),
@@ -195,27 +171,26 @@ pub fn build_adapters_from_config(
                     cfg.config.pool_size.unwrap_or(4),
                     cfg.priority,
                     builder,
-                    Arc::clone(&upcasters),
+                    Arc::clone(&ctx.upcasters),
                     config.migration_policy,
                 )));
             }
 
             AdapterConfig::Custom(cfg) => {
-                let adapter: Box<dyn StorageAdapter> =
-                    match registry.build(&cfg.type_name, cfg.raw.clone()) {
-                        Some(Ok(a)) => a,
-                        Some(Err(e)) => Box::new(FailedAdapter {
-                            id: cfg.id.clone(),
-                            priority: cfg.priority,
-                            error: e.to_string(),
-                        }),
-                        None => Box::new(FailedAdapter {
-                            id: cfg.id.clone(),
-                            priority: cfg.priority,
-                            error: ConfigError::UnregisteredAdapterType(cfg.type_name.clone())
-                                .to_string(),
-                        }),
-                    };
+                let adapter: Box<dyn StorageAdapter> = match registry.build(cfg, &ctx) {
+                    Some(Ok(a)) => a,
+                    Some(Err(e)) => Box::new(FailedAdapter {
+                        id: cfg.id.clone(),
+                        priority: cfg.priority,
+                        error: e.to_string(),
+                    }),
+                    None => Box::new(FailedAdapter {
+                        id: cfg.id.clone(),
+                        priority: cfg.priority,
+                        error: ConfigError::UnregisteredAdapterType(cfg.type_name.clone())
+                            .to_string(),
+                    }),
+                };
                 adapters.push(adapter);
             }
         }

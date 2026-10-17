@@ -204,10 +204,12 @@ pub fn run_sources(
 ) -> Result<SourceRunReport, SourceError> {
     let adapters = build_adapters_from_config(
         config,
-        sql_mappings,
-        document_mappings,
-        kv_mappings,
-        graph_mappings,
+        crate::runtime::MappingSet {
+            sql: sql_mappings,
+            document: document_mappings,
+            kv: kv_mappings,
+            graph: graph_mappings,
+        },
         Arc::new(UpcasterRegistry::new()),
         &crate::runtime::AdapterRegistry::new(),
     );

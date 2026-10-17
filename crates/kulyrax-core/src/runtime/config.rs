@@ -194,24 +194,16 @@ pub enum AdapterConfig {
     Neo4j(Neo4jAdapterConfig),
     MySql(MySqlAdapterConfig),
 
-    /// Phase 25.2: an unrecognized `type:` — resolved against the
-    /// [`crate::runtime::registry`] at `build_adapters_from_config` time, not
-    /// at parse time (a factory may be registered after config parsing but
-    /// before building, per the phase doc).
+    /// An unrecognized `type:`, resolved against the
+    /// [`crate::runtime::registry`] when adapters are built, not when config
+    /// is parsed.
     Custom(CustomAdapterConfig),
 }
 
 /// A `type:` this crate doesn't build in, carried opaquely until a registered
-/// factory resolves it. `id`/`priority`/`capabilities`/`depends_on` are
-/// pulled out here too (generically, the same way every built-in variant's
-/// are) so routing/dependency validation works identically before the
-/// adapter is ever built. `raw` is the *entire* adapter list entry — `type`,
-/// `id`, `priority`, `config`, `capabilities`, `depends_on`, all of it — not
-/// just the nested `config:` block: the registry's factory signature (Phase
-/// 25.2's own doc) takes a single `serde_yaml::Value` and nothing else, so
-/// that Value has to be self-sufficient for a factory to build a
-/// self-describing adapter (one whose own `id()`/`priority()` match what's in
-/// the config) from it alone.
+/// factory resolves it. The common fields are parsed up front so routing and
+/// dependency validation work before the adapter is built; `raw` is the whole
+/// list entry.
 #[derive(Debug, Clone)]
 pub struct CustomAdapterConfig {
     pub type_name: String,
@@ -220,6 +212,23 @@ pub struct CustomAdapterConfig {
     pub raw: serde_yaml::Value,
     pub capabilities: Option<AdapterCapabilities>,
     pub depends_on: Vec<AdapterId>,
+}
+
+impl CustomAdapterConfig {
+    /// Deserialize the entry's backend-specific `config:` block.
+    pub fn backend_config<C: serde::de::DeserializeOwned>(&self) -> Result<C, ConfigError> {
+        let (type_name, id) = (&self.type_name, &self.id);
+        let block = self.raw.get("config").cloned().ok_or_else(|| {
+            ConfigError::FactoryConfigInvalid(format!(
+                "{type_name} adapter {id:?} missing `config`"
+            ))
+        })?;
+        serde_yaml::from_value(block).map_err(|e| {
+            ConfigError::FactoryConfigInvalid(format!(
+                "{type_name} adapter {id:?}: invalid `config`: {e}"
+            ))
+        })
+    }
 }
 
 /// Try every built-in `type:` first (via [`KnownAdapterConfig`]'s derived
