@@ -1,6 +1,7 @@
 pub mod document;
 pub mod graph;
 pub mod keyvalue;
+pub(crate) mod loader;
 pub mod sql;
 
 use core::fmt;
