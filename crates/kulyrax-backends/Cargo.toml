@@ -14,6 +14,7 @@ kulyrax-adapter-postgres = { workspace = true, optional = true }
 kulyrax-adapter-elasticsearch = { workspace = true, optional = true }
 kulyrax-adapter-mysql = { workspace = true, optional = true }
 kulyrax-adapter-redis = { workspace = true, optional = true }
+kulyrax-adapter-mongodb = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_yaml = "0.9"
@@ -23,5 +24,6 @@ postgres = ["dep:kulyrax-adapter-postgres"]
 elasticsearch = ["dep:kulyrax-adapter-elasticsearch"]
 mysql = ["dep:kulyrax-adapter-mysql"]
 redis = ["dep:kulyrax-adapter-redis"]
-all = ["postgres", "elasticsearch", "mysql", "redis"]
+mongodb = ["dep:kulyrax-adapter-mongodb"]
+all = ["postgres", "elasticsearch", "mysql", "redis", "mongodb"]
 default = ["all"]

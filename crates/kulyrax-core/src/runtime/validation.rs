@@ -36,11 +36,6 @@ pub enum ValidationIssue {
         event: String,
         reason: String,
     },
-    /// Phase 23.4: a MongoDB adapter's connection config is unusable.
-    InvalidMongoDbConfig {
-        adapter_id: String,
-        reason: String,
-    },
     /// Phase 24.5: a Neo4j adapter's connection config is unusable.
     InvalidNeo4jConfig {
         adapter_id: String,
@@ -182,13 +177,6 @@ impl fmt::Display for ValidationIssue {
             }
             ValidationIssue::InvalidGraphMapping { event, reason } => {
                 write!(f, "invalid graph mapping for event {:?}: {}", event, reason)
-            }
-            ValidationIssue::InvalidMongoDbConfig { adapter_id, reason } => {
-                write!(
-                    f,
-                    "invalid mongodb adapter {:?} config: {}",
-                    adapter_id, reason
-                )
             }
             ValidationIssue::InvalidNeo4jConfig { adapter_id, reason } => {
                 write!(
@@ -498,7 +486,7 @@ fn first_party_backend_kind(type_name: &str) -> Option<StorageKind> {
 fn storage_kind(a: &AdapterConfig) -> Option<StorageKind> {
     match a {
         AdapterConfig::Sqlite(_) => Some(StorageKind::Sql),
-        AdapterConfig::File(_) | AdapterConfig::MongoDb(_) => Some(StorageKind::Document),
+        AdapterConfig::File(_) => Some(StorageKind::Document),
         AdapterConfig::KeyValue(_) => Some(StorageKind::KeyValue),
         AdapterConfig::Graph(_) | AdapterConfig::Neo4j(_) => Some(StorageKind::Graph),
         AdapterConfig::Custom(c) => first_party_backend_kind(&c.type_name),
@@ -781,42 +769,8 @@ pub fn validate_projection_config(
     let adapters_by_id = build_adapter_by_id(config, &mut report);
     let adapter_meta = adapter_metadata_map(config);
 
-    // Phase 28: Postgres's pre-flight URL-parse check used to live here
-    // (Phase 19.5); it moved into `kulyrax_adapter_postgres::factory` since
-    // Postgres no longer has a typed `AdapterConfig` variant to match on here
-    // — see the phase's design note on this trade-off (the check still
-    // happens, just at adapter-build time instead of config-validate time).
-
-    // Phase 23.4: a MongoDB adapter's `url` and `database` must be
-    // non-empty and `url` must parse. `Client::with_uri_str` validates
-    // scheme/host without connecting (no handshake at construction).
-    //
-    // The doc's live replica-set connectivity warning is deliberately not
-    // implemented here — see phase-23's "As built" notes: it would require a
-    // non-fatal warning channel this module has never had (every issue here
-    // is fatal by construction), contradicting this same sub-phase's own
-    // "no new validation mechanism" guarantee.
-    for a in &config.adapters {
-        if let AdapterConfig::MongoDb(cfg) = a {
-            let url = crate::runtime::config::expand_env(&cfg.config.url);
-            if url.trim().is_empty() {
-                report.push(ValidationIssue::InvalidMongoDbConfig {
-                    adapter_id: cfg.id.clone(),
-                    reason: "`url` is empty".into(),
-                });
-            } else if cfg.config.database.trim().is_empty() {
-                report.push(ValidationIssue::InvalidMongoDbConfig {
-                    adapter_id: cfg.id.clone(),
-                    reason: "`database` is empty".into(),
-                });
-            } else if ::mongodb::sync::Client::with_uri_str(&url).is_err() {
-                report.push(ValidationIssue::InvalidMongoDbConfig {
-                    adapter_id: cfg.id.clone(),
-                    reason: format!("`url` does not parse: {url}"),
-                });
-            }
-        }
-    }
+    // Connection settings of registry-resolved backends are checked by each
+    // backend's factory when adapters are built, not here.
 
     // Phase 24.5: a Neo4j adapter's `uri` must be non-empty and parse (via
     // the same `ConfigBuilder` the adapter itself uses, without connecting).

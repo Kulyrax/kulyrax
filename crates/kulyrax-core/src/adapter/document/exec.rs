@@ -95,7 +95,7 @@ impl ProjectionGuard {
 /// backends:
 /// - **File** ([`super::file`]): a single-writer assumption plus
 ///   write-to-temp-then-rename for the guard file.
-/// - **MongoDB** ([`super::mongo`]): a real client-session transaction
+/// - **MongoDB** (`kulyrax-adapter-mongodb`): a real client-session transaction
 ///   wraps the guard write and the target-document write together (they're
 ///   two different documents in two different collections); a concurrent
 ///   writer's commit makes ours fail with a retryable

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use crate::routing::AdapterId;
 
-const KNOWN_ADAPTER_TYPES: &[&str] = &["sqlite", "file", "keyvalue", "graph", "mongodb", "neo4j"];
+const KNOWN_ADAPTER_TYPES: &[&str] = &["sqlite", "file", "keyvalue", "graph", "neo4j"];
 
 // ------------------------------------------------------------
 // Failure Policy (Phase 6.2)
@@ -168,9 +168,6 @@ enum KnownAdapterConfig {
     #[serde(rename = "graph")]
     Graph(GraphAdapterConfig),
 
-    #[serde(rename = "mongodb")]
-    MongoDb(MongoDbAdapterConfig),
-
     #[serde(rename = "neo4j")]
     Neo4j(Neo4jAdapterConfig),
 }
@@ -181,7 +178,6 @@ pub enum AdapterConfig {
     File(FileAdapterConfig),
     KeyValue(KeyValueAdapterConfig),
     Graph(GraphAdapterConfig),
-    MongoDb(MongoDbAdapterConfig),
     Neo4j(Neo4jAdapterConfig),
 
     /// An unrecognized `type:`, resolved against the
@@ -244,7 +240,6 @@ impl<'de> Deserialize<'de> for AdapterConfig {
                 KnownAdapterConfig::File(c) => Ok(AdapterConfig::File(c)),
                 KnownAdapterConfig::KeyValue(c) => Ok(AdapterConfig::KeyValue(c)),
                 KnownAdapterConfig::Graph(c) => Ok(AdapterConfig::Graph(c)),
-                KnownAdapterConfig::MongoDb(c) => Ok(AdapterConfig::MongoDb(c)),
                 KnownAdapterConfig::Neo4j(c) => Ok(AdapterConfig::Neo4j(c)),
             };
         }
@@ -357,31 +352,6 @@ pub struct GraphAdapterConfig {
 #[derive(Debug, Deserialize)]
 pub struct GraphConfig {
     pub root: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct MongoDbAdapterConfig {
-    pub id: String,
-    pub priority: u32,
-    pub config: MongoDbConfig,
-
-    #[serde(default)]
-    pub capabilities: Option<AdapterCapabilities>,
-
-    #[serde(default)]
-    pub depends_on: Vec<AdapterId>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct MongoDbConfig {
-    /// `mongodb://[user:pass@]host[:port][/?options]`. May contain
-    /// `${ENV_VAR}` references (Phase 19.2 pattern, reused as-is).
-    pub url: String,
-    pub database: String,
-    /// `maxPoolSize` connection-string parameter (default 4) — MongoDB's
-    /// `Client` is internally pooled, so this isn't a separate r2d2 pool.
-    #[serde(default)]
-    pub pool_size: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -563,7 +533,6 @@ impl AdapterConfig {
             AdapterConfig::File(cfg) => &cfg.id,
             AdapterConfig::KeyValue(cfg) => &cfg.id,
             AdapterConfig::Graph(cfg) => &cfg.id,
-            AdapterConfig::MongoDb(cfg) => &cfg.id,
             AdapterConfig::Neo4j(cfg) => &cfg.id,
             AdapterConfig::Custom(cfg) => &cfg.id,
         }
@@ -575,7 +544,6 @@ impl AdapterConfig {
             AdapterConfig::File(cfg) => cfg.priority,
             AdapterConfig::KeyValue(cfg) => cfg.priority,
             AdapterConfig::Graph(cfg) => cfg.priority,
-            AdapterConfig::MongoDb(cfg) => cfg.priority,
             AdapterConfig::Neo4j(cfg) => cfg.priority,
             AdapterConfig::Custom(cfg) => cfg.priority,
         }
@@ -588,7 +556,6 @@ impl AdapterConfig {
             AdapterConfig::File(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::KeyValue(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::Graph(cfg) => cfg.capabilities.as_deref(),
-            AdapterConfig::MongoDb(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::Neo4j(cfg) => cfg.capabilities.as_deref(),
             AdapterConfig::Custom(cfg) => cfg.capabilities.as_deref(),
         }
@@ -600,7 +567,6 @@ impl AdapterConfig {
             AdapterConfig::File(cfg) => &cfg.depends_on,
             AdapterConfig::KeyValue(cfg) => &cfg.depends_on,
             AdapterConfig::Graph(cfg) => &cfg.depends_on,
-            AdapterConfig::MongoDb(cfg) => &cfg.depends_on,
             AdapterConfig::Neo4j(cfg) => &cfg.depends_on,
             AdapterConfig::Custom(cfg) => &cfg.depends_on,
         }

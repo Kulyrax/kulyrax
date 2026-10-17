@@ -120,8 +120,8 @@ jobs:
             [ "$state" = "1" ] && break
             sleep 1
           done
-      - name: cargo test -p kulyrax-core --test mongo_backend
-        run: cargo test -p kulyrax-core --test mongo_backend
+      - name: cargo test -p kulyrax-adapter-mongodb --test mongo_backend
+        run: cargo test -p kulyrax-adapter-mongodb --test mongo_backend
         env:
           KULYRAX_MONGO_URL: mongodb://localhost:27017/?directConnection=true
           KULYRAX_MONGO_DB: kulyrax_ci

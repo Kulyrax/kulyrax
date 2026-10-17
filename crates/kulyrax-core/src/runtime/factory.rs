@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use crate::adapter::StorageAdapter;
 use crate::adapter::document::file::FileDocumentAdapter;
-use crate::adapter::document::mongo::MongoDbAdapter;
 use crate::adapter::document::runtime::DocumentRuntimeBuilder;
 use crate::adapter::graph::neo4j::Neo4jAdapter;
 use crate::adapter::graph::runtime::GraphRuntimeBuilder;
@@ -130,21 +129,6 @@ pub fn build_adapters_reporting_failures(
                 adapters.push(Box::new(GraphStore::new(
                     cfg.id.clone(),
                     cfg.config.root.clone().into(),
-                    cfg.priority,
-                    builder,
-                    Arc::clone(&ctx.upcasters),
-                    config.migration_policy,
-                )));
-            }
-
-            AdapterConfig::MongoDb(cfg) => {
-                let builder = DocumentRuntimeBuilder::new(ctx.mappings.document.clone());
-                let url = crate::runtime::config::expand_env(&cfg.config.url);
-                adapters.push(Box::new(MongoDbAdapter::new(
-                    cfg.id.clone(),
-                    &url,
-                    cfg.config.database.clone(),
-                    cfg.config.pool_size.unwrap_or(4),
                     cfg.priority,
                     builder,
                     Arc::clone(&ctx.upcasters),

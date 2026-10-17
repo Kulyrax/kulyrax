@@ -34,7 +34,7 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 
 1. Done: introduce `MappingSet` and `AdapterBuildContext`, change `AdapterFactory` to `Fn(&CustomAdapterConfig, &AdapterBuildContext)`, and add `CustomAdapterConfig::backend_config`. Port Postgres and Elasticsearch to it. The only API removal is `KulyraxRuntime::{sql,document,kv,graph}_mappings()`.
 2. Done: guard against the regressions the extraction would cause. Validation classifies first-party custom types (`postgres`, `mysql`, `mongodb`, `elasticsearch`, `redis`, `neo4j`) by storage kind via a name → kind table, so their mapping and capability checks still run; third-party types stay deferred. `KulyraxRuntime::build_adapters()` returns `PipelineError::AdapterBuild` when any custom adapter fails to build; every pipeline command and `kulyrax-ingest` call it at startup. This also restores both checks for Postgres, which lost them when it moved out.
-3. Extract MySQL (done), then Redis (done), then MongoDB, then Neo4j, one commit each. Remove each enum variant from `AdapterConfig` and move its `*_backend.rs` test.
+3. Extract MySQL (done), then Redis (done), then MongoDB (done), then Neo4j, one commit each. Remove each enum variant from `AdapterConfig` and move its `*_backend.rs` test.
 4. Done early, so new crates are created in place: move the adapter crates under `crates/adapters/`.
 5. Replace the four `loader.rs` files with one generic `load_mappings<M>`.
 6. Do the comment pass.
@@ -78,6 +78,12 @@ Out of scope: behaviour changes to `decide()`, guard lanes, dispatch order, or t
 | Rebase onto `origin/main` f325f83 (Phase 29.1 pushed) | `git rebase --onto origin/main 4d37922 --exec "… --reset-author"` | one add/add conflict in this record: `main` held its original `proposed` draft, and all 7 lines unique to it had been revised on this branch, so the branch's copy was kept. The `pg_backend.rs` stale-row fix followed the move, and `ack_protocol_version` merged next to the startup check. All 6 commits are now authored by Panchauly |
 | Rebased branch gates | clippy `-D warnings`; `cargo test --workspace`; `cargo fmt --check` | clean; 99 test binaries, 280 passed, 0 failed; exit 0 |
 | CI on `origin/main` after the push | `gh run view 39023441834` | `test (postgres)` passed this time (it failed in run 38847664638), along with 8 other jobs; `test (windows-latest)` was still running when recorded |
+
+| Step 3: MongoDB out of core | `cargo tree -p kulyrax-core -e normal --depth 1` | no `mongodb`; still `neo4rs`, `tokio` |
+| Step 3: MongoDB factory | `cargo test -p kulyrax-adapter-mongodb --lib` | 4 passed (empty URL, empty database, unparseable URL, valid URL builds without a server) |
+| Step 3: MongoDB final gates | `cargo test -p kulyrax-backends --test registration`; clippy `-D warnings`; `cargo test --workspace`; `cargo fmt --check` | 5/5 registration tests; clean; 101 test binaries, 285 passed, 0 failed; exit 0 |
+
+Not run: the `mongo_backend` integration suite against a real MongoDB (gated on `KULYRAX_MONGO_URL`).
 
 Not run: the `redis_backend` integration suite against a real Redis. It is gated on `KULYRAX_REDIS_URL` the same way.
 

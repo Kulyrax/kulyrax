@@ -1,35 +1,81 @@
-//! Phase 23.2–23.3: the MongoDB document backend.
+//! MongoDB document backend over core's `DocumentBackend` seam. Registers as
+//! `type: mongodb` via [`factory`].
 //!
-//! Same `DocumentMapping` / `decide()` / guard model as the file-backed
-//! store — this file supplies only what a driver genuinely owns: a `Client`
-//! (already internally pooled — no r2d2 needed, unlike Postgres/Redis), the
-//! `{database}.{collection}` target and a dedicated `conduit_projection_state`
-//! guard collection, and a client-session transaction wrapping the guard
-//! write and the target-document write together (they're two different
-//! documents in two different collections, so a single atomic Mongo
-//! operation can't cover both).
+//! Documents go to `{database}.{collection}`; guards go to a separate
+//! `conduit_projection_state` collection. The guard and the target document
+//! live in different collections, so no single atomic Mongo operation covers
+//! both: each write runs in a client-session transaction.
 
 use std::sync::{Arc, Mutex};
 
 use mongodb::bson::{Document, doc, from_document, to_document};
 use mongodb::sync::{Client, ClientSession, Database};
+use serde::Deserialize;
 use serde_json::Value;
 
-use super::adapter::DocumentError;
-use super::exec::{self, DocumentBackend, DocumentOutcome, DocumentPlan, ProjectionGuard};
-use super::runtime::DocumentRuntimeBuilder;
-use crate::adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter};
-use crate::event::Event;
-use crate::routing::StorageKind;
-use crate::runtime::config::MigrationPolicy;
-use crate::upcast::UpcasterRegistry;
+use kulyrax_core::adapter::document::adapter::DocumentError;
+use kulyrax_core::adapter::document::exec::{
+    self, DocumentBackend, DocumentOutcome, DocumentPlan, ProjectionGuard,
+};
+use kulyrax_core::adapter::document::runtime::DocumentRuntimeBuilder;
+use kulyrax_core::adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter};
+use kulyrax_core::event::Event;
+use kulyrax_core::routing::StorageKind;
+use kulyrax_core::runtime::AdapterBuildContext;
+use kulyrax_core::runtime::config::{
+    ConfigError, CustomAdapterConfig, MigrationPolicy, expand_env,
+};
+use kulyrax_core::upcast::UpcasterRegistry;
+
+/// The `config:` block of a `type: mongodb` adapter entry.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MongoDbConfig {
+    /// `mongodb://[user:pass@]host[:port][/?options]`; `${ENV_VAR}` references
+    /// are expanded.
+    pub url: String,
+    pub database: String,
+    /// Becomes the `maxPoolSize` connection-string option (default 4).
+    #[serde(default)]
+    pub pool_size: Option<u32>,
+}
+
+/// Registry factory for `type: mongodb`.
+pub fn factory(
+    entry: &CustomAdapterConfig,
+    ctx: &AdapterBuildContext,
+) -> Result<Box<dyn StorageAdapter>, ConfigError> {
+    let id = entry.id.clone();
+    let cfg: MongoDbConfig = entry.backend_config()?;
+    let url = expand_env(&cfg.url);
+    let invalid = |reason: String| {
+        ConfigError::FactoryConfigInvalid(format!("mongodb adapter {id:?}: {reason}"))
+    };
+    if url.trim().is_empty() {
+        return Err(invalid("`url` is empty".into()));
+    }
+    if cfg.database.trim().is_empty() {
+        return Err(invalid("`database` is empty".into()));
+    }
+    if Client::with_uri_str(&url).is_err() {
+        return Err(invalid(format!("`url` does not parse: {url}")));
+    }
+    Ok(Box::new(MongoDbAdapter::new(
+        id.clone(),
+        &url,
+        cfg.database,
+        cfg.pool_size.unwrap_or(4),
+        entry.priority,
+        DocumentRuntimeBuilder::new(ctx.mappings.document.clone()),
+        Arc::clone(&ctx.upcasters),
+        ctx.migration_policy,
+    )))
+}
 
 /// Dedicated collection for guard documents — kept separate from the user's
 /// projected documents, same principle as the SQL guard table.
 const GUARD_COLLECTION: &str = "conduit_projection_state";
 
-/// Bounded retry budget for a transaction aborted by a concurrent writer
-/// (Phase 23.3) — the same shape as Phase 22.3's Redis retry loop.
+/// Retry budget for a transaction aborted by a concurrent writer.
 const MAX_ATTEMPTS: u32 = 5;
 
 /// Any Mongo error from inside the transaction (a read, a write, or the
@@ -56,15 +102,12 @@ fn is_retryable(e: &mongodb::error::Error) -> bool {
         || e.contains_label("UnknownTransactionCommitResult")
 }
 
-/// MongoDB document adapter (Phase 23). Like Postgres (Phase 19), genuinely
-/// ACID: two concurrent writers to the same entity serialize through
-/// MongoDB's own transaction conflict detection, not an optimistic
-/// WATCH/MULTI/EXEC race (Redis, Phase 22).
+/// Two concurrent writers to the same entity serialize through MongoDB's own
+/// transaction conflict detection.
 pub struct MongoDbAdapter {
     id: String,
     priority: u32,
-    /// `Err` (a stored message) when the URL didn't parse — every `handle()`
-    /// then fails cleanly rather than the factory being fallible.
+    /// `Err` when the URL did not parse; every `handle()` then fails cleanly.
     client: Result<Client, String>,
     database: String,
     builder: DocumentRuntimeBuilder,
@@ -76,12 +119,8 @@ pub struct MongoDbAdapter {
 }
 
 impl MongoDbAdapter {
-    /// Build the client from a connection URL
-    /// (`mongodb://[user:pass@]host[:port]/[?options]`). Infallible — a bad
-    /// URL is stored and surfaced per-event, keeping `build_adapters_from_config`
-    /// free of a `Result`. `Client` connects lazily (no handshake at
-    /// construction), matching Postgres/Redis's "errors surface on the first
-    /// real write" pattern.
+    /// `Client` connects lazily, so an unreachable server surfaces on the
+    /// first write rather than here.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
@@ -209,11 +248,9 @@ impl StorageAdapter for MongoDbAdapter {
             return self.failure(AdapterError::WriteFailed(e.to_string()));
         }
 
-        // Phase 23.3: a client-session transaction wraps the read-decide-write
-        // cycle; a concurrent writer's commit causes ours to abort with a
-        // retryable error label. Retry the whole transaction, bounded, then
-        // surface a batch failure like any other transient error (retried by
-        // the run loop — Phase 17.5).
+        // A concurrent writer's commit aborts ours with a retryable error
+        // label. Retry the whole transaction; once the budget is spent, the
+        // run loop retries the batch like any transient error.
         let mut attempts = 0;
         let result = loop {
             attempts += 1;
@@ -365,8 +402,8 @@ impl DocumentBackend for MongoBackend<'_> {
                     .run()
                     .map_err(mongo_err)?;
             } else {
-                // Phase 23.3: a targeted server-side `$set` on the facet's own
-                // top-level fields — no read-merge-write round trip needed.
+                // A server-side `$set` on the facet's own top-level fields
+                // avoids a read-merge-write round trip.
                 let facet_obj = document.as_object().ok_or_else(|| {
                     DocumentError::BuildFailed("facet mapping must resolve to a JSON object".into())
                 })?;
@@ -418,5 +455,63 @@ impl DocumentBackend for MongoBackend<'_> {
             .run()
             .map_err(mongo_err)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build(url: &str, database: &str) -> Result<Box<dyn StorageAdapter>, ConfigError> {
+        let raw = serde_yaml::to_value(serde_json::json!({
+            "type": "mongodb",
+            "id": "m1",
+            "priority": 10,
+            "config": { "url": url, "database": database },
+        }))
+        .map_err(|e| ConfigError::FactoryConfigInvalid(e.to_string()))?;
+        let entry = CustomAdapterConfig {
+            type_name: "mongodb".into(),
+            id: "m1".into(),
+            priority: 10,
+            raw,
+            capabilities: None,
+            depends_on: Vec::new(),
+        };
+        let ctx = AdapterBuildContext {
+            mappings: Default::default(),
+            upcasters: Arc::new(UpcasterRegistry::new()),
+            migration_policy: MigrationPolicy::default(),
+        };
+        factory(&entry, &ctx)
+    }
+
+    fn error_of(url: &str, database: &str) -> String {
+        build(url, database)
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn factory_rejects_an_empty_url() {
+        assert!(error_of("", "db").contains("`url` is empty"));
+    }
+
+    #[test]
+    fn factory_rejects_an_empty_database() {
+        assert!(error_of("mongodb://127.0.0.1:1", " ").contains("`database` is empty"));
+    }
+
+    #[test]
+    fn factory_rejects_an_unparseable_url() {
+        let err = error_of("not a url", "db");
+        assert!(err.contains("`url` does not parse"), "{err}");
+    }
+
+    #[test]
+    fn factory_builds_without_a_server_because_the_client_connects_lazily() {
+        let adapter = build("mongodb://127.0.0.1:1", "db");
+        assert_eq!(adapter.map(|a| a.kind()).ok(), Some(StorageKind::Document));
     }
 }

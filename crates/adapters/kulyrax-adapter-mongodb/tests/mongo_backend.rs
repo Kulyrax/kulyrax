@@ -1,4 +1,4 @@
-//! Phase 23.5: MongoDB backend integration scenarios.
+//! MongoDB backend integration scenarios.
 //!
 //! **Gated on `KULYRAX_MONGO_URL`** (`mongodb://[user:pass@]host[:port]`,
 //! optionally `KULYRAX_MONGO_DB` for the database name, default
@@ -14,11 +14,11 @@
 //! guard and fresh-collection helper, rather than the five files the phase
 //! doc sketches.
 
+use kulyrax_adapter_mongodb::MongoDbAdapter;
 use kulyrax_core::adapter::AdapterOutcome;
 use kulyrax_core::adapter::StorageAdapter;
 use kulyrax_core::adapter::document::file::FileDocumentAdapter;
 use kulyrax_core::adapter::document::mapping::DocumentMapping;
-use kulyrax_core::adapter::document::mongo::MongoDbAdapter;
 use kulyrax_core::adapter::document::runtime::DocumentRuntimeBuilder;
 use kulyrax_core::event::Event;
 use kulyrax_core::runtime::config::MigrationPolicy;

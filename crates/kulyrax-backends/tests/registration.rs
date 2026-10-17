@@ -58,3 +58,8 @@ fn mysql_resolves_through_its_factory() {
 fn redis_resolves_through_its_factory() {
     assert_factory_ran("redis", "{url: 'not a url'}");
 }
+
+#[test]
+fn mongodb_resolves_through_its_factory() {
+    assert_factory_ran("mongodb", "{url: 'not a url', database: db}");
+}

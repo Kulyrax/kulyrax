@@ -20,4 +20,7 @@ pub fn register_default_backends(runtime: &mut KulyraxRuntime) {
 
     #[cfg(feature = "redis")]
     runtime.register_adapter_factory("redis", kulyrax_adapter_redis::factory);
+
+    #[cfg(feature = "mongodb")]
+    runtime.register_adapter_factory("mongodb", kulyrax_adapter_mongodb::factory);
 }
