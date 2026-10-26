@@ -22,6 +22,7 @@ live_n=$(( rate * seconds ))
 rm -rf work
 gen_events work/rebuild-events "$n" 1000 u
 mkdir -p work/events
+trap 'stop_store postgres' EXIT
 fresh_store postgres
 dc exec -T postgres psql -q -U postgres -d bench -c "CREATE DATABASE rebuild"
 dc exec -T postgres psql -q -U postgres -d rebuild -c \
@@ -51,10 +52,9 @@ live_found=$(count_projected postgres | tr -d '[:space:]')
 [ "$rebuilt" = "$n" ] || { echo "rebuild: expected $n, found $rebuilt" >&2; exit 1; }
 [ "$live_found" = "$(( live_n + per_file ))" ] || { echo "live: expected $(( live_n + per_file )), found $live_found" >&2; exit 1; }
 
-mkdir -p results
 {
   awk -v n="$n" -v s="$start" -v e="$end" 'BEGIN {
     printf "postgres rebuild: %d events in %.2f s = %.0f events/s (%d rows verified)\n", n, e - s, n / (e - s), n
   }'
   echo "live lag during rebuild at $rate events/s for ${seconds} s (live run inside the rebuild: $overlapped): $live"
-} | tee results/postgres-rebuild.txt
+} | record postgres-rebuild

@@ -60,6 +60,22 @@ fresh_store() {
   esac
 }
 
+# Stop and remove a networked backend's container, so only one ever runs.
+stop_store() {
+  case "$1" in
+    sqlite | file-*) ;;
+    *) dc rm -fsv "$1" >/dev/null 2>&1 || true ;;
+  esac
+}
+
+# Write stdin to results/<name>.txt and flush it to disk, so a crash loses
+# at most the run in progress.
+record() {
+  mkdir -p results
+  tee "results/$1.txt"
+  sync
+}
+
 # How many entities the store holds: the number every run checks.
 count_projected() {
   case "$1" in

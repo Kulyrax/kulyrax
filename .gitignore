@@ -21,6 +21,7 @@ examples/*/app.db
 # Benchmark scratch data and results
 examples/benchmark/work/
 examples/benchmark/results/
+examples/benchmark/suite.log
 
 # Local Claude Code state
 .claude/

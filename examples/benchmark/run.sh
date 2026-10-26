@@ -28,6 +28,7 @@ bin=$(kulyrax_bin)
 
 rm -rf work
 gen_events work/events "$n" "$per_file" u
+trap 'stop_store "$backend"' EXIT
 fresh_store "$backend"
 
 start=$(date +%s.%N)
@@ -40,9 +41,10 @@ if [ "$found" != "$n" ]; then
   exit 1
 fi
 
-mkdir -p results
-awk -v n="$n" -v per="$per_file" -v s="$start" -v e="$end" -v b="$backend" 'BEGIN {
+{
+  awk -v n="$n" -v per="$per_file" -v s="$start" -v e="$end" -v b="$backend" 'BEGIN {
   t = e - s
   printf "%s: %d events (%d per file) in %.2f s = %.0f events/s (%d entities verified)\n", b, n, per, t, n / t, n
-}' | tee "results/$backend.txt"
-sed -n '/^Time per stage/,/^---/p' work/run.log | sed '$d' | tee -a "results/$backend.txt"
+}'
+  sed -n '/^Time per stage/,/^---/p' work/run.log | sed '$d'
+} | record "$backend"

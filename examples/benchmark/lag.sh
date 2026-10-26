@@ -25,6 +25,7 @@ n=$(( rate * seconds ))
 cargo build --quiet --release --manifest-path benchtool/Cargo.toml
 rm -rf work
 mkdir -p work/events
+trap 'stop_store "$backend"' EXIT
 fresh_store "$backend"
 
 result=$(benchtool/target/release/benchmark-benchtool lag \
@@ -40,6 +41,5 @@ if [ "$found" != "$expected" ]; then
   exit 1
 fi
 
-mkdir -p results
 echo "$backend lag at $rate events/s for ${seconds} s (poll ${poll_ms} ms, $per_file events/file, $expected entities verified): $result" \
-  | tee "results/$backend-lag.txt"
+  | record "$backend-lag"
