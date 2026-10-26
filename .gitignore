@@ -18,10 +18,9 @@ Thumbs.db
 examples/*/.kulyrax/
 examples/*/app.db
 
-# Benchmark scratch data
-examples/benchmark/events/
-examples/benchmark/bench.db
-examples/benchmark/run.log
+# Benchmark scratch data and results
+examples/benchmark/work/
+examples/benchmark/results/
 
 # Local Claude Code state
 .claude/

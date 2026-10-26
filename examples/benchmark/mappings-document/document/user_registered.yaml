@@ -1,0 +1,11 @@
+# File-backed document store, MongoDB and Elasticsearch.
+event: UserRegistered
+collection: users
+id: payload.id
+version: 1
+document:
+  id: payload.id
+  name: payload.name
+  email: payload.email
+  bio: payload.bio
+  followers: payload.followers

@@ -7,9 +7,9 @@ adapters:
     priority: 10
     capabilities: [write, upsert]
     config:
-      path: ./bench.db
+      path: ./work/bench.db
 sources:
   - type: directory
     id: bench
-    path: ./events
-    state_dir: ./.kulyrax/state
+    path: ./work/events
+    state_dir: ./work/state

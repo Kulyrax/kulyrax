@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use kulyrax_core::adapter::SkipReason;
+use kulyrax_core::execution::stages::StageTimings;
 use kulyrax_core::execution::{
     AdapterOutcome, AdapterReportError, ExecutionReport, ExecutionStatus,
 };
@@ -423,6 +424,7 @@ fn render_source_run_report(
             if let Some(ref p) = report.halt_position {
                 println!("Halt position: {}", p);
             }
+            render_stage_timings(&report.timings);
             println!("------------------");
         }
         OutputFormat::Json => {
@@ -430,6 +432,39 @@ fn render_source_run_report(
         }
     }
     Ok(())
+}
+
+fn render_stage_timings(t: &StageTimings) {
+    println!("Time per stage (stages nest: dispatch > adapter > schema/read/write/commit):");
+    for (name, s) in [
+        ("source read", t.source_read),
+        ("dispatch", t.dispatch),
+        ("adapter", t.adapter),
+        ("schema", t.schema),
+        ("read", t.read),
+        ("write", t.write),
+        ("commit", t.commit),
+        ("checkpoint", t.checkpoint),
+    ] {
+        if s.calls == 0 {
+            continue;
+        }
+        println!(
+            "  {name:<12} {:>10} calls  {:>12.1} ms  {:>10.1} µs/call",
+            s.calls,
+            s.total_us as f64 / 1000.0,
+            s.total_us as f64 / s.calls as f64
+        );
+    }
+    if t.adapter.calls > 0 {
+        let inner = t.schema.total_us + t.read.total_us + t.write.total_us + t.commit.total_us;
+        let other = t.adapter.total_us.saturating_sub(inner);
+        println!(
+            "  adapter time outside schema/read/write/commit (mapping, connection, begin): {:.1} ms, {:.1} µs/call",
+            other as f64 / 1000.0,
+            other as f64 / t.adapter.calls as f64
+        );
+    }
 }
 
 // --------------------------------------------------

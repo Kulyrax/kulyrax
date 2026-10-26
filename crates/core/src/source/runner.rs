@@ -20,6 +20,7 @@ use crate::adapter::graph::mapping::GraphMapping;
 use crate::adapter::keyvalue::mapping::KvMapping;
 use crate::adapter::sql::mapping::SqlMapping;
 use crate::dispatch::dispatch;
+use crate::execution::stages::{self, Stage, StageTimings, timed};
 use crate::execution::{AdapterOutcome, ExecutionReport, ExecutionStatus};
 use crate::routing::AdapterId;
 use crate::runtime::build_adapters_from_config;
@@ -102,6 +103,8 @@ pub struct SourceRunReport {
     /// batch that could not be committed, for operator intervention.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub halt_position: Option<String>,
+    /// Wall-clock time per stage of the loop, summed over the whole run.
+    pub timings: StageTimings,
 }
 
 /// One pass of dispatching a sorted batch.
@@ -253,6 +256,30 @@ pub trait Reloader {
 /// not replaced: their positions carry over.
 pub fn run_sources_with_reload(
     config: &KulyraxConfig,
+    routing_rules: HashMap<String, Vec<AdapterId>>,
+    adapters: Vec<Box<dyn StorageAdapter>>,
+    sources: Vec<Box<dyn EventSource>>,
+    opts: &SourceRunOptions,
+    stop: &AtomicBool,
+    reloader: Option<&mut dyn Reloader>,
+) -> Result<SourceRunReport, SourceError> {
+    // Drop anything an earlier run on this thread left behind.
+    stages::take();
+    let mut report = run_loop(
+        config,
+        routing_rules,
+        adapters,
+        sources,
+        opts,
+        stop,
+        reloader,
+    )?;
+    report.timings = stages::take();
+    Ok(report)
+}
+
+fn run_loop(
+    config: &KulyraxConfig,
     mut routing_rules: HashMap<String, Vec<AdapterId>>,
     mut adapters: Vec<Box<dyn StorageAdapter>>,
     mut sources: Vec<Box<dyn EventSource>>,
@@ -272,6 +299,7 @@ pub fn run_sources_with_reload(
         batches_committed: 0,
         stopped_reason: StoppedReason::CaughtUp,
         halt_position: None,
+        timings: StageTimings::default(),
     };
     let mut reports_buf: Vec<ExecutionReport> = Vec::new();
 
@@ -291,7 +319,7 @@ pub fn run_sources_with_reload(
         let mut progressed = false;
 
         for source in sources.iter_mut() {
-            let batch = source.poll(opts.max_batch)?;
+            let batch = timed(Stage::SourceRead, || source.poll(opts.max_batch))?;
             if batch.is_empty() {
                 continue;
             }
@@ -311,15 +339,17 @@ pub fn run_sources_with_reload(
 
             let mut retries = 0u32;
             let (o, committed, dlq_count) = loop {
-                let o = dispatch_batch(
-                    &sorted,
-                    &mut adapters,
-                    failure_policy,
-                    &routing_rules,
-                    &adapter_meta,
-                    &source_id,
-                    &mut reports_buf,
-                );
+                let o = timed(Stage::Dispatch, || {
+                    dispatch_batch(
+                        &sorted,
+                        &mut adapters,
+                        failure_policy,
+                        &routing_rules,
+                        &adapter_meta,
+                        &source_id,
+                        &mut reports_buf,
+                    )
+                });
                 if o.hard_failures.is_empty() {
                     break (o, true, 0);
                 }
@@ -359,7 +389,9 @@ pub fn run_sources_with_reload(
             });
 
             if committed {
-                source.commit_with_dlq_count(position_to.clone(), dlq_count as u32)?;
+                timed(Stage::Checkpoint, || {
+                    source.commit_with_dlq_count(position_to.clone(), dlq_count as u32)
+                })?;
                 report.batches_committed += 1;
             } else {
                 report.stopped_reason = StoppedReason::RetryExhausted;

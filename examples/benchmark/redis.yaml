@@ -1,0 +1,14 @@
+version: 1
+routing:
+  file: routing.yaml
+adapters:
+  - type: redis
+    id: store
+    priority: 10
+    config:
+      url: redis://localhost:16379
+sources:
+  - type: directory
+    id: bench
+    path: ./work/events
+    state_dir: ./work/state

@@ -1,0 +1,11 @@
+# File-backed graph store and Neo4j.
+kind: node
+event: UserRegistered
+label: User
+key: payload.id
+version: 1
+properties:
+  name: payload.name
+  email: payload.email
+  bio: payload.bio
+  followers: payload.followers

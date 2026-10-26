@@ -20,6 +20,7 @@ use kulyrax_core::adapter::document::exec::{
 use kulyrax_core::adapter::document::runtime::DocumentRuntimeBuilder;
 use kulyrax_core::adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter};
 use kulyrax_core::event::Event;
+use kulyrax_core::execution::stages::{Stage, timed};
 use kulyrax_core::routing::StorageKind;
 use kulyrax_core::runtime::AdapterBuildContext;
 use kulyrax_core::runtime::config::{
@@ -272,7 +273,7 @@ impl StorageAdapter for MongoDbAdapter {
             };
 
             let attempt_result = match outcome {
-                Ok(o) => match session.commit_transaction().run() {
+                Ok(o) => match timed(Stage::Commit, || session.commit_transaction().run()) {
                     Ok(()) => Ok(o),
                     Err(e) => Err(mongo_err(e)),
                 },

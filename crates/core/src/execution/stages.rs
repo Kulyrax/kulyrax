@@ -1,0 +1,119 @@
+//! Wall-clock time spent in each stage of the source run loop, for finding
+//! where projection time goes (`examples/benchmark`).
+//!
+//! The accumulator is thread-local rather than threaded through the call
+//! chain: the stages it times sit behind `StorageAdapter::handle(&self,
+//! &Event)` and the backend traits, which have no room for a timing argument.
+//! Dispatch is synchronous and every backend call runs on the run-loop thread,
+//! so one thread sees one run's stages. A run loop on another thread, such as
+//! a parallel test, keeps its own totals.
+
+use std::cell::RefCell;
+use std::time::{Duration, Instant};
+
+use serde::Serialize;
+
+/// One timed stage. A call can count towards more than one: `Dispatch`
+/// contains `Adapter`, which contains `Read`, `Write`, `Commit` and `Schema`.
+#[derive(Debug, Clone, Copy)]
+pub enum Stage {
+    /// `EventSource::poll`: reading the source and parsing its events.
+    SourceRead,
+    /// Dispatching a whole batch to every routed adapter.
+    Dispatch,
+    /// One `StorageAdapter::handle` call.
+    Adapter,
+    /// SQL only: `ensure_guard_table`, run at the start of every SQL write.
+    Schema,
+    /// Reads that feed `decide()` (guard lanes), plus the existing value a
+    /// named key-value facet merges into.
+    Read,
+    /// The target write and the guard write (for document, key-value and
+    /// graph backends these are one call).
+    Write,
+    /// The transaction commit: SQL, plus the MongoDB and Neo4j adapters, which
+    /// time their own. The other backends commit inside `Write`.
+    Commit,
+    /// `EventSource::commit`: advancing the source checkpoint.
+    Checkpoint,
+}
+
+/// Call count and total time for one stage.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct StageTotal {
+    pub calls: u64,
+    pub total_us: u64,
+}
+
+impl StageTotal {
+    fn add(&mut self, elapsed: Duration) {
+        self.calls += 1;
+        self.total_us += elapsed.as_micros() as u64;
+    }
+}
+
+/// Totals for every [`Stage`] over one run.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct StageTimings {
+    pub source_read: StageTotal,
+    pub dispatch: StageTotal,
+    pub adapter: StageTotal,
+    pub schema: StageTotal,
+    pub read: StageTotal,
+    pub write: StageTotal,
+    pub commit: StageTotal,
+    pub checkpoint: StageTotal,
+}
+
+impl StageTimings {
+    fn slot(&mut self, stage: Stage) -> &mut StageTotal {
+        match stage {
+            Stage::SourceRead => &mut self.source_read,
+            Stage::Dispatch => &mut self.dispatch,
+            Stage::Adapter => &mut self.adapter,
+            Stage::Schema => &mut self.schema,
+            Stage::Read => &mut self.read,
+            Stage::Write => &mut self.write,
+            Stage::Commit => &mut self.commit,
+            Stage::Checkpoint => &mut self.checkpoint,
+        }
+    }
+}
+
+thread_local! {
+    static TIMINGS: RefCell<StageTimings> = RefCell::new(StageTimings::default());
+}
+
+/// Run `f`, adding its wall-clock time to `stage` on this thread.
+pub fn timed<T>(stage: Stage, f: impl FnOnce() -> T) -> T {
+    let start = Instant::now();
+    let out = f();
+    let elapsed = start.elapsed();
+    TIMINGS.with(|t| t.borrow_mut().slot(stage).add(elapsed));
+    out
+}
+
+/// Return this thread's totals and reset them to zero.
+pub fn take() -> StageTimings {
+    TIMINGS.with(|t| std::mem::take(&mut *t.borrow_mut()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timed_counts_calls_and_take_resets() {
+        take();
+        let v = timed(Stage::Read, || 7);
+        timed(Stage::Read, || ());
+        timed(Stage::Commit, || ());
+        assert_eq!(v, 7);
+
+        let t = take();
+        assert_eq!(t.read.calls, 2);
+        assert_eq!(t.commit.calls, 1);
+        assert_eq!(t.write.calls, 0);
+        assert_eq!(take(), StageTimings::default());
+    }
+}

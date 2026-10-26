@@ -11,6 +11,7 @@ use serde_json::Value;
 use super::adapter::SqlError;
 use crate::adapter::{GuardState, OnExisting, Operation, WriteDecision, decide};
 use crate::event::Event;
+use crate::execution::stages::{Stage, timed};
 
 // ---------------------------------------------------------------------------
 // Neutral write description (Phase 19.1) — `SqlMapping::build` stops emitting a
@@ -234,21 +235,25 @@ pub fn project<T: SqlTxn>(
 
     let is_named_facet = !plan.facet.is_empty();
 
-    txn.ensure_guard_table()?;
+    timed(Stage::Schema, || txn.ensure_guard_table())?;
 
     // Phase 15.3: a named facet can only touch a row the default facet created
     // and has not tombstoned.
     if is_named_facet {
-        let default_state = txn.read_guard_lane(&plan.table, &plan.entity_key, "", true)?;
+        let default_state = timed(Stage::Read, || {
+            txn.read_guard_lane(&plan.table, &plan.entity_key, "", true)
+        })?;
         let present = matches!(default_state, Some(s) if !s.deleted);
         if !present {
-            txn.commit()?;
+            timed(Stage::Commit, || txn.commit())?;
             return Ok(SqlOutcome::Skipped(SkipReason::EntityAbsent));
         }
     }
 
     // Phase 12.2 / 13.1 / 15.2: read this lane, decide, write — all in the txn.
-    let stored = txn.read_guard_lane(&plan.table, &plan.entity_key, &plan.facet, true)?;
+    let stored = timed(Stage::Read, || {
+        txn.read_guard_lane(&plan.table, &plan.entity_key, &plan.facet, true)
+    })?;
     let effective_mode = if is_named_facet {
         OnExisting::Replace
     } else {
@@ -259,69 +264,75 @@ pub fn project<T: SqlTxn>(
 
     match decision {
         WriteDecision::SkipIdempotent => {
-            txn.commit()?;
+            timed(Stage::Commit, || txn.commit())?;
             return Ok(SqlOutcome::Skipped(SkipReason::AlreadyProjected));
         }
         WriteDecision::SkipStale => {
-            txn.commit()?;
+            timed(Stage::Commit, || txn.commit())?;
             return Ok(SqlOutcome::Skipped(SkipReason::StaleSequence));
         }
         WriteDecision::SkipTombstoned => {
-            txn.commit()?;
+            timed(Stage::Commit, || txn.commit())?;
             return Ok(SqlOutcome::Skipped(SkipReason::Tombstoned));
         }
         WriteDecision::SkipAlreadyDeleted => {
             // Phase 13.2: still bump last_sequence so a later resurrection
             // compares against the highest delete sequence seen.
-            txn.bump_guard_lane(
-                &plan.table,
-                &plan.entity_key,
-                &plan.facet,
-                event.sequence,
-                &event.event_id,
-            )?;
-            txn.commit()?;
+            timed(Stage::Write, || {
+                txn.bump_guard_lane(
+                    &plan.table,
+                    &plan.entity_key,
+                    &plan.facet,
+                    event.sequence,
+                    &event.event_id,
+                )
+            })?;
+            timed(Stage::Commit, || txn.commit())?;
             return Ok(SqlOutcome::Skipped(SkipReason::AlreadyDeleted));
         }
         WriteDecision::Insert | WriteDecision::Update | WriteDecision::Delete => {}
     }
 
-    if decision == WriteDecision::Delete {
-        txn.delete_row(&plan.table, &plan.primary_key_columns, &plan.key_values)?;
-    } else {
-        txn.execute_write(&plan.write)?;
-    }
+    // The target write and its guard row, timed as one stage.
+    timed(Stage::Write, || -> Result<(), SqlError> {
+        if decision == WriteDecision::Delete {
+            txn.delete_row(&plan.table, &plan.primary_key_columns, &plan.key_values)?;
+        } else {
+            txn.execute_write(&plan.write)?;
+        }
 
-    let (deleted, row_permanent) = if decision == WriteDecision::Delete {
-        (true, plan.permanent)
-    } else {
-        (false, false)
-    };
-    txn.upsert_guard_row(&GuardRow {
-        table: plan.table.clone(),
-        entity_key: plan.entity_key.clone(),
-        facet: plan.facet.clone(),
-        last_sequence: event.sequence,
-        last_event_id: event.event_id.clone(),
-        deleted,
-        permanent: row_permanent,
+        let (deleted, row_permanent) = if decision == WriteDecision::Delete {
+            (true, plan.permanent)
+        } else {
+            (false, false)
+        };
+        txn.upsert_guard_row(&GuardRow {
+            table: plan.table.clone(),
+            entity_key: plan.entity_key.clone(),
+            facet: plan.facet.clone(),
+            last_sequence: event.sequence,
+            last_event_id: event.event_id.clone(),
+            deleted,
+            permanent: row_permanent,
+        })?;
+
+        // Phase 15.3: default-facet delete cascade / resurrection clear.
+        if !is_named_facet && decision == WriteDecision::Delete {
+            txn.cascade_facets(
+                &plan.table,
+                &plan.entity_key,
+                true,
+                plan.permanent,
+                event.sequence,
+                &event.event_id,
+            )?;
+        } else if was_tombstoned_default && decision == WriteDecision::Insert {
+            txn.cascade_facets(&plan.table, &plan.entity_key, false, false, 0, "")?;
+        }
+        Ok(())
     })?;
 
-    // Phase 15.3: default-facet delete cascade / resurrection clear.
-    if !is_named_facet && decision == WriteDecision::Delete {
-        txn.cascade_facets(
-            &plan.table,
-            &plan.entity_key,
-            true,
-            plan.permanent,
-            event.sequence,
-            &event.event_id,
-        )?;
-    } else if was_tombstoned_default && decision == WriteDecision::Insert {
-        txn.cascade_facets(&plan.table, &plan.entity_key, false, false, 0, "")?;
-    }
-
-    txn.commit()?;
+    timed(Stage::Commit, || txn.commit())?;
 
     Ok(match decision {
         WriteDecision::Insert => SqlOutcome::Created,

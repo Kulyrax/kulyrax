@@ -1,4 +1,4 @@
-# Matches the users table created by examples/postgres/dbtool.
+# Postgres and MySQL. Matches the users table run.sh creates.
 event: UserRegistered
 table: users
 primary_key: id

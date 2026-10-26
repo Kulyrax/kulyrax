@@ -17,6 +17,7 @@ use serde_json::Value;
 use super::adapter::DocumentError;
 use crate::adapter::{GuardState, OnExisting, Operation, SkipReason, WriteDecision, decide};
 use crate::event::Event;
+use crate::execution::stages::{Stage, timed};
 
 // ---------------------------------------------------------------------------
 // The guard — reused as-is as the wire format for every backend (Phase 23.1)
@@ -174,7 +175,9 @@ pub fn project<B: DocumentBackend>(
 ) -> Result<DocumentOutcome, DocumentError> {
     let is_named_facet = !plan.facet.is_empty();
 
-    let mut stored_guard = backend.read_guard(&plan.collection, &plan.entity_id)?;
+    let mut stored_guard = timed(Stage::Read, || {
+        backend.read_guard(&plan.collection, &plan.entity_id)
+    })?;
 
     // Phase 15.3: a named facet can only touch an entity the default facet
     // created and has not tombstoned.
@@ -217,7 +220,9 @@ pub fn project<B: DocumentBackend>(
             g.last_sequence = event.sequence;
             g.last_event_id = event.event_id.clone();
             g.deleted = true;
-            backend.write(&plan.collection, &plan.entity_id, None, "", &g)?;
+            timed(Stage::Write, || {
+                backend.write(&plan.collection, &plan.entity_id, None, "", &g)
+            })?;
             return Ok(DocumentOutcome::Skipped(SkipReason::AlreadyDeleted));
         }
         WriteDecision::Insert | WriteDecision::Update | WriteDecision::Delete => {}
@@ -236,7 +241,9 @@ pub fn project<B: DocumentBackend>(
             fg.last_sequence = event.sequence;
             fg.last_event_id = event.event_id.clone();
         }
-        backend.delete(&plan.collection, &plan.entity_id, &g)?;
+        timed(Stage::Write, || {
+            backend.delete(&plan.collection, &plan.entity_id, &g)
+        })?;
         return Ok(DocumentOutcome::Deleted);
     }
 
@@ -261,13 +268,15 @@ pub fn project<B: DocumentBackend>(
             }
         }
     }
-    backend.write(
-        &plan.collection,
-        &plan.entity_id,
-        Some(&plan.document),
-        &plan.facet,
-        &g,
-    )?;
+    timed(Stage::Write, || {
+        backend.write(
+            &plan.collection,
+            &plan.entity_id,
+            Some(&plan.document),
+            &plan.facet,
+            &g,
+        )
+    })?;
 
     Ok(match decision {
         WriteDecision::Insert => DocumentOutcome::Created,

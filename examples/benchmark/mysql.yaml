@@ -1,0 +1,16 @@
+version: 1
+routing:
+  file: routing.yaml
+adapters:
+  - type: mysql
+    id: store
+    priority: 10
+    capabilities: [write, upsert, delete, transactions]
+    config:
+      url: mysql://root@localhost:13306/bench
+      pool_size: 4
+sources:
+  - type: directory
+    id: bench
+    path: ./work/events
+    state_dir: ./work/state

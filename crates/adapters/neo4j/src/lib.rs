@@ -38,6 +38,7 @@ use kulyrax_core::adapter::graph::mapping::{ResolvedRecord, canonical_edge_key};
 use kulyrax_core::adapter::graph::runtime::GraphRuntimeBuilder;
 use kulyrax_core::adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter};
 use kulyrax_core::event::Event;
+use kulyrax_core::execution::stages::{Stage, timed};
 use kulyrax_core::routing::StorageKind;
 use kulyrax_core::runtime::AdapterBuildContext;
 use kulyrax_core::runtime::config::{
@@ -355,7 +356,7 @@ impl StorageAdapter for Neo4jAdapter {
                 };
                 match outcome {
                     Ok(o) => {
-                        rt.block_on(txn.commit()).map_err(neo_err)?;
+                        timed(Stage::Commit, || rt.block_on(txn.commit())).map_err(neo_err)?;
                         Ok(o)
                     }
                     Err(e) => {
