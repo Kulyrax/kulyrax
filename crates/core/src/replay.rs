@@ -378,6 +378,9 @@ impl ReplayContext {
         events: impl Iterator<Item = Result<Event, ReplayLoadError>>,
         opts: &ReplayRunOptions,
     ) -> Result<ReplayReport, ReplayLoadError> {
+        // Before any event: an adapter that fails to prepare then fails each
+        // event routed to it, with the prepare error in the report.
+        let _ = crate::adapter::prepare_adapters(&self.adapters);
         let started_at = SystemTime::now();
         let mut report = ReplayReport::new(started_at);
         let cap = opts.max_per_event_summaries;

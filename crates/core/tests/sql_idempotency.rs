@@ -1,3 +1,6 @@
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::StorageAdapter;
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use kulyrax_core::adapter::sql::sqlite::SqliteAdapter;
@@ -68,14 +71,14 @@ columns:
 
     let builder = SqlRuntimeBuilder::new(sql_mappings);
 
-    let sql_adapter = SqliteAdapter::new(
+    let sql_adapter = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         builder,
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
 
     let event = test_event();
 

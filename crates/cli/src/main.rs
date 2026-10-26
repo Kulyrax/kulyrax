@@ -435,7 +435,7 @@ fn render_source_run_report(
 }
 
 fn render_stage_timings(t: &StageTimings) {
-    println!("Time per stage (stages nest: dispatch > adapter > schema/read/write/commit):");
+    println!("Time per stage (dispatch contains adapter, which contains read/write/commit; schema runs once, before ingesting):");
     for (name, s) in [
         ("source read", t.source_read),
         ("dispatch", t.dispatch),
@@ -457,10 +457,10 @@ fn render_stage_timings(t: &StageTimings) {
         );
     }
     if t.adapter.calls > 0 {
-        let inner = t.schema.total_us + t.read.total_us + t.write.total_us + t.commit.total_us;
+        let inner = t.read.total_us + t.write.total_us + t.commit.total_us;
         let other = t.adapter.total_us.saturating_sub(inner);
         println!(
-            "  adapter time outside schema/read/write/commit (mapping, connection, begin): {:.1} ms, {:.1} µs/call",
+            "  adapter time outside read/write/commit (mapping, connection, begin): {:.1} ms, {:.1} µs/call",
             other as f64 / 1000.0,
             other as f64 / t.adapter.calls as f64
         );

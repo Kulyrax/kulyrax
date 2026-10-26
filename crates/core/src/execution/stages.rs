@@ -14,7 +14,8 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 /// One timed stage. A call can count towards more than one: `Dispatch`
-/// contains `Adapter`, which contains `Read`, `Write`, `Commit` and `Schema`.
+/// contains `Adapter`, which contains `Read`, `Write` and `Commit`. `Schema`
+/// runs in `StorageAdapter::prepare`, before any dispatch.
 #[derive(Debug, Clone, Copy)]
 pub enum Stage {
     /// `EventSource::poll`: reading the source and parsing its events.
@@ -23,7 +24,8 @@ pub enum Stage {
     Dispatch,
     /// One `StorageAdapter::handle` call.
     Adapter,
-    /// SQL only: `ensure_guard_table`, run at the start of every SQL write.
+    /// Store set-up in `StorageAdapter::prepare`: the SQL guard table, the
+    /// MongoDB guard index, the Neo4j guard constraint.
     Schema,
     /// Reads that feed `decide()` (guard lanes), plus the existing value a
     /// named key-value facet merges into.

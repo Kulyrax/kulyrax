@@ -2,6 +2,9 @@
 //! resolving to a JSON object/array means the mapping points at the wrong
 //! place — the build must fail fast and never reach the guard table/file.
 
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::document::file::FileDocumentAdapter;
 use kulyrax_core::adapter::document::mapping::DocumentMapping;
 use kulyrax_core::adapter::document::runtime::DocumentRuntimeBuilder;
@@ -61,14 +64,14 @@ columns:
         )?,
     );
 
-    let adapter = SqliteAdapter::new(
+    let adapter = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(sql_mappings),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
 
     // "id" resolves to a JSON array, not a scalar.
     let event = event_with_non_scalar_id(r#"{ "id": ["a", "b"] }"#);

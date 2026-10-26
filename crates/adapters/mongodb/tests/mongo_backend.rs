@@ -21,6 +21,7 @@ use kulyrax_core::adapter::document::file::FileDocumentAdapter;
 use kulyrax_core::adapter::document::mapping::DocumentMapping;
 use kulyrax_core::adapter::document::runtime::DocumentRuntimeBuilder;
 use kulyrax_core::event::Event;
+use kulyrax_core::execution::stages;
 use kulyrax_core::runtime::config::MigrationPolicy;
 use kulyrax_core::upcast::UpcasterRegistry;
 
@@ -63,6 +64,20 @@ fn mongo_client(url: &str) -> Result<mongodb::sync::Client, mongodb::error::Erro
 }
 
 fn mongo_adapter(
+    url: &str,
+    database: &str,
+    mappings: HashMap<String, DocumentMapping>,
+) -> MongoDbAdapter {
+    prepared(unprepared_mongo_adapter(url, database, mappings))
+}
+
+/// Prepare an adapter the way every write path does before projecting.
+fn prepared<A: StorageAdapter>(adapter: A) -> A {
+    adapter.prepare().expect("prepare adapter");
+    adapter
+}
+
+fn unprepared_mongo_adapter(
     url: &str,
     database: &str,
     mappings: HashMap<String, DocumentMapping>,
@@ -380,5 +395,74 @@ fn doc_cross_backend() -> R {
         "both backends converge on the same guard sequence"
     );
     assert_eq!(file_guard["deleted"], mongo_guard.get_bool("deleted")?);
+    Ok(())
+}
+
+fn prep_mapping(coll: &str) -> HashMap<String, DocumentMapping> {
+    let mut m = HashMap::new();
+    m.insert(
+        "Prep".into(),
+        doc_mapping(&format!(
+            "event: Prep\ncollection: {coll}\nversion: 1\nid: payload.id\ndocument:\n  id: payload.id\n"
+        )),
+    );
+    m
+}
+
+/// Index creation is an explicit `prepare` step: before it, `handle` fails and
+/// writes nothing.
+#[test]
+fn mongo_handle_before_prepare_fails_and_writes_nothing() -> R {
+    require_mongo!(url);
+    let db = mongo_db();
+    let coll = fresh_collection();
+    let a = unprepared_mongo_adapter(&url, &db, prep_mapping(&coll));
+
+    let r = a.handle(&ev("Prep", 1, serde_json::json!({ "id": "u1" })));
+    match &r.outcome {
+        AdapterOutcome::Failed(e) => assert!(e.to_string().contains("not prepared"), "{e}"),
+        other => panic!("expected a failure, got {other:?}"),
+    }
+    let written = mongo_client(&url)?
+        .database(&db)
+        .collection::<mongodb::bson::Document>(&coll)
+        .count_documents(doc! {})
+        .run()?;
+    assert_eq!(written, 0);
+    Ok(())
+}
+
+#[test]
+fn mongo_prepare_does_the_setup_and_events_do_not() -> R {
+    require_mongo!(url);
+    let db = mongo_db();
+    let coll = fresh_collection();
+    let a = unprepared_mongo_adapter(&url, &db, prep_mapping(&coll));
+
+    stages::take();
+    a.prepare().map_err(|e| e.to_string())?;
+    for (seq, id) in [(1u64, "u1"), (1, "u2"), (1, "u3")] {
+        let r = a.handle(&ev("Prep", seq, serde_json::json!({ "id": id })));
+        assert!(matches!(r.outcome, AdapterOutcome::Created), "{:?}", r.outcome);
+    }
+    assert_eq!(stages::take().schema.calls, 1, "only prepare creates the index");
+    Ok(())
+}
+
+#[test]
+fn mongo_prepare_twice_is_idempotent() -> R {
+    require_mongo!(url);
+    let db = mongo_db();
+    let a = mongo_adapter(&url, &db, HashMap::new()); // prepared once by the helper
+    a.prepare().map_err(|e| e.to_string())?;
+    let guard_indexes = mongo_client(&url)?
+        .database(&db)
+        .collection::<mongodb::bson::Document>("conduit_projection_state")
+        .list_indexes()
+        .run()?
+        .filter_map(Result::ok)
+        .filter(|ix| ix.keys == doc! { "target": 1, "entity_key": 1 })
+        .count();
+    assert_eq!(guard_indexes, 1);
     Ok(())
 }

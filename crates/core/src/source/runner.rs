@@ -14,7 +14,7 @@ use std::time::Duration;
 use serde::Serialize;
 
 use super::{EventSource, SourceError, SourcePosition, SourcedEvent};
-use crate::adapter::StorageAdapter;
+use crate::adapter::{StorageAdapter, prepare_adapters};
 use crate::adapter::document::mapping::DocumentMapping;
 use crate::adapter::graph::mapping::GraphMapping;
 use crate::adapter::keyvalue::mapping::KvMapping;
@@ -243,7 +243,8 @@ pub struct Reloaded {
 /// Asked between batches whether to switch to a new configuration.
 ///
 /// Return `Some` only for a configuration that is already validated and
-/// whose adapters are built: the loop swaps it in without further checks.
+/// whose adapters are built and prepared (`StorageAdapter::prepare`): the
+/// loop swaps it in without further checks.
 /// A rejected reload returns `None` and the loop carries on unchanged.
 pub trait Reloader {
     fn poll(&mut self) -> Option<Reloaded>;
@@ -265,6 +266,12 @@ pub fn run_sources_with_reload(
 ) -> Result<SourceRunReport, SourceError> {
     // Drop anything an earlier run on this thread left behind.
     stages::take();
+    // Before the first poll, so a store that can't be set up fails the run
+    // without ingesting anything. A reloaded adapter set arrives prepared.
+    let failures = prepare_adapters(&adapters);
+    if !failures.is_empty() {
+        return Err(SourceError::Prepare(failures));
+    }
     let mut report = run_loop(
         config,
         routing_rules,

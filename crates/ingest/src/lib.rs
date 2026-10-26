@@ -456,6 +456,7 @@ pub fn serve(
     );
     register_backends.clone()(&mut runtime);
     runtime.build_adapters().map_err(ServeError::Pipeline)?;
+    runtime.prepare_adapters().map_err(ServeError::Pipeline)?;
 
     let (server, source) = start("grpc", &opts.listen).map_err(ServeError::Ingest)?;
     if let Some(a) = server.local_addr {

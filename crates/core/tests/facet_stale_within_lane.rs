@@ -2,6 +2,9 @@
 //! holds — a `contact` event at seq 5 then another at seq 3 → the seq-3 one is
 //! `Skipped(StaleSequence)` and the email stays at the seq-5 value.
 
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use kulyrax_core::adapter::sql::sqlite::SqliteAdapter;
@@ -84,14 +87,14 @@ fn stale_event_within_a_facet_lane_is_skipped() -> Result<(), Box<dyn std::error
             [],
         )?;
     }
-    let adapter = SqliteAdapter::new(
+    let adapter = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(mappings()),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
 
     adapter.handle(&created(1));
 

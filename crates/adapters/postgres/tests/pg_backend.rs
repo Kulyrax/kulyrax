@@ -55,7 +55,7 @@ fn pg_exec(url: &str, sql: &str) -> R {
 }
 
 fn pg_adapter(url: &str, mappings: HashMap<String, SqlMapping>) -> PostgresAdapter {
-    PostgresAdapter::new(
+    prepared(PostgresAdapter::new(
         "pg".into(),
         url,
         2,
@@ -63,7 +63,13 @@ fn pg_adapter(url: &str, mappings: HashMap<String, SqlMapping>) -> PostgresAdapt
         SqlRuntimeBuilder::new(mappings),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    )
+    ))
+}
+
+/// Prepare an adapter the way every write path does before projecting.
+fn prepared<A: StorageAdapter>(adapter: A) -> A {
+    adapter.prepare().expect("prepare adapter");
+    adapter
 }
 
 fn upsert_mapping(event: &str, table: &str, cols: &str) -> SqlMapping {
@@ -357,14 +363,14 @@ fn sql_cross_backend() -> R {
             [],
         )?;
     }
-    let sqlite = SqliteAdapter::new(
+    let sqlite = prepared(SqliteAdapter::new(
         "sqlite".into(),
         db.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(m.clone()),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
     let pg = pg_adapter(&url, m);
 
     for (seq, name) in [(1u64, "a"), (3, "c"), (2, "b")] {
@@ -458,5 +464,81 @@ fn pg_concurrent_writers() -> R {
         name, "five",
         "the higher sequence's write is the one that lands"
     );
+    Ok(())
+}
+
+/// The guard read, target write and guard write are one transaction: a CHECK
+/// constraint rejects one event's guard row after its target write
+/// succeeded, and neither row may remain.
+#[test]
+fn pg_failed_guard_write_leaves_neither_row() -> R {
+    require_pg!(url);
+    let t = fresh_table();
+    pg_exec(
+        &url,
+        &format!("DROP TABLE IF EXISTS {t}; CREATE TABLE {t} (id text PRIMARY KEY, name text)"),
+    )?;
+    pg_exec(
+        &url,
+        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+    )
+    .ok();
+
+    let mut m = HashMap::new();
+    m.insert(
+        "Atomic".into(),
+        upsert_mapping("Atomic", &t, "  id: payload.id\n  name: payload.name\n"),
+    );
+    let a = pg_adapter(&url, m);
+
+    // An ordinary write first, for contrast with the forced failure.
+    let ok = a.handle(&ev("Atomic", 1, serde_json::json!({ "id": "u1", "name": "a" })));
+    assert!(matches!(ok.outcome, AdapterOutcome::Created), "{:?}", ok.outcome);
+
+    let fail = ev("Atomic", 2, serde_json::json!({ "id": "u2", "name": "b" }));
+    let check = format!("chk_{}_{t}", std::process::id());
+    pg_exec(
+        &url,
+        &format!(
+            "ALTER TABLE conduit_projection_state ADD CONSTRAINT {check} CHECK (last_event_id <> '{}')",
+            fail.event_id
+        ),
+    )?;
+    let r = a.handle(&fail);
+    let dropped = pg_exec(
+        &url,
+        &format!("ALTER TABLE conduit_projection_state DROP CONSTRAINT {check}"),
+    );
+
+    assert!(matches!(r.outcome, AdapterOutcome::Failed(_)), "{:?}", r.outcome);
+    let mut c = postgres::Client::connect(&url, postgres::NoTls)?;
+    let target = c.query_opt(&format!("SELECT name FROM {t} WHERE id = 'u2'"), &[])?;
+    let guards: i64 = c
+        .query_one(
+            &format!(
+                "SELECT count(*) FROM conduit_projection_state WHERE target_table = '{t}' AND entity_key = '[\"u2\"]'"
+            ),
+            &[],
+        )?
+        .get(0);
+    dropped?;
+    assert!(target.is_none(), "the target row must roll back with the guard write");
+    assert_eq!(guards, 0, "no guard row");
+    Ok(())
+}
+
+#[test]
+fn pg_prepare_twice_is_idempotent() -> R {
+    require_pg!(url);
+    let a = pg_adapter(&url, HashMap::new()); // prepared once by the helper
+    a.prepare().map_err(|e| e.to_string())?;
+    let mut c = postgres::Client::connect(&url, postgres::NoTls)?;
+    let tables: i64 = c
+        .query_one(
+            "SELECT count(*) FROM information_schema.tables WHERE table_name = 'conduit_projection_state'",
+            &[],
+        )?
+        .get(0);
+    assert_eq!(tables, 1);
     Ok(())
 }

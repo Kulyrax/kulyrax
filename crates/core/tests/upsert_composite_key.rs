@@ -2,6 +2,9 @@
 //! 11.1) — a bridge-table row is updated in place by a newer-sequence event
 //! for the same `(left, right)` pair; a different pair inserts a new row.
 
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use kulyrax_core::adapter::sql::sqlite::SqliteAdapter;
@@ -64,14 +67,14 @@ columns:
         )?,
     );
 
-    let adapter = SqliteAdapter::new(
+    let adapter = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(sql_mappings),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
 
     // First delivery for (post-1, tag-a).
     let r1 = adapter.handle(&tag_assigned(1, "post-1", "tag-a", "first"));

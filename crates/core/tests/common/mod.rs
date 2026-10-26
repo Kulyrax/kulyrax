@@ -112,3 +112,9 @@ pub fn read_user(db_path: &Path, id: &str) -> Option<(String, i64)> {
     )
     .ok()
 }
+
+/// Prepare an adapter the way every write path does before projecting.
+pub fn prepared<A: kulyrax_core::adapter::StorageAdapter>(adapter: A) -> A {
+    adapter.prepare().expect("prepare adapter");
+    adapter
+}

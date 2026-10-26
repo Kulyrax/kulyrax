@@ -4,6 +4,9 @@
 //! raw PK constraint violation, and the document adapter silently wrote a
 //! second file for the same logical entity.
 
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::document::file::FileDocumentAdapter;
 use kulyrax_core::adapter::document::mapping::DocumentMapping;
 use kulyrax_core::adapter::document::runtime::DocumentRuntimeBuilder;
@@ -67,14 +70,14 @@ columns:
         )?,
     );
 
-    let adapter = SqliteAdapter::new(
+    let adapter = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(sql_mappings),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
 
     let first = event_for_entity_u1("evt-1", 1, "first@example.com");
     let second = event_for_entity_u1("evt-2", 2, "second@example.com");

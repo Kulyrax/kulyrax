@@ -6,7 +6,7 @@
 //! live in different collections, so no single atomic Mongo operation covers
 //! both: each write runs in a client-session transaction.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use mongodb::bson::{Document, doc, from_document, to_document};
 use mongodb::sync::{Client, ClientSession, Database};
@@ -18,7 +18,7 @@ use kulyrax_core::adapter::document::exec::{
     self, DocumentBackend, DocumentOutcome, DocumentPlan, ProjectionGuard,
 };
 use kulyrax_core::adapter::document::runtime::DocumentRuntimeBuilder;
-use kulyrax_core::adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter};
+use kulyrax_core::adapter::{AdapterError, AdapterResult, Prepared, SkipReason, StorageAdapter};
 use kulyrax_core::event::Event;
 use kulyrax_core::execution::stages::{Stage, timed};
 use kulyrax_core::routing::StorageKind;
@@ -114,9 +114,8 @@ pub struct MongoDbAdapter {
     builder: DocumentRuntimeBuilder,
     upcasters: Arc<UpcasterRegistry>,
     migration_policy: MigrationPolicy,
-    /// Guarded so the unique compound index is created at most once per
-    /// adapter instance — `create_index` cannot run inside a transaction.
-    guard_index_ensured: Mutex<bool>,
+    /// Set by `prepare` once the guard collection's unique index exists.
+    prepared: Prepared,
 }
 
 impl MongoDbAdapter {
@@ -150,7 +149,7 @@ impl MongoDbAdapter {
             builder,
             upcasters,
             migration_policy,
-            guard_index_ensured: Mutex::new(false),
+            prepared: Prepared::default(),
         }
     }
 
@@ -159,18 +158,10 @@ impl MongoDbAdapter {
     }
 
     /// Create the guard collection's unique compound index on
-    /// `(target, entity_key)` at most once — `createIndex` cannot run inside
-    /// a multi-document transaction, so this always runs outside one, before
-    /// the retry loop starts. Idempotent server-side (MongoDB no-ops an
-    /// identical index spec), so a lost race just means two harmless calls.
+    /// `(target, entity_key)`. `createIndex` cannot run inside a
+    /// multi-document transaction, so `prepare` runs it on its own.
+    /// Idempotent server-side (MongoDB no-ops an identical index spec).
     fn ensure_guard_index(&self, db: &Database) -> Result<(), DocumentError> {
-        let mut ensured = self
-            .guard_index_ensured
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        if *ensured {
-            return Ok(());
-        }
         let model = mongodb::IndexModel::builder()
             .keys(doc! { "target": 1, "entity_key": 1 })
             .options(
@@ -183,7 +174,6 @@ impl MongoDbAdapter {
             .create_index(model)
             .run()
             .map_err(mongo_err)?;
-        *ensured = true;
         Ok(())
     }
 }
@@ -199,7 +189,24 @@ impl StorageAdapter for MongoDbAdapter {
         self.priority
     }
 
+    fn prepare(&self) -> Result<(), AdapterError> {
+        let client = self
+            .client
+            .as_ref()
+            .map_err(|e| AdapterError::WriteFailed(e.clone()))?;
+        self.prepared
+            .prepare(|| {
+                timed(Stage::Schema, || {
+                    self.ensure_guard_index(&client.database(&self.database))
+                })
+            })
+            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+    }
+
     fn handle(&self, event: &Event) -> AdapterResult {
+        if let Err(e) = self.prepared.require() {
+            return self.failure(AdapterError::WriteFailed(e));
+        }
         let projection = match self.builder.build(event, &self.upcasters) {
             Ok(p) => p,
             Err(DocumentError::UnsupportedVersion {
@@ -245,9 +252,6 @@ impl StorageAdapter for MongoDbAdapter {
             Err(e) => return self.failure(AdapterError::WriteFailed(e.clone())),
         };
         let db = client.database(&self.database);
-        if let Err(e) = self.ensure_guard_index(&db) {
-            return self.failure(AdapterError::WriteFailed(e.to_string()));
-        }
 
         // A concurrent writer's commit aborts ours with a retryable error
         // label. Retry the whole transaction; once the budget is spent, the

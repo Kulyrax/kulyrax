@@ -1,6 +1,6 @@
 //! The run report counts every stage of the source loop: one source read per
 //! poll, one dispatch and checkpoint per batch, and one adapter call, guard
-//! read, write and commit per projected SQL event.
+//! read, write and commit per projected SQL event, plus one schema setup.
 
 mod common;
 
@@ -57,9 +57,10 @@ fn run_report_counts_each_stage() {
     assert_eq!(t.source_read.calls, 3);
     assert_eq!(t.dispatch.calls, 2);
     assert_eq!(t.checkpoint.calls, 2);
+    // The guard table is created once, before the first event.
+    assert_eq!(t.schema.calls, 1);
     for (stage, s) in [
         ("adapter", t.adapter),
-        ("schema", t.schema),
         ("read", t.read),
         ("write", t.write),
         ("commit", t.commit),

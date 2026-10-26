@@ -3,6 +3,9 @@
 //! tombstone at sequence 3) each time — delete is sequence-gated symmetrically
 //! with upsert (Phase 13.1).
 
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::StorageAdapter;
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
@@ -103,14 +106,14 @@ fn apply_order(order: &[u64]) -> (i64, i64, i64) {
             .unwrap();
     }
 
-    let adapter = SqliteAdapter::new(
+    let adapter = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(mappings()),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
 
     for &sequence in order {
         let result = adapter.handle(&events[&sequence]);

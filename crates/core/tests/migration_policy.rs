@@ -1,5 +1,8 @@
 //! Phase 10.3: MigrationPolicy + UpcasterRegistry integration at the adapter level.
 
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use kulyrax_core::adapter::sql::sqlite::SqliteAdapter;
@@ -77,14 +80,15 @@ fn adapter(db_path: &Path, upcasters: UpcasterRegistry, policy: MigrationPolicy)
     let mut mappings = HashMap::new();
     mappings.insert("UserCreated".to_string(), sql_mapping_v2());
     let builder = SqlRuntimeBuilder::new(mappings);
-    SqliteAdapter::new(
+    let adapter = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         builder,
         Arc::new(upcasters),
         policy,
-    )
+    ));
+    adapter
 }
 
 // ------------------------------------------------------------
@@ -198,14 +202,14 @@ columns:
         .unwrap(),
     );
     let builder = SqlRuntimeBuilder::new(mappings);
-    let adapter = SqliteAdapter::new(
+    let adapter = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         builder,
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::Strict,
-    );
+    ));
 
     let result = adapter.handle(&test_event(1));
 

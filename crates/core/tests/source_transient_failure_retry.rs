@@ -38,6 +38,9 @@ impl StorageAdapter for FlakyAdapter {
     fn priority(&self) -> u32 {
         self.inner.priority()
     }
+    fn prepare(&self) -> Result<(), AdapterError> {
+        self.inner.prepare()
+    }
     fn handle(&self, event: &Event) -> AdapterResult {
         let n = self.calls.get();
         self.calls.set(n + 1);

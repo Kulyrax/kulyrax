@@ -2,6 +2,9 @@
 //! the key and properties agree across both back ends, driven by the same
 //! `decide()` gate.
 
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::graph::mapping::GraphMapping;
 use kulyrax_core::adapter::graph::runtime::GraphRuntimeBuilder;
 use kulyrax_core::adapter::graph::store::GraphStore;
@@ -49,14 +52,14 @@ fn sql_row_and_graph_node_agree() -> Result<(), Box<dyn std::error::Error>> {
         )
         .unwrap(),
     );
-    let sql = SqliteAdapter::new(
+    let sql = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(sql_m),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
 
     let mut graph_m = HashMap::new();
     graph_m.insert(

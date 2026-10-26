@@ -46,6 +46,9 @@ pub enum SourceError {
     Io(std::io::Error),
     Parse(String),
     Checkpoint(String),
+    /// One or more adapters failed `StorageAdapter::prepare`; nothing was
+    /// ingested.
+    Prepare(Vec<crate::adapter::PrepareFailure>),
 }
 
 impl std::fmt::Display for SourceError {
@@ -54,6 +57,13 @@ impl std::fmt::Display for SourceError {
             SourceError::Io(e) => write!(f, "{}", e),
             SourceError::Parse(s) => write!(f, "source parse error: {}", s),
             SourceError::Checkpoint(s) => write!(f, "checkpoint error: {}", s),
+            SourceError::Prepare(failures) => {
+                write!(f, "adapters failed to prepare:")?;
+                for failure in failures {
+                    write!(f, " {failure};")?;
+                }
+                Ok(())
+            }
         }
     }
 }

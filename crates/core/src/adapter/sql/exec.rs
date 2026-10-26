@@ -126,12 +126,14 @@ pub struct GuardRow {
 /// works unchanged; the trait is the entire contract. A breaking change here
 /// is a breaking change to `kulyrax-core`.
 ///
-/// **The atomicity contract.** `ensure_guard_table` through `commit` all run
+/// **The atomicity contract.** `read_guard_lane` through `commit` all run
 /// against the *same* underlying transaction: the guard read
 /// (`read_guard_lane`), the target write (`execute_write`/`delete_row`), and
 /// the guard write (`upsert_guard_row`/`bump_guard_lane`/`cascade_facets`)
 /// must be indivisible from the perspective of any other writer — either all
-/// of them land, or none do. How the shipped backends meet it:
+/// of them land, or none do. Schema setup (`ensure_guard_table`) is kept out
+/// of that transaction: see [`ensure_schema`]. How the shipped backends meet
+/// it:
 /// - **SQLite** ([`super::sqlite::SqliteTxn`]): SQLite serializes writers
 ///   itself, plus a real `rusqlite::Transaction`; `lock` is a no-op.
 /// - **Postgres** (`kulyrax-adapter-postgres`): `READ COMMITTED` with
@@ -151,7 +153,9 @@ pub struct GuardRow {
 /// implementation and `GraphBackend`'s Neo4j implementation both use.
 pub trait SqlTxn: Sized {
     /// `CREATE TABLE IF NOT EXISTS conduit_projection_state (…)` — Phase 11.2 /
-    /// 13.2 / 15.2 shape, in the backend's own DDL.
+    /// 13.2 / 15.2 shape, in the backend's own DDL. Only ever called through
+    /// [`ensure_schema`], from the adapter's `StorageAdapter::prepare`, in a
+    /// transaction of its own; never by [`project`].
     fn ensure_guard_table(&mut self) -> Result<(), SqlError>;
 
     /// Read one guard lane. `lock` → `SELECT … FOR UPDATE` where the backend
@@ -225,7 +229,23 @@ pub struct SqlPlan {
     pub write: SqlWrite,
 }
 
-/// The Phase 11–15 SQL write path, once, over any [`SqlTxn`].
+/// Create the guard table in `txn`, a transaction of its own, and commit it.
+///
+/// A SQL adapter calls this from its `StorageAdapter::prepare`, never inside
+/// an event's transaction: on MySQL, any DDL commits the open transaction
+/// implicitly, even `CREATE TABLE IF NOT EXISTS` on a table that exists, and
+/// every later statement then autocommits on its own — the guard read, target
+/// write and guard write would stop being atomic.
+pub fn ensure_schema<T: SqlTxn>(mut txn: T) -> Result<(), SqlError> {
+    timed(Stage::Schema, || {
+        txn.ensure_guard_table()?;
+        txn.commit()
+    })
+}
+
+/// The Phase 11–15 SQL write path, once, over any [`SqlTxn`]. The adapter
+/// must have been prepared (see [`ensure_schema`] and
+/// [`crate::adapter::Prepared`]).
 pub fn project<T: SqlTxn>(
     mut txn: T,
     plan: &SqlPlan,
@@ -234,8 +254,6 @@ pub fn project<T: SqlTxn>(
     use crate::adapter::SkipReason;
 
     let is_named_facet = !plan.facet.is_empty();
-
-    timed(Stage::Schema, || txn.ensure_guard_table())?;
 
     // Phase 15.3: a named facet can only touch a row the default facet created
     // and has not tombstoned.

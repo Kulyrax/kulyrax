@@ -59,7 +59,7 @@ fn my_exec(url: &str, sql: &str) -> R {
 }
 
 fn my_adapter(url: &str, mappings: HashMap<String, SqlMapping>) -> MySqlAdapter {
-    MySqlAdapter::new(
+    prepared(MySqlAdapter::new(
         "mysql".into(),
         url,
         2,
@@ -67,7 +67,13 @@ fn my_adapter(url: &str, mappings: HashMap<String, SqlMapping>) -> MySqlAdapter 
         SqlRuntimeBuilder::new(mappings),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    )
+    ))
+}
+
+/// Prepare an adapter the way every write path does before projecting.
+fn prepared<A: StorageAdapter>(adapter: A) -> A {
+    adapter.prepare().expect("prepare adapter");
+    adapter
 }
 
 fn upsert_mapping(event: &str, table: &str, cols: &str) -> SqlMapping {
@@ -358,14 +364,14 @@ fn sql_cross_backend_mysql() -> R {
             [],
         )?;
     }
-    let sqlite = SqliteAdapter::new(
+    let sqlite = prepared(SqliteAdapter::new(
         "sqlite".into(),
         db.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(m.clone()),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
     let my = my_adapter(&url, m);
 
     for (seq, name) in [(1u64, "a"), (3, "c"), (2, "b")] {
@@ -465,5 +471,82 @@ fn mysql_concurrent_writers() -> R {
         name, "five",
         "the higher sequence's write is the one that lands"
     );
+    Ok(())
+}
+
+/// The guard read, target write and guard write are one transaction: a CHECK
+/// constraint rejects one event's guard row after its target write
+/// succeeded, and neither row may remain. Guards against DDL inside the
+/// event's transaction, which MySQL commits implicitly.
+#[test]
+fn mysql_failed_guard_write_leaves_neither_row() -> R {
+    require_mysql!(url);
+    let t = fresh_table();
+    my_exec(
+        &url,
+        &format!(
+            "DROP TABLE IF EXISTS {t}; CREATE TABLE {t} (id VARCHAR(64) PRIMARY KEY, name VARCHAR(64))"
+        ),
+    )?;
+    my_exec(
+        &url,
+        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+    )
+    .ok();
+
+    let mut m = HashMap::new();
+    m.insert(
+        "Atomic".into(),
+        upsert_mapping("Atomic", &t, "  id: payload.id\n  name: payload.name\n"),
+    );
+    let a = my_adapter(&url, m);
+
+    // An ordinary write first, for contrast with the forced failure.
+    let ok = a.handle(&ev("Atomic", 1, serde_json::json!({ "id": "u1", "name": "a" })));
+    assert!(matches!(ok.outcome, AdapterOutcome::Created), "{:?}", ok.outcome);
+
+    let fail = ev("Atomic", 2, serde_json::json!({ "id": "u2", "name": "b" }));
+    let check = format!("chk_{}_{t}", std::process::id());
+    my_exec(
+        &url,
+        &format!(
+            "ALTER TABLE conduit_projection_state ADD CONSTRAINT {check} CHECK (last_event_id <> '{}')",
+            fail.event_id
+        ),
+    )?;
+    let r = a.handle(&fail);
+    let dropped = my_exec(
+        &url,
+        &format!("ALTER TABLE conduit_projection_state DROP CHECK {check}"),
+    );
+
+    assert!(matches!(r.outcome, AdapterOutcome::Failed(_)), "{:?}", r.outcome);
+    let pool = mysql::Pool::new(url.as_str())?;
+    let mut conn = pool.get_conn()?;
+    let target: Option<String> = conn.exec_first(format!("SELECT name FROM {t} WHERE id = 'u2'"), ())?;
+    let guards: Option<i64> = conn.exec_first(
+        format!(
+            "SELECT count(*) FROM conduit_projection_state WHERE target_table = '{t}' AND entity_key = '[\"u2\"]'"
+        ),
+        (),
+    )?;
+    dropped?;
+    assert_eq!(target, None, "the target row must roll back with the guard write");
+    assert_eq!(guards, Some(0), "no guard row");
+    Ok(())
+}
+
+#[test]
+fn mysql_prepare_twice_is_idempotent() -> R {
+    require_mysql!(url);
+    let a = my_adapter(&url, HashMap::new()); // prepared once by the helper
+    a.prepare().map_err(|e| e.to_string())?;
+    let pool = mysql::Pool::new(url.as_str())?;
+    let mut conn = pool.get_conn()?;
+    let tables: Option<i64> = conn.exec_first(
+        "SELECT count(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'conduit_projection_state'",
+        (),
+    )?;
+    assert_eq!(tables, Some(1));
     Ok(())
 }

@@ -54,6 +54,8 @@ pub enum PipelineError {
     Replay(ReplayLoadError),
     Source(SourceError),
     AdapterBuild(Vec<AdapterBuildFailure>),
+    /// One or more built adapters failed `StorageAdapter::prepare`.
+    AdapterPrepare(Vec<crate::adapter::PrepareFailure>),
 }
 
 impl fmt::Display for PipelineError {
@@ -72,6 +74,13 @@ impl fmt::Display for PipelineError {
                 write!(f, "{} adapter(s) could not be built:", failures.len())?;
                 for failure in failures {
                     write!(f, "\n  - {:?}: {}", failure.adapter_id, failure.reason)?;
+                }
+                Ok(())
+            }
+            PipelineError::AdapterPrepare(failures) => {
+                write!(f, "{} adapter(s) could not be prepared:", failures.len())?;
+                for failure in failures {
+                    write!(f, "\n  - {failure}")?;
                 }
                 Ok(())
             }
@@ -239,6 +248,7 @@ pub fn run(
     let mut runtime =
         KulyraxRuntime::load_with_backends(config_path, mappings_dir, register_backends)?;
     runtime.build_adapters()?;
+    runtime.prepare_adapters()?;
     let event = load_event(event_path)?;
     Ok(runtime.run_once(event))
 }
@@ -371,6 +381,7 @@ pub fn run_source_loop(
     let mut runtime =
         KulyraxRuntime::load_with_backends(config_path, mappings_dir, register_backends.clone())?;
     runtime.build_adapters()?;
+    runtime.prepare_adapters()?;
     let sources = build_sources(runtime.config(), config_path)?;
     if sources.is_empty() {
         return Err(PipelineError::Mapping(
@@ -415,6 +426,7 @@ pub fn replay(
     let mut runtime =
         KulyraxRuntime::load_with_backends(config_path, mappings_dir, register_backends)?;
     runtime.build_adapters()?;
+    runtime.prepare_adapters()?;
     let mut iter = events_from_path(events_path)?;
     Ok(runtime.replay(&mut iter, opts)?)
 }

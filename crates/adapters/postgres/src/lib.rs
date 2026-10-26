@@ -27,7 +27,9 @@ use kulyrax_core::adapter::sql::exec::{
     self, GuardRow, Placeholders, SqlOutcome, SqlPlan, SqlTxn, SqlWrite,
 };
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
-use kulyrax_core::adapter::{AdapterError, AdapterResult, GuardState, SkipReason, StorageAdapter};
+use kulyrax_core::adapter::{
+    AdapterError, AdapterResult, GuardState, Prepared, SkipReason, StorageAdapter,
+};
 use kulyrax_core::event::Event;
 use kulyrax_core::routing::StorageKind;
 use kulyrax_core::runtime::AdapterBuildContext;
@@ -110,6 +112,8 @@ pub struct PostgresAdapter {
     migration_policy: MigrationPolicy,
     /// Per-target-table `information_schema.columns` map, introspected once.
     col_types: Arc<Mutex<HashMap<String, Arc<ColTypes>>>>,
+    /// Set by `prepare` once the guard table exists.
+    prepared: Prepared,
 }
 
 impl PostgresAdapter {
@@ -144,6 +148,7 @@ impl PostgresAdapter {
             upcasters,
             migration_policy,
             col_types: Arc::new(Mutex::new(HashMap::new())),
+            prepared: Prepared::default(),
         }
     }
 
@@ -196,7 +201,31 @@ impl StorageAdapter for PostgresAdapter {
         self.priority
     }
 
+    /// Create the guard table in a transaction of its own (see
+    /// `exec::ensure_schema`).
+    fn prepare(&self) -> Result<(), AdapterError> {
+        let pool = self
+            .pool
+            .as_ref()
+            .map_err(|e| AdapterError::WriteFailed(e.clone()))?;
+        self.prepared
+            .prepare(|| {
+                let mut client = pool
+                    .get()
+                    .map_err(|e| SqlError::ExecutionFailed(e.to_string()))?;
+                let tx = client.transaction().map_err(pg_err)?;
+                exec::ensure_schema(PostgresTxn {
+                    tx,
+                    col_types: Arc::default(),
+                })
+            })
+            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+    }
+
     fn handle(&self, event: &Event) -> AdapterResult {
+        if let Err(e) = self.prepared.require() {
+            return self.failure(AdapterError::WriteFailed(e));
+        }
         let projection = match self.builder.build(event, &self.upcasters) {
             Ok(p) => p,
             Err(SqlError::UnsupportedVersion {

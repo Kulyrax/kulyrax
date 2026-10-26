@@ -5,6 +5,8 @@ pub(crate) mod loader;
 pub mod sql;
 
 use core::fmt;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -398,8 +400,91 @@ pub trait StorageAdapter {
     /// Execution priority (lower = earlier)
     fn priority(&self) -> u32;
 
+    /// Set up what the store needs before the first `handle`, such as the SQL
+    /// guard table. Every path that writes calls it once, after building the
+    /// adapter and before projecting anything (see [`prepare_adapters`]);
+    /// `dry-run` never does, so it stays write-free. Safe to call again.
+    /// Building an adapter has no side effects; this is the first point an
+    /// adapter may touch its store.
+    fn prepare(&self) -> Result<(), AdapterError> {
+        Ok(())
+    }
+
     /// Execute side effect
     fn handle(&self, event: &Event) -> AdapterResult;
+}
+
+/// Whether an adapter's [`StorageAdapter::prepare`] has succeeded, for
+/// adapters whose store needs set-up (a table, an index, a constraint). Set
+/// only after that set-up has committed, and checked at the start of
+/// `handle`, so an unprepared adapter fails loudly instead of creating things
+/// as a side effect of its first event. Adapters that keep the default no-op
+/// `prepare` don't use it and are never checked.
+#[derive(Debug, Default)]
+pub struct Prepared {
+    done: AtomicBool,
+    /// Why the last `prepare` failed, so each event an unprepared adapter
+    /// rejects says what actually went wrong.
+    last_error: Mutex<Option<String>>,
+}
+
+impl Prepared {
+    /// Run `setup` and, if it succeeds, mark the adapter prepared. Runs
+    /// `setup` again on every call, so the set-up must be idempotent.
+    pub fn prepare<E: fmt::Display>(
+        &self,
+        setup: impl FnOnce() -> Result<(), E>,
+    ) -> Result<(), E> {
+        let result = setup();
+        let mut last = self.last_error.lock().unwrap_or_else(|e| e.into_inner());
+        match &result {
+            Ok(()) => {
+                *last = None;
+                self.done.store(true, Ordering::Release);
+            }
+            Err(e) => *last = Some(e.to_string()),
+        }
+        result
+    }
+
+    /// `Err` holds the message an unprepared adapter fails each event with.
+    pub fn require(&self) -> Result<(), String> {
+        if self.done.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let last = self.last_error.lock().unwrap_or_else(|e| e.into_inner());
+        Err(match last.as_deref() {
+            Some(e) => format!("adapter not prepared: {e}"),
+            None => "adapter not prepared: call StorageAdapter::prepare before projecting".into(),
+        })
+    }
+}
+
+/// One adapter whose [`StorageAdapter::prepare`] failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrepareFailure {
+    pub adapter_id: String,
+    pub message: String,
+}
+
+impl fmt::Display for PrepareFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "adapter '{}': {}", self.adapter_id, self.message)
+    }
+}
+
+/// Prepare every adapter, returning each one that failed. Callers fail the
+/// run before ingesting anything when this is non-empty.
+pub fn prepare_adapters(adapters: &[Box<dyn StorageAdapter>]) -> Vec<PrepareFailure> {
+    adapters
+        .iter()
+        .filter_map(|a| {
+            a.prepare().err().map(|e| PrepareFailure {
+                adapter_id: a.id().to_string(),
+                message: e.to_string(),
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

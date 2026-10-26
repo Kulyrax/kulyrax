@@ -59,6 +59,16 @@ shapes satisfy it, and every built-in backend uses one of them:
   equivalent) reachable from a client transaction, or rely on a genuine
   single-writer guarantee the way SQLite does.
 
+**Keep DDL out of that transaction.** A SQL backend creates the guard table
+in `StorageAdapter::prepare`, by passing a fresh transaction to
+`sql::exec::ensure_schema`, and records success in a `sql::exec::Prepared`
+that its `handle` checks first; `project` never creates the table. Every
+path that writes calls `prepare` once before projecting; `dry-run` never
+does. Some databases commit an open transaction implicitly on any DDL —
+MySQL does, even for `CREATE TABLE IF NOT EXISTS` on a table that exists —
+after which every statement autocommits on its own and the guard read,
+target write and guard write are no longer atomic.
+
 Whichever shape you pick, get it right: a backend that merely "usually" makes
 the guard-and-write pair atomic will occasionally lose or duplicate an
 update, exactly the bug class idempotency guards exist to prevent.

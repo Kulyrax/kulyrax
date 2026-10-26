@@ -3,6 +3,9 @@
 //! email and the seq-6 login. Neither facet's sequence gate sees the other's
 //! sequence, so arrival order cannot make one falsely supersede the other.
 
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use kulyrax_core::adapter::sql::sqlite::SqliteAdapter;
@@ -112,14 +115,14 @@ fn run(order: &[Event]) -> (String, String) {
         )
         .unwrap();
     }
-    let adapter = SqliteAdapter::new(
+    let adapter = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(mappings()),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
     for e in order {
         let r = adapter.handle(e);
         assert!(

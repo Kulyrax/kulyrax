@@ -32,10 +32,11 @@ release binary of this checkout once, before any timing starts.
 `kulyrax run` prints time per stage when it finishes (`timings` in `--output json`).
 The stages nest:
 
+- `schema`: setting up the store when adapters are prepared, once before anything
+  is ingested (SQL guard table, MongoDB guard index, Neo4j guard constraint).
 - `source read`: polling the source (reading and parsing event files).
 - `dispatch`: projecting a batch, which contains every `adapter` call.
 - `adapter`: one adapter handling one event, which contains:
-  - `schema`: SQL only, the `CREATE TABLE IF NOT EXISTS` for the guard table.
   - `read`: guard reads that feed `decide()`.
   - `write`: the target write and the guard write.
   - `commit`: the transaction commit (SQL, MongoDB, Neo4j; the file stores, Redis and

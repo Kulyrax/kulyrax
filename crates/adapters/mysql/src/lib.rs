@@ -21,7 +21,9 @@ use kulyrax_core::adapter::sql::exec::{
     self, GuardRow, Placeholders, SqlOutcome, SqlPlan, SqlTxn, SqlWrite,
 };
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
-use kulyrax_core::adapter::{AdapterError, AdapterResult, GuardState, SkipReason, StorageAdapter};
+use kulyrax_core::adapter::{
+    AdapterError, AdapterResult, GuardState, Prepared, SkipReason, StorageAdapter,
+};
 use kulyrax_core::event::Event;
 use kulyrax_core::routing::StorageKind;
 use kulyrax_core::runtime::AdapterBuildContext;
@@ -78,6 +80,8 @@ pub struct MySqlAdapter {
     builder: SqlRuntimeBuilder,
     upcasters: Arc<UpcasterRegistry>,
     migration_policy: MigrationPolicy,
+    /// Set by `prepare` once the guard table exists.
+    prepared: Prepared,
 }
 
 impl MySqlAdapter {
@@ -106,6 +110,7 @@ impl MySqlAdapter {
             builder,
             upcasters,
             migration_policy,
+            prepared: Prepared::default(),
         }
     }
 
@@ -125,7 +130,26 @@ impl StorageAdapter for MySqlAdapter {
         self.priority
     }
 
+    /// Create the guard table in a transaction of its own, never inside an
+    /// event's: MySQL DDL commits the open transaction implicitly (see
+    /// `exec::ensure_schema`).
+    fn prepare(&self) -> Result<(), AdapterError> {
+        let pool = self
+            .pool
+            .as_ref()
+            .map_err(|e| AdapterError::WriteFailed(e.clone()))?;
+        self.prepared
+            .prepare(|| {
+                let tx = pool.start_transaction(TxOpts::default()).map_err(my_err)?;
+                exec::ensure_schema(MySqlTxn { tx })
+            })
+            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+    }
+
     fn handle(&self, event: &Event) -> AdapterResult {
+        if let Err(e) = self.prepared.require() {
+            return self.failure(AdapterError::WriteFailed(e));
+        }
         let projection = match self.builder.build(event, &self.upcasters) {
             Ok(p) => p,
             Err(SqlError::UnsupportedVersion {

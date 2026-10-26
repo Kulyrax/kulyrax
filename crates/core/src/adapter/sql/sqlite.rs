@@ -6,7 +6,7 @@ use crate::{
     adapter::sql::adapter::SqlError,
     adapter::sql::exec::{self, GuardRow, Placeholders, SqlOutcome, SqlPlan, SqlTxn, SqlWrite},
     adapter::sql::runtime::SqlRuntimeBuilder,
-    adapter::{AdapterError, AdapterResult, GuardState, SkipReason, StorageAdapter},
+    adapter::{AdapterError, AdapterResult, GuardState, Prepared, SkipReason, StorageAdapter},
     event::Event,
     routing::StorageKind,
     runtime::config::MigrationPolicy,
@@ -23,9 +23,11 @@ pub struct SqliteAdapter {
     builder: SqlRuntimeBuilder,
     upcasters: Arc<UpcasterRegistry>,
     migration_policy: MigrationPolicy,
-    /// Opened on the first event and reused. Opening per event, with the
+    /// Opened by `prepare` and reused. Opening per event, with the
     /// default rollback journal, cost several disk flushes per write.
     conn: Mutex<Option<Connection>>,
+    /// Set by `prepare` once the guard table exists.
+    prepared: Prepared,
 }
 
 /// WAL with `synchronous = FULL` flushes the log once per commit, so every
@@ -58,6 +60,7 @@ impl SqliteAdapter {
             upcasters,
             migration_policy,
             conn: Mutex::new(None),
+            prepared: Prepared::default(),
         }
     }
 
@@ -79,7 +82,34 @@ impl StorageAdapter for SqliteAdapter {
         self.priority
     }
 
+    /// Open the connection and create the guard table in a transaction of its
+    /// own (see `exec::ensure_schema`).
+    fn prepare(&self) -> Result<(), AdapterError> {
+        let mut guard = self.conn.lock().map_err(|_| {
+            AdapterError::WriteFailed(
+                "SQLite connection lock poisoned by an earlier panic".to_string(),
+            )
+        })?;
+        self.prepared
+            .prepare(|| {
+                if guard.is_none() {
+                    *guard = Some(open_connection(&self.path).map_err(sql_err)?);
+                }
+                let Some(conn) = guard.as_mut() else {
+                    return Err(SqlError::ExecutionFailed(
+                        "SQLite connection unavailable".to_string(),
+                    ));
+                };
+                let tx = conn.transaction().map_err(sql_err)?;
+                exec::ensure_schema(SqliteTxn { tx })
+            })
+            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+    }
+
     fn handle(&self, event: &Event) -> AdapterResult {
+        if let Err(e) = self.prepared.require() {
+            return self.failure(AdapterError::WriteFailed(e));
+        }
         let projection = match self.builder.build(event, &self.upcasters) {
             Ok(p) => p,
             Err(SqlError::UnsupportedVersion {
@@ -130,12 +160,6 @@ impl StorageAdapter for SqliteAdapter {
                 ));
             }
         };
-        if guard.is_none() {
-            match open_connection(&self.path) {
-                Ok(c) => *guard = Some(c),
-                Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
-            }
-        }
         let Some(conn) = guard.as_mut() else {
             return self.failure(AdapterError::WriteFailed(
                 "SQLite connection unavailable".to_string(),

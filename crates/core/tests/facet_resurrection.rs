@@ -3,6 +3,9 @@
 //! clears every facet lane's tombstone) and the `contact` facet update at
 //! seq 4 then applies normally.
 
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use kulyrax_core::adapter::sql::sqlite::SqliteAdapter;
@@ -111,14 +114,14 @@ fn default_facet_resurrection_reopens_facet_lanes() -> Result<(), Box<dyn std::e
             [],
         )?;
     }
-    let adapter = SqliteAdapter::new(
+    let adapter = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(mappings()),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
 
     adapter.handle(&created(1, "Ada"));
     adapter.handle(&deleted(2));
