@@ -15,13 +15,13 @@ use std::path::Path;
 // Helpers
 // ------------------------------------------------------------
 
-/// `tests/fixtures/routing.json` routes `UserCreated` to `["sql-primary", "doc-readmodel"]`
+/// `tests/fixtures/routing.yaml` routes `UserCreated` to `["sql-primary", "doc-readmodel"]`
 /// — must match the adapter IDs used below.
 fn test_routing() -> HashMap<String, Vec<AdapterId>> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
-        .join("routing.json");
+        .join("routing.yaml");
 
     load_routing(path).expect("routing fixture loads")
 }
@@ -38,7 +38,7 @@ fn execute_event_runs_without_panic() {
     let config = KulyraxConfig {
         version: 1,
         routing: RoutingConfig {
-            file: "routing.json".into(),
+            file: "routing.yaml".into(),
         },
         adapters: vec![
             AdapterConfig::Sqlite(SqliteAdapterConfig {

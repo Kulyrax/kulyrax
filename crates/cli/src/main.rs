@@ -6,7 +6,9 @@ use kulyrax_core::execution::{
 use kulyrax_core::pipeline;
 use kulyrax_core::replay::{ReplayReport, ReplayRunOptions};
 use kulyrax_core::routing::StorageKind;
-use kulyrax_core::runtime::PROJECTION_DEPTH_EXCEEDS_RECOMMENDED_WARNING;
+use kulyrax_core::runtime::{
+    DryRunOutcome, DryRunReport, PROJECTION_DEPTH_EXCEEDS_RECOMMENDED_WARNING, ReloadOutcome,
+};
 use kulyrax_core::source::runner::{RunMode, SourceRunOptions, SourceRunReport, StoppedReason};
 
 use std::path::PathBuf;
@@ -16,7 +18,7 @@ use std::time::Duration;
 
 #[derive(Parser)]
 #[command(name = "kulyrax")]
-#[command(about = "Event-first projection engine")]
+#[command(about = "Event-first projection engine", version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -31,6 +33,23 @@ enum OutputFormat {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Ask a running `run` or `ingest` process to re-read its config, routing and mappings
+    Reload {
+        /// The same config file the running process was started with.
+        #[arg(long)]
+        config: PathBuf,
+        /// Seconds to wait for the process to answer.
+        #[arg(long, default_value_t = 30)]
+        timeout_secs: u64,
+    },
+
+    /// Create a runnable starter project (config, routing, a mapping, sample events)
+    Init {
+        /// Folder to create the project in; created if missing.
+        #[arg(default_value = ".")]
+        dir: PathBuf,
+    },
+
     /// Run a single event (`--event`) or the continuous source loop (config `sources:`).
     Run {
         #[arg(long)]
@@ -96,6 +115,7 @@ enum Commands {
         output: OutputFormat,
     },
 
+    /// Show which adapters an event reaches and in what order (no writes)
     Explain {
         #[arg(long)]
         config: PathBuf,
@@ -111,6 +131,7 @@ enum Commands {
         output: OutputFormat,
     },
 
+    /// Show what one event would write to each adapter, without writing anything
     DryRun {
         #[arg(long)]
         config: PathBuf,
@@ -158,6 +179,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     let exit_code = match cli.command {
+        Commands::Init { dir } => init_cmd(dir)?,
+        Commands::Reload {
+            config,
+            timeout_secs,
+        } => reload_cmd(config, timeout_secs)?,
         Commands::Run {
             config,
             mappings,
@@ -278,6 +304,7 @@ fn run_cmd(
         &opts,
         &stop,
         kulyrax_backends::register_default_backends,
+        log_reload,
     )?;
     render_source_run_report(&report, output)?;
     Ok(match report.stopped_reason {
@@ -559,7 +586,72 @@ fn explain_cmd(
 }
 
 // --------------------------------------------------
-// Dry-run (full simulated execution)
+// Reload (ask a running process to re-read its project)
+// --------------------------------------------------
+
+fn reload_cmd(config: PathBuf, timeout_secs: u64) -> Result<i32, Box<dyn std::error::Error>> {
+    let outcome = pipeline::request_reload(&config, Duration::from_secs(timeout_secs))?;
+    Ok(match outcome {
+        ReloadOutcome::Applied { message } => {
+            println!("reload applied: {message}");
+            0
+        }
+        ReloadOutcome::Rejected { reason } => {
+            eprintln!(
+                "reload rejected, still running the previous configuration:
+  {reason}"
+            );
+            1
+        }
+        ReloadOutcome::NotPickedUp => {
+            eprintln!(
+                "no running process answered within {timeout_secs}s. Is `kulyrax run` (without --once) or `kulyrax ingest` running with {}?",
+                config.display()
+            );
+            2
+        }
+    })
+}
+
+/// How a running process reports each reload on stderr.
+fn log_reload(outcome: &ReloadOutcome) {
+    match outcome {
+        ReloadOutcome::Applied { message } => eprintln!("kulyrax: reload applied ({message})"),
+        ReloadOutcome::Rejected { reason } => {
+            eprintln!("kulyrax: reload rejected, keeping the previous configuration: {reason}")
+        }
+        ReloadOutcome::NotPickedUp => {}
+    }
+}
+
+// --------------------------------------------------
+// Init (starter project)
+// --------------------------------------------------
+
+fn init_cmd(dir: PathBuf) -> Result<i32, Box<dyn std::error::Error>> {
+    let written = match pipeline::init_project(&dir) {
+        Ok(written) => written,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return Ok(1);
+        }
+    };
+    println!("Created a Kulyrax project in {}:", dir.display());
+    for path in &written {
+        println!("  {}", path.display());
+    }
+    println!();
+    println!("Next:");
+    if dir != std::path::Path::new(".") {
+        println!("  cd {}", dir.display());
+    }
+    println!("  kulyrax run --config config.yaml --mappings mappings --once");
+    println!("  # then look in ./out/users/");
+    Ok(0)
+}
+
+// --------------------------------------------------
+// Dry-run (resolve writes, never perform them)
 // --------------------------------------------------
 
 fn dry_run_cmd(
@@ -568,14 +660,57 @@ fn dry_run_cmd(
     event: PathBuf,
     output: OutputFormat,
 ) -> Result<i32, Box<dyn std::error::Error>> {
-    let report = pipeline::dry_run(
-        &config,
-        &mappings,
-        &event,
-        kulyrax_backends::register_default_backends,
-    )?;
-    render_report(&report, output)?;
-    Ok(exit_code_from_status(report.status))
+    let report = pipeline::dry_run(&config, &mappings, &event)?;
+    match output {
+        OutputFormat::Text => print_dry_run_report(&report),
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+    }
+    let any_failed = report
+        .adapters
+        .iter()
+        .any(|a| matches!(a.outcome, DryRunOutcome::Failed { .. }));
+    Ok(if any_failed { 1 } else { 0 })
+}
+
+fn print_dry_run_report(report: &DryRunReport) {
+    println!("--- Dry Run (nothing was written) ---");
+    println!("Event: {} ({})", report.event_id, report.event_type);
+    if report.adapters.is_empty() {
+        println!("No adapter is routed for this event type.");
+    }
+    for (i, adapter) in report.adapters.iter().enumerate() {
+        let kind = adapter
+            .kind
+            .map_or_else(|| "unknown kind".to_string(), |k| k.to_string());
+        println!();
+        println!("{}. {} ({kind})", i + 1, adapter.adapter_id);
+        match &adapter.outcome {
+            DryRunOutcome::Planned(w) => {
+                let facet = if w.facet.is_empty() {
+                    String::new()
+                } else {
+                    format!(", facet {}", w.facet)
+                };
+                println!(
+                    "   would {:?} {} key {}{facet} (on_existing: {:?}, v{} -> v{})",
+                    w.operation,
+                    w.target,
+                    w.entity_key,
+                    w.on_existing,
+                    w.source_version,
+                    w.projected_version
+                );
+                println!("   values: {}", w.values);
+            }
+            DryRunOutcome::Failed { error } => println!("   would fail: {error}"),
+            DryRunOutcome::NotPreviewable { reason } => println!("   not previewable: {reason}"),
+        }
+    }
+    println!();
+    println!(
+        "Guard state was not read, so a live run may still skip these writes as \
+         already projected or stale."
+    );
 }
 
 // --------------------------------------------------

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use rusqlite::{Connection, Transaction, params, params_from_iter};
 
@@ -23,6 +23,22 @@ pub struct SqliteAdapter {
     builder: SqlRuntimeBuilder,
     upcasters: Arc<UpcasterRegistry>,
     migration_policy: MigrationPolicy,
+    /// Opened on the first event and reused. Opening per event, with the
+    /// default rollback journal, cost several disk flushes per write.
+    conn: Mutex<Option<Connection>>,
+}
+
+/// WAL with `synchronous = FULL` flushes the log once per commit, so every
+/// committed projection survives a power loss. That durability matters: the
+/// source checkpoint advances right after the batch commits, so a lost write
+/// would never be reprojected. `synchronous = NORMAL` would be faster but
+/// could lose the last commits on power loss.
+fn open_connection(path: &str) -> rusqlite::Result<Connection> {
+    let conn = Connection::open(path)?;
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "synchronous", "FULL")?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    Ok(conn)
 }
 
 impl SqliteAdapter {
@@ -41,6 +57,7 @@ impl SqliteAdapter {
             builder,
             upcasters,
             migration_policy,
+            conn: Mutex::new(None),
         }
     }
 
@@ -105,9 +122,24 @@ impl StorageAdapter for SqliteAdapter {
             write: projection.write,
         };
 
-        let mut conn = match Connection::open(&self.path) {
-            Ok(c) => c,
-            Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
+        let mut guard = match self.conn.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                return self.failure(AdapterError::WriteFailed(
+                    "SQLite connection lock poisoned by an earlier panic".to_string(),
+                ));
+            }
+        };
+        if guard.is_none() {
+            match open_connection(&self.path) {
+                Ok(c) => *guard = Some(c),
+                Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
+            }
+        }
+        let Some(conn) = guard.as_mut() else {
+            return self.failure(AdapterError::WriteFailed(
+                "SQLite connection unavailable".to_string(),
+            ));
         };
         let tx = match conn.transaction() {
             Ok(tx) => tx,

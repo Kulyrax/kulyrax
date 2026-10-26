@@ -5,7 +5,7 @@
 use kulyrax_core::KulyraxRuntime;
 
 /// Register every backend enabled by feature. Call before the runtime builds
-/// its adapters (its first `run_once` / `dry_run_once` / `replay` /
+/// its adapters (its first `run_once` / `replay` /
 /// `run_sources` call).
 #[allow(unused_variables)] // `runtime` is unused when every backend feature is off.
 pub fn register_default_backends(runtime: &mut KulyraxRuntime) {

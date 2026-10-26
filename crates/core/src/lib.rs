@@ -6,6 +6,7 @@ pub mod pipeline;
 pub mod replay;
 pub mod routing;
 pub mod runtime;
+pub mod scaffold;
 pub mod source;
 pub mod upcast;
 
@@ -31,8 +32,7 @@ use crate::{
 
 /// Re-export at crate root so users can `use kulyrax_core::ExecutionReport`.
 pub use execution::{
-    AdapterExecutionReport, AdapterOutcome, AdapterReportError, ExecutionMode, ExecutionReport,
-    ExecutionStatus,
+    AdapterExecutionReport, AdapterOutcome, AdapterReportError, ExecutionReport, ExecutionStatus,
 };
 
 /// Phase 10.2 upcaster registry for schema evolution.
@@ -70,7 +70,7 @@ pub use runtime::{AdapterBuildContext, AdapterRegistry, KulyraxRuntime, MappingS
 /// Execution report types (also at [crate root](crate) for convenience).
 pub mod report {
     pub use crate::execution::{
-        AdapterExecutionReport, AdapterOutcome, AdapterReportError, ExecutionMode, ExecutionReport,
+        AdapterExecutionReport, AdapterOutcome, AdapterReportError, ExecutionReport,
         ExecutionStatus,
     };
 }
@@ -154,52 +154,4 @@ pub fn execute_event_with_upcasters(
         routing_rules,
         &adapter_meta,
     )
-}
-
-/// Execute a single event with an explicit [ExecutionMode] (e.g. [execution::ExecutionMode::DryRun] for no-write simulation).
-/// Same as [execute_event] when mode is [execution::ExecutionMode::Run].
-/// When mode is DryRun, the pipeline runs but adapters are expected to skip persistence (adapter support is required for true dry-run).
-#[allow(clippy::too_many_arguments)]
-pub fn execute_event_with_mode(
-    config: &KulyraxConfig,
-    sql_mappings: HashMap<String, SqlMapping>,
-    document_mappings: HashMap<String, DocumentMapping>,
-    kv_mappings: HashMap<String, KvMapping>,
-    graph_mappings: HashMap<String, GraphMapping>,
-    routing_rules: &HashMap<String, Vec<crate::routing::AdapterId>>,
-    event: Event,
-    mode: crate::execution::ExecutionMode,
-) -> ExecutionReport {
-    match mode {
-        crate::execution::ExecutionMode::Run => execute_event(
-            config,
-            sql_mappings,
-            document_mappings,
-            kv_mappings,
-            graph_mappings,
-            routing_rules,
-            event,
-        ),
-        crate::execution::ExecutionMode::DryRun => {
-            let mut adapters = build_adapters_from_config(
-                config,
-                crate::runtime::MappingSet {
-                    sql: sql_mappings,
-                    document: document_mappings,
-                    kv: kv_mappings,
-                    graph: graph_mappings,
-                },
-                Arc::new(UpcasterRegistry::new()),
-                &runtime::AdapterRegistry::new(),
-            );
-            let adapter_meta = crate::runtime::adapter_metadata_map(config);
-            dispatch(
-                &event,
-                &mut adapters,
-                config.failure_policy,
-                routing_rules,
-                &adapter_meta,
-            )
-        }
-    }
 }

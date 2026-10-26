@@ -74,7 +74,7 @@ fn sample_config(doc_root: &Path, sqlite_path: &Path) -> KulyraxConfig {
     KulyraxConfig {
         version: 1,
         routing: RoutingConfig {
-            file: "routing.json".into(),
+            file: "routing.yaml".into(),
         },
         adapters: vec![
             AdapterConfig::Sqlite(SqliteAdapterConfig {
@@ -446,7 +446,7 @@ fn replay_user_created_writes_two_sqlite_adapters() {
     let config = KulyraxConfig {
         version: 1,
         routing: RoutingConfig {
-            file: "routing.json".into(),
+            file: "routing.yaml".into(),
         },
         adapters: vec![
             AdapterConfig::Sqlite(SqliteAdapterConfig {

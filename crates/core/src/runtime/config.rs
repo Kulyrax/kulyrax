@@ -386,7 +386,7 @@ pub fn expand_env(s: &str) -> String {
 // ------------------------------------------------------------
 
 /// A configured event source — the input-side mirror of [`AdapterConfig`].
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SourceConfig {
     /// Watches a directory for event files (`*.json` / `*.ndjson` / `*.jsonl`).
@@ -395,7 +395,7 @@ pub enum SourceConfig {
     Stdin(StdinSourceConfig),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct DirectorySourceConfig {
     pub id: String,
     /// Directory of event files, relative to the config file's directory.
@@ -404,7 +404,7 @@ pub struct DirectorySourceConfig {
     pub state_dir: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct StdinSourceConfig {
     pub id: String,
     pub state_dir: String,
@@ -546,7 +546,7 @@ mod source_tests {
         let yaml = r#"
 version: 1
 routing:
-  file: routing.json
+  file: routing.yaml
 adapters:
   - type: sqlite
     id: sql-primary
@@ -572,7 +572,7 @@ sources:
     fn rejects_duplicate_source_id() {
         let yaml = r#"
 version: 1
-routing: { file: routing.json }
+routing: { file: routing.yaml }
 adapters:
   - type: sqlite
     id: s
@@ -591,7 +591,7 @@ sources:
     fn config_without_sources_is_valid() {
         let yaml = r#"
 version: 1
-routing: { file: routing.json }
+routing: { file: routing.yaml }
 adapters:
   - type: sqlite
     id: s
@@ -639,7 +639,7 @@ mod phase19_tests {
     fn postgres_type_falls_through_to_custom() {
         let yaml = r#"
 version: 1
-routing: { file: routing.json }
+routing: { file: routing.yaml }
 adapters:
   - type: postgres
     id: pg-primary

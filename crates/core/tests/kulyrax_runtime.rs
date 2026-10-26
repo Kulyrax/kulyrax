@@ -57,7 +57,7 @@ fn config_with_one_custom_adapter(type_name: &str) -> KulyraxConfig {
     KulyraxConfig {
         version: 1,
         routing: RoutingConfig {
-            file: "routing.json".into(),
+            file: "routing.yaml".into(),
         },
         adapters: vec![AdapterConfig::Custom(CustomAdapterConfig {
             type_name: type_name.into(),
@@ -218,4 +218,49 @@ fn build_adapters_succeeds_when_every_adapter_builds() {
         runtime.run_once(user_created_event()).status,
         ExecutionStatus::Succeeded
     );
+}
+
+#[test]
+fn adapters_rebuilt_after_run_sources_still_receive_the_mappings() {
+    let type_name = "test-mapping-count-sql";
+    let seen_mapping_counts = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen_in_factory = Arc::clone(&seen_mapping_counts);
+    let sql_mapping: kulyrax_core::adapter::sql::mapping::SqlMapping = serde_yaml::from_str(
+        "event: UserCreated\ntable: users\nprimary_key: id\nversion: 1\ncolumns:\n  id: payload.id\n",
+    )
+    .expect("mapping parses");
+
+    let mut runtime = KulyraxRuntime::from_parts(
+        config_with_one_custom_adapter(type_name),
+        HashMap::from([("UserCreated".to_string(), sql_mapping)]),
+        HashMap::new(),
+        HashMap::new(),
+        HashMap::new(),
+        routing_to_sql_primary(),
+    );
+    runtime.register_adapter_factory(type_name, move |_entry, ctx| {
+        seen_in_factory
+            .lock()
+            .expect("lock")
+            .push(ctx.mappings.sql.len());
+        Ok(Box::new(CountingAdapter {
+            id: "sql-primary".to_string(),
+            priority: 10,
+            calls: Arc::new(AtomicUsize::new(0)),
+        }) as Box<dyn StorageAdapter>)
+    });
+
+    // run_sources consumes the built adapters; the next run must rebuild them
+    // from the same mappings, not from an empty set.
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    runtime
+        .run_sources(
+            Vec::new(),
+            &kulyrax_core::SourceRunOptions::default(),
+            &stop,
+        )
+        .expect("empty source run");
+    runtime.run_once(user_created_event());
+
+    assert_eq!(*seen_mapping_counts.lock().expect("lock"), [1, 1]);
 }

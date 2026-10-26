@@ -32,7 +32,7 @@ impl StorageAdapter for TestAdapter {
     }
 
     fn handle(&self, _event: &Event) -> AdapterResult {
-        // adapter_id 🔴 THIS MUST MATCH routing.json
+        // adapter_id 🔴 THIS MUST MATCH routing.yaml
         if self.succeed {
             AdapterResult::created(self.id.to_string(), self.kind)
         } else {
@@ -53,7 +53,7 @@ fn test_routing() -> HashMap<String, Vec<AdapterId>> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
-        .join("routing.json");
+        .join("routing.yaml");
 
     load_routing(path).expect("routing fixture loads")
 }
@@ -236,7 +236,7 @@ fn dispatch_only_runs_routed_adapters() {
         &meta,
     );
 
-    // routing.json selects only Sql + Document
+    // routing.yaml selects only Sql + Document
     assert_eq!(report.adapter_reports.len(), 2);
     assert!(
         report

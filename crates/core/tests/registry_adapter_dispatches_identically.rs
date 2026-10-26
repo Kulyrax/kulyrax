@@ -5,7 +5,7 @@
 //! same as any Rust trait implementation — not what this test is for.)
 //!
 //! Mirrors `dispatch.rs`'s own `set_test_routing()` / fixture-routing
-//! pattern: `tests/fixtures/routing.json` already sends `"UserCreated"` to
+//! pattern: `tests/fixtures/routing.yaml` already sends `"UserCreated"` to
 //! `["sql-primary", "doc-readmodel"]`, so this test registers a mock factory
 //! under `id: "sql-primary"` and runs a real built-in (`file`) adapter under
 //! `id: "doc-readmodel"`, wired so the built-in depends on the registered
@@ -33,7 +33,7 @@ fn test_routing() -> HashMap<String, Vec<AdapterId>> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
-        .join("routing.json");
+        .join("routing.yaml");
     load_routing(path).expect("routing fixture loads")
 }
 
@@ -103,7 +103,7 @@ fn registered_adapter_participates_identically_in_dependency_order_and_dispatch(
     let config = KulyraxConfig {
         version: 1,
         routing: RoutingConfig {
-            file: "routing.json".into(),
+            file: "routing.yaml".into(),
         },
         adapters: vec![
             AdapterConfig::Custom(CustomAdapterConfig {
@@ -182,7 +182,7 @@ fn unregistered_custom_type_becomes_a_failed_placeholder_not_a_panic() {
     let config = KulyraxConfig {
         version: 1,
         routing: RoutingConfig {
-            file: "routing.json".into(),
+            file: "routing.yaml".into(),
         },
         // `CacheInvalidated` routes to `["kv-cache"]` alone in the shared
         // routing fixture, so a single adapter fully covers this route.

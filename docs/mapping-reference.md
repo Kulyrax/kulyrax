@@ -22,6 +22,31 @@ fail loading, and the error names both files.
 are optional. An event that routing sends to an adapter but that has no loaded
 mapping fails validation at startup with `Missing<Kind>Mapping`.
 
+## Routing (`routing.yaml`)
+
+Routing decides which adapters each event type reaches. The config names the
+file, relative to the config file itself:
+
+```yaml
+# config.yaml
+routing:
+  file: routing.yaml
+```
+
+```yaml
+# routing.yaml: event_type: [adapter ids it reaches]
+UserRegistered: [sql-primary]
+UserEmailChanged: [sql-primary, doc-readmodel]
+```
+
+Each adapter id must match an `id:` under `adapters:` in the config. An event
+type that isn't listed reaches no adapter. The file must end in `.yaml` or
+`.yml`; a `routing.json` from an older version fails at startup with a message
+explaining the conversion.
+
+Every file you write for Kulyrax (config, routing, mappings) is YAML. Events
+stay JSON, because that is the contract with producers.
+
 ## Shared fields
 
 | field | required | default | meaning |
@@ -83,7 +108,7 @@ columns:
 
 The identical mapping file routes to either document backend — `file`
 (file-backed) or `mongodb` — chosen by which adapter
-`routing.json` points the event type at. Nothing in the mapping itself names
+`routing.yaml` points the event type at. Nothing in the mapping itself names
 a backend; on MongoDB, `document` becomes the document's fields directly
 (the projected value *is* the Mongo document, keyed by `_id: <id>`) and a
 named `facet` becomes a server-side `$set` instead of a read-merge-write.
@@ -121,7 +146,7 @@ document:
 ## Key-value (`mappings/keyvalue/`)
 
 The identical mapping file routes to either KV backend — `keyvalue` (file-backed)
-or `redis` — chosen by which adapter `routing.json` points the event
+or `redis` — chosen by which adapter `routing.yaml` points the event
 type at. Nothing in the mapping itself names a backend.
 
 | field | required | meaning |
@@ -145,7 +170,7 @@ value:
 A graph mapping is a `kind`-tagged union: exactly one of `node` or `edge`
 per mapping file. The identical mapping file routes to either graph backend
 — `graph` (file-backed) or `neo4j` — chosen by which adapter
-`routing.json` points the event type at. On Neo4j, `label`/`edge_type`
+`routing.yaml` points the event type at. On Neo4j, `label`/`edge_type`
 become the node label / relationship type directly, `properties` become the
 record's properties, and a node's `key` (or an edge's resolved identity)
 becomes its `id` property.

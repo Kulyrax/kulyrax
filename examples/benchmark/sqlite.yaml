@@ -1,0 +1,15 @@
+version: 1
+routing:
+  file: routing.yaml
+adapters:
+  - type: sqlite
+    id: store
+    priority: 10
+    capabilities: [write, upsert]
+    config:
+      path: ./bench.db
+sources:
+  - type: directory
+    id: bench
+    path: ./events
+    state_dir: ./.kulyrax/state

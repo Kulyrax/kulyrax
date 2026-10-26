@@ -160,7 +160,7 @@ Commands:
 * `run` — real execution: one-shot with `--event <file>`, or the continuous source loop (`--once` to drain and exit) when the config declares `sources:`
 * `sources` — list configured sources and their committed positions
 * `explain` — routing + dependency order for one event, no execution
-* `dry-run` — full simulated execution, no writes
+* `dry-run` — show the write each routed adapter would make for one event; builds no adapter and writes nothing
 * `replay` — drain a directory / NDJSON file once (superseded by `run --once`; kept for compatibility)
 * `ingest` — run the gRPC ingestion service, projecting whatever a connected producer streams in
 

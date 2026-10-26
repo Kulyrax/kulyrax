@@ -2,9 +2,9 @@
 # doesn't go through the directory/stdin source path (see examples/grpc-producer).
 #
 # Three real destinations, routed identically for every vehicle event type
-# (see routing.json): Postgres and MongoDB are built into kulyrax-core /
-# kulyrax-adapter-postgres; Elasticsearch is the new kulyrax-adapter-elasticsearch
-# crate built specifically because this example needed a real third
+# (see routing.yaml): Postgres, MongoDB and Elasticsearch each come from their
+# own adapter crate. kulyrax-adapter-elasticsearch was built specifically
+# because this example needed a real third
 # destination, not a mock (see this example's README "Capability assessment").
 version: 1
 
@@ -18,7 +18,7 @@ version: 1
 failure_policy: continue_on_error
 
 routing:
-  file: routing.json
+  file: routing.yaml
 
 adapters:
   - type: postgres

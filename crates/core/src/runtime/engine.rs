@@ -24,16 +24,22 @@ use crate::replay::{ReplayContext, ReplayLoadError, ReplayReport, ReplayRunOptio
 use crate::routing::AdapterId;
 use crate::runtime::config::{ConfigError, CustomAdapterConfig, KulyraxConfig};
 use crate::runtime::dependency_graph::{AdapterExecutionMeta, adapter_metadata_map};
+use crate::runtime::dry_run::{DryRunReport, dry_run_event};
 use crate::runtime::factory::build_adapters_reporting_failures;
 use crate::runtime::registry::{AdapterBuildContext, AdapterRegistry, MappingSet};
-use crate::source::runner::{SourceRunOptions, SourceRunReport, run_sources_with_adapters};
+use crate::source::runner::{
+    Reloaded, Reloader, SourceRunOptions, SourceRunReport, run_sources_with_adapters,
+    run_sources_with_reload,
+};
 use crate::source::{EventSource, SourceError};
 use crate::upcast::UpcasterRegistry;
 
 pub struct KulyraxRuntime {
     config: KulyraxConfig,
-    /// Moved into the adapters when they are built; `None` afterwards.
-    mappings: Option<MappingSet>,
+    /// Kept for the runtime's lifetime: every adapter build gets a copy, so
+    /// adapters rebuilt after `run_sources` (which consumes them) still have
+    /// their mappings, and `dry_run_once` can resolve writes without adapters.
+    mappings: MappingSet,
     routing_rules: HashMap<String, Vec<AdapterId>>,
     adapter_meta: HashMap<AdapterId, AdapterExecutionMeta>,
     registry: AdapterRegistry,
@@ -90,7 +96,7 @@ impl KulyraxRuntime {
         Self {
             adapter_meta: adapter_metadata_map(&config),
             config,
-            mappings: Some(mappings),
+            mappings,
             routing_rules,
             registry: AdapterRegistry::new(),
             upcasters: Arc::new(UpcasterRegistry::new()),
@@ -119,7 +125,7 @@ impl KulyraxRuntime {
     }
 
     /// Register a factory for adapter `type: <type_name>`. Must happen before
-    /// adapters are built (the first `run_once` / `dry_run_once` / `replay` /
+    /// adapters are built (the first `run_once` / `replay` /
     /// `run_sources` call); an unregistered type builds as a failing
     /// placeholder.
     pub fn register_adapter_factory(
@@ -151,7 +157,7 @@ impl KulyraxRuntime {
         if self.adapters.is_none() {
             let (adapters, failures) = build_adapters_reporting_failures(
                 &self.config,
-                self.mappings.take().unwrap_or_default(),
+                self.mappings.clone(),
                 Arc::clone(&self.upcasters),
                 &self.registry,
             );
@@ -182,10 +188,18 @@ impl KulyraxRuntime {
         )
     }
 
-    /// Dispatches exactly like [`Self::run_once`]; a true dry run depends on
-    /// adapter-level support.
-    pub fn dry_run_once(&mut self, event: Event) -> ExecutionReport {
-        self.run_once(event)
+    /// Resolve what `event` would write to each adapter it routes to, without
+    /// writing anything, building adapters, or contacting any store. See
+    /// [`crate::runtime::dry_run`] for what the report does and doesn't cover.
+    pub fn dry_run_once(&self, event: &Event) -> Result<DryRunReport, PipelineError> {
+        dry_run_event(
+            event,
+            &self.config,
+            &self.routing_rules,
+            &self.mappings,
+            &self.upcasters,
+        )
+        .map_err(PipelineError::Validation)
     }
 
     /// Replay a stream in sequence order through the built adapters.
@@ -205,6 +219,39 @@ impl KulyraxRuntime {
         let result = ctx.run_stream_with_options(events, opts);
         self.adapters = Some(ctx.into_adapters());
         result
+    }
+
+    /// [`Self::run_sources`] that asks `reloader` between batches whether to
+    /// switch to a new configuration (see [`run_sources_with_reload`]).
+    pub fn run_sources_with_reload(
+        &mut self,
+        sources: Vec<Box<dyn EventSource>>,
+        opts: &SourceRunOptions,
+        stop: &AtomicBool,
+        reloader: &mut dyn Reloader,
+    ) -> Result<SourceRunReport, SourceError> {
+        self.ensure_adapters_built();
+        let adapters = self.adapters.take().unwrap_or_default();
+        run_sources_with_reload(
+            &self.config,
+            self.routing_rules.clone(),
+            adapters,
+            sources,
+            opts,
+            stop,
+            Some(reloader),
+        )
+    }
+
+    /// Build the adapters and hand over everything a running loop needs to
+    /// switch to this runtime's configuration.
+    pub(crate) fn into_reloaded(mut self) -> Result<Reloaded, PipelineError> {
+        self.build_adapters()?;
+        Ok(Reloaded {
+            adapters: self.adapters.take().unwrap_or_default(),
+            routing_rules: self.routing_rules,
+            config: self.config,
+        })
     }
 
     /// Run the poll → sort → dispatch → commit loop until caught up, stopped,

@@ -222,12 +222,46 @@ pub fn run_sources(
 pub fn run_sources_with_adapters(
     config: &KulyraxConfig,
     routing_rules: HashMap<String, Vec<AdapterId>>,
+    adapters: Vec<Box<dyn StorageAdapter>>,
+    sources: Vec<Box<dyn EventSource>>,
+    opts: &SourceRunOptions,
+    stop: &AtomicBool,
+) -> Result<SourceRunReport, SourceError> {
+    run_sources_with_reload(config, routing_rules, adapters, sources, opts, stop, None)
+}
+
+/// A new adapter set, routing table and config, ready to swap in.
+pub struct Reloaded {
+    pub config: KulyraxConfig,
+    pub routing_rules: HashMap<String, Vec<AdapterId>>,
+    pub adapters: Vec<Box<dyn StorageAdapter>>,
+}
+
+/// Asked between batches whether to switch to a new configuration.
+///
+/// Return `Some` only for a configuration that is already validated and
+/// whose adapters are built: the loop swaps it in without further checks.
+/// A rejected reload returns `None` and the loop carries on unchanged.
+pub trait Reloader {
+    fn poll(&mut self) -> Option<Reloaded>;
+}
+
+/// [`run_sources_with_adapters`] that also asks `reloader` for a new
+/// configuration at the top of every loop iteration. That point is only
+/// reached once every batch polled so far has been committed or the loop has
+/// halted, so no batch ever runs on a mix of old and new adapters. Sources are
+/// not replaced: their positions carry over.
+pub fn run_sources_with_reload(
+    config: &KulyraxConfig,
+    mut routing_rules: HashMap<String, Vec<AdapterId>>,
     mut adapters: Vec<Box<dyn StorageAdapter>>,
     mut sources: Vec<Box<dyn EventSource>>,
     opts: &SourceRunOptions,
     stop: &AtomicBool,
+    mut reloader: Option<&mut dyn Reloader>,
 ) -> Result<SourceRunReport, SourceError> {
-    let adapter_meta = adapter_metadata_map(config);
+    let mut adapter_meta = adapter_metadata_map(config);
+    let mut failure_policy = config.failure_policy;
 
     let mut report = SourceRunReport {
         batches: Vec::new(),
@@ -245,6 +279,13 @@ pub fn run_sources_with_adapters(
         if stop.load(Ordering::Relaxed) {
             report.stopped_reason = StoppedReason::Shutdown;
             return Ok(report);
+        }
+
+        if let Some(reloaded) = reloader.as_deref_mut().and_then(|r| r.poll()) {
+            adapter_meta = adapter_metadata_map(&reloaded.config);
+            failure_policy = reloaded.config.failure_policy;
+            routing_rules = reloaded.routing_rules;
+            adapters = reloaded.adapters;
         }
 
         let mut progressed = false;
@@ -273,7 +314,7 @@ pub fn run_sources_with_adapters(
                 let o = dispatch_batch(
                     &sorted,
                     &mut adapters,
-                    config.failure_policy,
+                    failure_policy,
                     &routing_rules,
                     &adapter_meta,
                     &source_id,

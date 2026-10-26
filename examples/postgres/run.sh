@@ -11,7 +11,7 @@ export DATABASE_URL="${DATABASE_URL:-postgres://postgres:postgres@localhost:5432
 DBTOOL="cargo run --quiet --manifest-path dbtool/Cargo.toml --"
 KULYRAX="cargo run --quiet --manifest-path ../../Cargo.toml -p kulyrax-cli --bin kulyrax --"
 
-rm -rf .conduit
+rm -rf .kulyrax
 
 $DBTOOL init "$DATABASE_URL"
 

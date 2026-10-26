@@ -224,7 +224,7 @@ impl AdapterResult {
 // ---------------------------------------------------------------------------
 
 /// Mapping-level write mode for an entity that already has a projected state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OnExisting {
     /// Entity already projected → clean skip (`SkipReason::AlreadyProjected`).
@@ -240,7 +240,7 @@ pub enum OnExisting {
 /// What a mapping does (Phase 13.1). `on_existing` is read only when
 /// `operation: upsert` — orthogonal fields, not a combined enum, so adding a
 /// third operation later doesn't multiply the matrix.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Operation {
     /// Create or update the entity (Phase 11/12 behavior). Default.

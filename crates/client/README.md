@@ -1,10 +1,10 @@
 # kulyrax-client
 
 The reference Rust producer client for Kulyrax's gRPC ingestion contract
-([`kulyrax/v1`](https://github.com/Panchauly/kulyrax/blob/master/proto/kulyrax/v1/ingest.proto)).
+([`kulyrax/v1`](https://github.com/Kulyrax/kulyrax/blob/main/proto/kulyrax/v1/ingest.proto)).
 A thin wrapper over the generated `tonic` client — the shape a producer in any
 `protoc`-supported language reproduces with generated stubs and ~20 lines of glue (see
-[`proto/README.md`](https://github.com/Panchauly/kulyrax/blob/master/proto/README.md)).
+[`proto/README.md`](https://github.com/Kulyrax/kulyrax/blob/main/proto/README.md)).
 
 ```rust,no_run
 # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -28,5 +28,5 @@ while let Some(ack) = producer.next_ack().await {
 # }
 ```
 
-Licensed under either of [MIT](https://github.com/Panchauly/kulyrax/blob/master/LICENSE-MIT)
-or [Apache-2.0](https://github.com/Panchauly/kulyrax/blob/master/LICENSE-APACHE) at your option.
+Licensed under either of [MIT](https://github.com/Kulyrax/kulyrax/blob/main/LICENSE-MIT)
+or [Apache-2.0](https://github.com/Kulyrax/kulyrax/blob/main/LICENSE-APACHE) at your option.

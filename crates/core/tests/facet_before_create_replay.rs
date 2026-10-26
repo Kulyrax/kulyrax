@@ -89,7 +89,7 @@ fn replay_reorders_facet_after_create_by_sequence() {
     let config = KulyraxConfig {
         version: 1,
         routing: RoutingConfig {
-            file: "routing.json".into(),
+            file: "routing.yaml".into(),
         },
         adapters: vec![AdapterConfig::File(FileAdapterConfig {
             id: "doc-readmodel".into(),

@@ -28,7 +28,7 @@ fn main() {
     let config = KulyraxConfig {
         version: 1,
         routing: RoutingConfig {
-            file: "routing.json".into(),
+            file: "routing.yaml".into(),
         },
         adapters: vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
             id: "sql-primary".into(),

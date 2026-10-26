@@ -6,7 +6,7 @@
 version: 1
 
 routing:
-  file: routing.json
+  file: routing.yaml
 
 adapters:
   - type: postgres
@@ -27,4 +27,4 @@ sources:
   - type: directory
     id: quickstart
     path: ./events
-    state_dir: ./.conduit/state
+    state_dir: ./.kulyrax/state

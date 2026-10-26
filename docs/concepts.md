@@ -20,7 +20,7 @@ producer — is the same shape:
 }
 ```
 
-- **`event_type`** is the only thing routing looks at. `routing.json` maps
+- **`event_type`** is the only thing routing looks at. `routing.yaml` maps
   it to a list of adapter ids; each adapter's mapping directory then has (at
   most) one mapping file per event type. There is no content-based or
   metadata-based routing — this is deliberate (see the [README](../README.md#core-principles)).

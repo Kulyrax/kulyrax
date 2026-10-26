@@ -1,0 +1,9 @@
+# Matches the users table created by examples/sqlite-quickstart/dbtool.
+event: UserRegistered
+table: users
+primary_key: id
+version: 1
+columns:
+  id: payload.id
+  name: payload.name
+  email: payload.email
