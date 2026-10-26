@@ -18,13 +18,31 @@ where Postgres spends 5.7 ms per event with `synchronous_commit` off (from
 - [x] The run report has per-stage timing: source read (read + parse), dispatch,
   `decide()` reads, adapter write, commit, checkpoint.
 - [x] Input is split across many files (default 1,000 events per file).
-- [ ] 100,000-event throughput baseline recorded for every backend.
-- [ ] p50/p99 projection lag recorded for every backend.
+- [ ] Throughput baseline for every backend: 100,000 events, except MySQL and
+  Elasticsearch at 10,000 (their paths were known to be broken or unexplained).
+- [ ] p50/p99 projection lag recorded for every backend, with pass/fail against the
+  lag target.
 - [ ] One rebuild-while-ingesting run recorded (Postgres).
 - [ ] Where Postgres's 5.7 ms/event goes, from 100k-event stage timings.
+- [ ] File stores measured with Defender on and with `work/` excluded, side by side.
+- [ ] Directory-size isolation: file-document at 10k vs 100k events, both excluded.
+- [ ] Summary table of all backends with per-stage breakdown and pass/fail against
+  both targets.
 - [x] fmt, clippy `-D warnings` and `cargo test --workspace` pass.
 
+## Targets
+
+Set by the owner (2026-10-26); the summary reports pass/fail for each backend.
+
+- Throughput: at least 5,000 events/s per adapter, about 200 µs per event.
+- Lag: p99 under 1 s.
+
 ## Constraints and assumptions
+
+- **Every number here is an internal baseline.** The machine is a domain-joined
+  Windows laptop with Defender on, Hyper-V crashes, and databases in Docker Desktop's
+  VM, whose disk is a file on NTFS. Published benchmarks will run on a clean Linux VM
+  with NVMe, with hardware and settings recorded.
 
 - Constraint: no engine behaviour change in this phase. Stage timing only adds a
   `timings` field to the run report and a table to its text output.
