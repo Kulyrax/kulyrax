@@ -1,0 +1,16 @@
+version: 1
+routing:
+  file: routing.yaml
+adapters:
+  - type: postgres
+    id: store
+    priority: 10
+    capabilities: [write, upsert, delete, transactions]
+    config:
+      url: ${DATABASE_URL}
+      pool_size: 4
+sources:
+  - type: directory
+    id: bench
+    path: ./events
+    state_dir: ./.kulyrax/state

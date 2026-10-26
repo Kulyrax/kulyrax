@@ -17,3 +17,11 @@ Thumbs.db
 # State and output written by running the examples
 examples/*/.kulyrax/
 examples/*/app.db
+
+# Benchmark scratch data
+examples/benchmark/events/
+examples/benchmark/bench.db
+examples/benchmark/run.log
+
+# Local Claude Code state
+.claude/

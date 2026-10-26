@@ -17,15 +17,25 @@ extension point, not a fork: see
 
 ## Install
 
-Kulyrax is not on crates.io yet, so build it from source with a Rust toolchain
-(1.88 or newer):
+Download the archive for your platform from the
+[latest release](https://github.com/Kulyrax/kulyrax/releases/latest), unpack it, and
+put `kulyrax` on your `PATH`. One binary, every backend included.
+
+| Platform | Archive |
+|---|---|
+| Linux x86_64 | `kulyrax-<version>-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS, Apple Silicon | `kulyrax-<version>-aarch64-apple-darwin.tar.gz` |
+| macOS, Intel | `kulyrax-<version>-x86_64-apple-darwin.tar.gz` |
+| Windows x86_64 | `kulyrax-<version>-x86_64-pc-windows-msvc.zip` |
+
+Each archive has a `.sha256` file next to it. The binaries are not code-signed yet, so
+macOS and Windows will ask you to confirm the first run.
+
+**Or build from source** with Rust 1.88 or newer (no `protoc` install needed):
 
 ```sh
 cargo install --git https://github.com/Kulyrax/kulyrax kulyrax-cli
 ```
-
-That installs one binary, `kulyrax`, with every backend included. No `protoc` install
-is needed; it is vendored.
 
 ## Start your own project
 
@@ -110,6 +120,15 @@ out-of-order event is a clean, explainable skip rather than a duplicate write.
   caught at startup, not mid-run.
 - **Storage-agnostic** — adapters define *how* to write; mappings define *what*.
 
+## How it compares
+
+| Tool | What it does | Use it instead of Kulyrax when… |
+|---|---|---|
+| **Debezium** | Captures row changes from a database's log and publishes them as events. | You need to *produce* events from an existing database. It sits upstream of Kulyrax, not in its place. |
+| **Kafka Connect** | Moves records between Kafka and other systems through per-connector sinks. | You are already on Kafka and an off-the-shelf sink does what you need. Kulyrax has no Kafka source yet ([roadmap](ROADMAP.md)). |
+| **Materialize** | A streaming SQL database that keeps views over streams up to date inside itself. | You need joins or aggregates across streams, queried from Materialize. |
+| **Kulyrax** | Projects each event into read models in *your* stores (SQL, document, key-value, graph) with one mapping format, one per-entity sequence guard against duplicates and reordering, and dependency order across targets. | You own the event log and want idempotent read models in several databases without writing projection code. |
+
 ## What Kulyrax is not
 
 Not a streaming platform (no Kafka-alternative ambitions), not an ETL/ELT tool, not a
@@ -141,7 +160,7 @@ database backend.
 
 ## Status
 
-Latest release notes: **[`RELEASES/v0.8.0.md`](RELEASES/v0.8.0.md)**.
+Latest release notes: **[`RELEASES/v0.9.0.md`](RELEASES/v0.9.0.md)**.
 
 Kulyrax is in an **alpha** phase — core architecture and execution semantics are stable,
 but public APIs may still evolve. Intended for early feedback, not production
