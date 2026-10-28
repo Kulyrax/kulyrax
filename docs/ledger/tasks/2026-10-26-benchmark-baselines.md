@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # Phase 1: benchmark every backend and find where the time goes
@@ -18,15 +18,16 @@ where Postgres spends 5.7 ms per event with `synchronous_commit` off (from
 - [x] The run report has per-stage timing: source read (read + parse), dispatch,
   `decide()` reads, adapter write, commit, checkpoint.
 - [x] Input is split across many files (default 1,000 events per file).
-- [ ] Throughput baseline for every backend: 100,000 events, except MySQL and
-  Elasticsearch at 10,000 (their paths were known to be broken or unexplained).
-- [ ] p50/p99 projection lag recorded for every backend, with pass/fail against the
-  lag target.
-- [ ] One rebuild-while-ingesting run recorded (Postgres).
-- [ ] Where Postgres's 5.7 ms/event goes, from 100k-event stage timings.
-- [ ] File stores measured with Defender on and with `work/` excluded, side by side.
-- [ ] Directory-size isolation: file-document at 10k vs 100k events, both excluded.
-- [ ] Summary table of all backends with per-stage breakdown and pass/fail against
+- [x] Throughput baseline for every backend: 100,000 events, except MySQL and
+  Elasticsearch at 10,000 (their paths were known to be broken or unexplained), and
+  Neo4j at 10,000 (owner, 2026-10-28; see Decisions).
+- [x] p50/p99 projection lag recorded for every backend. Not scored against the
+  lag target: at half throughput it is not meaningful (see Decisions).
+- [x] One rebuild-while-ingesting run recorded (Postgres).
+- [x] Where Postgres's 5.7 ms/event goes, from 100k-event stage timings.
+- [x] File stores measured with Defender on and with `work/` excluded, side by side.
+- [x] Directory-size isolation: file-document at 10k vs 100k events, both excluded.
+- [x] Summary table of all backends with per-stage breakdown and pass/fail against
   both targets.
 - [x] fmt, clippy `-D warnings` and `cargo test --workspace` pass.
 
@@ -75,6 +76,10 @@ Set by the owner (2026-10-26); the summary reports pass/fail for each backend.
   need 2.5 h for 100k to confirm the pattern every other backend already shows; its
   summary row is marked "10k, same pattern". (The 100k Neo4j run was voided: the
   laptop slept on battery from 2026-10-27 02:28 to 2026-10-28 18:13 mid-run.)
+- Owner, 2026-10-28, from the summary: sharding file-store directories is dropped
+  (no directory-size effect). MySQL and Elasticsearch server settings stay as they
+  are (`sync_binlog=1`, translog `request`); batching (Phase 2) and the
+  Elasticsearch `_bulk` API (Phase 4) are the fixes. Phase 2 approved.
 - `lag.sh` uses `--poll-interval-ms 100`. The CLI default is 1,000 ms, which would add
   up to a second of idle wait to every lag figure.
 
@@ -118,6 +123,106 @@ Recorded MySQL atomicity check (`docker compose exec mysql mysql bench`):
 `START TRANSACTION; INSERT 1; CREATE TABLE IF NOT EXISTS <existing>; INSERT 2; ROLLBACK;`
 left both rows in the table.
 
+## Summary (2026-10-28)
+
+Internal baselines only (see Constraints). Throughput binary: `cb9a21b` (pinned in
+`target/bench/`), except "MySQL, fixed": a release build of `b22fb1b`, the
+`prepare()` fix. Stage columns are µs per event; "other" is adapter time outside
+schema/read/write/commit (mapping, pool checkout, `BEGIN`). Every result verified
+every entity.
+
+**Gates and the MySQL fix.** At `b22fb1b`: fmt clean, clippy `-D warnings` clean,
+`cargo test --workspace` 109 binaries / 330 passed / 0 failed; Postgres, MongoDB and
+Neo4j suites pass against containers. The MySQL atomicity test **fails on the old
+code** (`cb9a21b`: the target row survives the failed guard write) and **passes on
+the new**. Details and one open blocker (MySQL deadlocks when its tests run in
+parallel) in [2026-10-26-sql-schema-out-of-transaction](2026-10-26-sql-schema-out-of-transaction.md).
+
+### Throughput (target ≥ 5,000 events/s ≈ 200 µs/event)
+
+| Backend | Events | events/s | schema | read | write | commit | other | Target |
+|---|---|---|---|---|---|---|---|---|
+| SQLite (Defender excluded) | 100k | 42 | 75 | 71 | 148 | **23,687** | 65 | fail |
+| Postgres | 100k | 30 | 2,758 ¹ | 1,694 | 2,836 | **23,955** | 2,197 | fail |
+| MySQL, old code | 10k | 4 | 77,800 | 3,033 | **181,063** | 2,852 | 2,643 | fail |
+| MySQL, fixed | 10k | 9 | ~10 ² | 2,912 | 5,823 | **99,899** ³ | 2,818 | fail |
+| Redis | 100k | 433 | – | 897 | 481 | – | 911 | fail |
+| MongoDB | 100k | 26 | – | 2,216 | 4,179 | **31,245** | 77 | fail |
+| Elasticsearch | 10k | 10 | – | 3,204 | **95,598** ⁴ | – | 36 | fail |
+| Neo4j (10k, same pattern) | 10k | 22 | – | 5,755 | 7,095 | **30,009** | 2,682 | fail |
+
+¹ Old code ran guard-table DDL on every event; `prepare()` removes it.
+² One call, 103 ms in total.
+³ InnoDB redo-log fsync plus binlog fsync (`sync_binlog=1`) on every transaction,
+on a VM disk. Server settings stay as they are; batching is the fix.
+⁴ The translog fsync on every request (below). The adapter moves to the `_bulk` API
+in Phase 4; durability stays `request`.
+
+### File stores, Defender on vs `work/` excluded (100k events)
+
+| Backend | Defender on: events/s (write µs) | Excluded: events/s (write µs) | Target |
+|---|---|---|---|
+| File document | 159 (6,077) | 393 (2,453) | fail |
+| File key-value | 218 (4,406) | 430 (2,238) | fail |
+| File graph | 143 (6,830) | 360 (2,681) | fail |
+
+The suite's file key-value run (244 events/s) had the exclusion added partway through;
+the rerun above replaces it. File document's "on" figure is the suite run.
+
+Defender costs 2.0–2.5× on file creation, but excluded, every file store still
+spends 2.2–2.7 ms per write with no fsync: more than 10× over the target either way.
+The fix is Phase 3 (per-batch writes and fsyncs), not per-file tuning before Phase 2.
+
+**Directory size: no effect.** File document, both excluded: 402 events/s (write
+2,391 µs) at 10k vs 393 events/s (2,453 µs) at 100k, within noise. Sharding the
+store directories is dropped from the plan (owner, 2026-10-28).
+
+### Lag (target p99 < 1 s): recorded, not scored
+
+At half of each backend's throughput, which for most is near idle; **not
+meaningful**. After Phase 2, lag is rerun at 1,000/s and 5,000/s for every backend.
+
+| Backend | Rate | p50 | p99 |
+|---|---|---|---|
+| File document | 79/s | 243 ms | 2,573 ms |
+| File key-value | 122/s | 84 ms | 228 ms |
+| File graph | 180/s | 129 ms | 546 ms |
+| Redis | 216/s | 102 ms | 484 ms |
+| SQLite | 21/s | 102 ms | 727 ms |
+| Postgres | 15/s | 92 ms | 710 ms |
+| MySQL, old code | 2/s | 335 ms | 891 ms |
+| MongoDB | 13/s | 151 ms | 1,122 ms |
+| Elasticsearch | 5/s | 147 ms | 1,923 ms |
+| Neo4j | 11/s | 103 ms | 680 ms |
+
+### Rebuild while ingesting (Postgres): fail
+
+100,000 events rebuilt at 30 events/s, the same as live; the target is at least 2×
+live. Live lag during the rebuild at 15 events/s: p50 199 ms, p99 962 ms.
+
+### Elasticsearch: `refresh` and translog durability
+
+No write sends `refresh`; the index default `refresh_interval` (1 s) applies. 300
+sequential `PUT ?op_type=create` per setting, two runs each, timed by curl
+(`time_total`), against the benchmark container:
+
+| `index.translog.durability` | mean | p50 | p99 |
+|---|---|---|---|
+| `request` (default) | 114 / 86 ms | 81 / 72 ms | 712 / 583 ms |
+| `async` (fsync every 5 s) | 8.4 / 7.5 ms | 7.2 / 5.8 ms | 13.5 / 12.9 ms |
+
+About 90% of a write is the per-request translog fsync, matching the 96 ms/write in
+the benchmark. The adapter default is unchanged.
+
+### Conclusion
+
+**The bottleneck is per-event commit plus per-event round trips, on every
+backend.** Each event pays its own durable commit (an fsync in SQLite, Postgres,
+MySQL, MongoDB, Neo4j and Elasticsearch) and its own network round trips for the
+guard read, the write and the transaction itself. No backend reaches a tenth of the
+target; most miss it by more than 100×. Tuning won't close that gap; only the batch
+contract (Phase 2) will.
+
 ## Phase 2 inputs
 
 Owner's reading of these results (2026-10-28), to be carried into the Phase 2 scope:
@@ -141,11 +246,15 @@ Owner's reading of these results (2026-10-28), to be carried into the Phase 2 sc
   commits, even when the table already exists, and later statements autocommit. So the
   guard read (`FOR UPDATE`), the target write and the guard write are not atomic, which
   breaks the `SqlTxn` atomicity contract. A crash between the target write and the
-  guard write leaves a row with no guard. Needs its own fix and approval; MySQL
-  benchmark numbers measure this broken path until then.
-- Elasticsearch: 132 ms per `PUT` with no `refresh` parameter. Cause unknown.
-- File stores: 3.5–5 ms per new file on Windows. Inferred, not checked: antivirus
-  scanning of newly created files. Phase 3's fsyncs will add to this.
+  guard write leaves a row with no guard. **Fixed** by the explicit `prepare()` step
+  ([2026-10-26-sql-schema-out-of-transaction](2026-10-26-sql-schema-out-of-transaction.md));
+  "MySQL, old code" measures the broken path, "MySQL, fixed" the new one. The fix
+  exposed MySQL deadlocks between concurrent writers: open, recorded in that task.
+- Elasticsearch: **explained**, the translog fsync on every request (Summary).
+  Phase 4 moves the adapter to `_bulk`.
+- File stores: **partly explained.** Defender accounts for 2.0–2.5×; with `work/`
+  excluded, writes still take 2.2–2.7 ms each with no fsync. Phase 3's fsyncs will
+  add to this unless they are per batch.
 - Every number comes from Docker Desktop on Windows, where container storage sits in
   a VM. Flush costs on Linux on bare metal may differ a lot.
 - The mapping loader requires `sql/` and `document/` folders even when a run uses
@@ -153,4 +262,7 @@ Owner's reading of these results (2026-10-28), to be carried into the Phase 2 sc
 
 ## Outcome
 
-In progress: tooling done and verified; the 100k baseline suite has not finished yet.
+Completed 2026-10-28. Every backend is measured with per-stage timings; every
+backend fails the throughput target and the Postgres rebuild fails the 2× rule. The
+cause is the same everywhere (Conclusion). The owner approved Phase 2 from this
+summary.
