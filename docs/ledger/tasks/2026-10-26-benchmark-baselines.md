@@ -63,8 +63,18 @@ Set by the owner (2026-10-26); the summary reports pass/fail for each backend.
   projection is durable and acknowledged. No engine change needed.
 - Lag runs last 180 s at half the backend's measured throughput, not 100,000 events.
   At 2–200 events/s, 100,000 paced events would take between 8 minutes and 14 hours
-  per backend. Throughput and rebuild runs use 100,000 events. **Open:** the requester
-  asked for 100k minimum; this deviation needs their acceptance.
+  per backend. Approved by the owner (2026-10-26).
+- **Lag results at half throughput are not meaningful** (owner, 2026-10-28): half of
+  ~30 events/s is ~15/s, near idle, so a "pass" there says nothing. After Phase 2,
+  lag is rerun at fixed absolute rates (1,000/s and 5,000/s) for every backend; that
+  is the lag result that counts. Here they are recorded but not scored.
+- **Rebuild must run at least 2× live throughput**, or it has no catch-up mode
+  (owner, 2026-10-28). The Postgres rebuild ran at 30 events/s, the same as live: a
+  failure.
+- Neo4j, Elasticsearch and MySQL run at 10,000 events. Neo4j at 11 events/s would
+  need 2.5 h for 100k to confirm the pattern every other backend already shows; its
+  summary row is marked "10k, same pattern". (The 100k Neo4j run was voided: the
+  laptop slept on battery from 2026-10-27 02:28 to 2026-10-28 18:13 mid-run.)
 - `lag.sh` uses `--poll-interval-ms 100`. The CLI default is 1,000 ms, which would add
   up to a second of idle wait to every lag figure.
 
@@ -107,6 +117,22 @@ Observed (smoke runs, to be confirmed at 100k):
 Recorded MySQL atomicity check (`docker compose exec mysql mysql bench`):
 `START TRANSACTION; INSERT 1; CREATE TABLE IF NOT EXISTS <existing>; INSERT 2; ROLLBACK;`
 left both rows in the table.
+
+## Phase 2 inputs
+
+Owner's reading of these results (2026-10-28), to be carried into the Phase 2 scope:
+
+- **The bottleneck is per-event commit plus per-event round trips, on every
+  backend.** Tuning won't close a gap of 100× or more against 5,000 events/s; only
+  the batch contract will.
+- The replay/rebuild path is in scope, with larger batches (e.g. 5,000), not only
+  live ingest: rebuild must reach at least 2× live.
+- Postgres: hold one connection per adapter for the batch or run instead of a pool
+  checkout and `BEGIN` per event (~2.2 ms of "other" per event).
+- Redis: pipeline reads and writes per batch (~1.8 ms of round trips per event, with
+  no commit at all).
+- Guard reads: load every guard for a batch in one query (`WHERE key IN (…)`,
+  `$in`) instead of one per event (1.7 ms Postgres, 2.2 ms MongoDB).
 
 ## Risks and open questions
 
