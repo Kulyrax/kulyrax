@@ -25,8 +25,8 @@ mappings_for() {
 
 dc() { docker compose -f docker-compose.yml "$@"; }
 
-# Start an empty store for one backend: a new container (anonymous volumes
-# removed) for a networked one, an empty work directory for the rest.
+# Start an empty store for one backend: a new container and data volume
+# for a networked one, an empty work directory for the rest.
 fresh_store() {
   local backend=$1
   case "$backend" in
@@ -35,7 +35,7 @@ fresh_store() {
       ;;
     file-*) ;;
     *)
-      dc rm -fsv "$backend" >/dev/null 2>&1 || true
+      stop_store "$backend"
       dc up -d --wait "$backend" >/dev/null
       ;;
   esac
@@ -60,11 +60,15 @@ fresh_store() {
   esac
 }
 
-# Stop and remove a networked backend's container, so only one ever runs.
+# Stop and remove a networked backend's container and its data volume, so
+# only one ever runs and nothing carries over to the next run.
 stop_store() {
   case "$1" in
     sqlite | file-*) ;;
-    *) dc rm -fsv "$1" >/dev/null 2>&1 || true ;;
+    *)
+      dc rm -fsv "$1" >/dev/null 2>&1 || true
+      docker volume rm -f "kulyrax-bench_$1-data" >/dev/null 2>&1 || true
+      ;;
   esac
 }
 
