@@ -28,10 +28,16 @@ mkdir -p work/events
 trap 'stop_store "$backend"' EXIT
 fresh_store "$backend"
 
+# work/ is wiped by the next run, so a failed run's report is kept in results/.
 result=$(benchtool/target/release/benchmark-benchtool lag \
   --dir work/events --checkpoint work/state/bench.json \
-  --events "$n" --per-file "$per_file" --rate "$rate" -- \
-  "$bin" run --config "$backend.yaml" --mappings "$mappings" --poll-interval-ms "$poll_ms")
+  --events "$n" --per-file "$per_file" --rate "$rate" --log work/kulyrax.log -- \
+  "$bin" run --config "$backend.yaml" --mappings "$mappings" --poll-interval-ms "$poll_ms") || {
+  mkdir -p results
+  cp work/kulyrax.log "results/$backend-lag-failure.log"
+  echo "$backend: lag run failed; kulyrax's report is in results/$backend-lag-failure.log" >&2
+  exit 1
+}
 
 # benchtool's warm-up file adds one file's worth of entities.
 expected=$(( n + per_file ))

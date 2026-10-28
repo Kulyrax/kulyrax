@@ -2,7 +2,7 @@
 //! directory its batch is committed by a running `kulyrax run`.
 //!
 //!   benchtool lag --dir <events dir> --checkpoint <state>/<source id>.json \
-//!                 --events N --per-file K --rate R [--id-prefix p] -- <kulyrax run …>
+//!                 --events N --per-file K --rate R [--id-prefix p] [--log file] -- <kulyrax run …>
 //!
 //! It starts the given command, writes one warm-up file and waits for its
 //! commit (so connection setup isn't counted), then writes N events as files
@@ -26,6 +26,8 @@ struct Args {
     per_file: usize,
     rate: f64,
     id_prefix: String,
+    /// Where the command's stdout goes (its run report); discarded if unset.
+    log: Option<PathBuf>,
     command: Vec<String>,
 }
 
@@ -34,6 +36,7 @@ fn parse_args() -> Args {
     assert_eq!(it.next().as_deref(), Some("lag"), "usage: benchtool lag …");
     let (mut dir, mut checkpoint, mut events, mut per_file, mut rate) = (None, None, None, None, None);
     let mut id_prefix = "lag".to_string();
+    let mut log = None;
     let mut command = Vec::new();
     while let Some(a) = it.next() {
         let mut val = || it.next().unwrap_or_else(|| panic!("{a} needs a value"));
@@ -44,6 +47,7 @@ fn parse_args() -> Args {
             "--per-file" => per_file = Some(val().parse().expect("--per-file")),
             "--rate" => rate = Some(val().parse().expect("--rate")),
             "--id-prefix" => id_prefix = val(),
+            "--log" => log = Some(PathBuf::from(val())),
             "--" => {
                 command = it.by_ref().collect();
                 break;
@@ -59,6 +63,7 @@ fn parse_args() -> Args {
         per_file: per_file.expect("--per-file"),
         rate: rate.expect("--rate"),
         id_prefix,
+        log,
         command,
     }
 }
@@ -123,7 +128,10 @@ fn main() {
 
     let mut child = Command::new(&a.command[0])
         .args(&a.command[1..])
-        .stdout(Stdio::null())
+        .stdout(match &a.log {
+            Some(path) => Stdio::from(std::fs::File::create(path).expect("create --log file")),
+            None => Stdio::null(),
+        })
         .spawn()
         .expect("start kulyrax");
 
