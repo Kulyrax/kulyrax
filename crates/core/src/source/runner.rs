@@ -19,7 +19,9 @@ use crate::adapter::graph::mapping::GraphMapping;
 use crate::adapter::keyvalue::mapping::KvMapping;
 use crate::adapter::sql::mapping::SqlMapping;
 use crate::adapter::{StorageAdapter, prepare_adapters};
+use crate::batch::{BatchResult, dispatch_batch};
 use crate::dispatch::dispatch;
+use crate::event::Event;
 use crate::execution::stages::{self, Stage, StageTimings, timed};
 use crate::execution::{AdapterOutcome, ExecutionReport, ExecutionStatus};
 use crate::routing::AdapterId;
@@ -29,6 +31,10 @@ use crate::runtime::dependency_graph::adapter_metadata_map;
 use crate::upcast::UpcasterRegistry;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+/// Default events per batch for continuous ingest (`run`, `ingest`). Catch-up
+/// (`run --once`, `replay`) uses [`crate::replay::DEFAULT_REPLAY_BATCH`].
+pub const DEFAULT_LIVE_BATCH: usize = 1000;
 
 /// Whether to drain every source once and exit, or keep polling.
 #[derive(Debug, Clone, Copy)]
@@ -42,7 +48,8 @@ pub enum RunMode {
 #[derive(Debug, Clone)]
 pub struct SourceRunOptions {
     pub mode: RunMode,
-    /// Max events per source per poll.
+    /// Max events per source per poll: one batch, committed in one
+    /// transaction per adapter (see [`crate::batch`]).
     pub max_batch: usize,
     /// Across-batch retries before a batch is DLQ'd (if `dlq_dir` set) or the loop halts.
     pub retry_budget: u32,
@@ -54,7 +61,7 @@ impl Default for SourceRunOptions {
     fn default() -> Self {
         Self {
             mode: RunMode::Once,
-            max_batch: 256,
+            max_batch: DEFAULT_LIVE_BATCH,
             retry_budget: 3,
             dlq_dir: None,
         }
@@ -87,6 +94,10 @@ pub struct BatchSummary {
     pub failed: u64,
     pub dlq: u64,
     pub retries: u32,
+    /// The batch transaction rolled back (a failing event, or an adapter that
+    /// could not begin or commit its batch) and the batch was dispatched one
+    /// event at a time.
+    pub fell_back: bool,
     pub committed: bool,
 }
 
@@ -116,11 +127,18 @@ struct BatchOutcome {
     failed: u64,
     /// Indices into the sorted batch whose dispatch status was `Failed`.
     hard_failures: Vec<usize>,
+    /// The batch transaction was rolled back and the batch dispatched one
+    /// event at a time instead.
+    fell_back: bool,
 }
 
+/// Dispatch a sorted batch: in one transaction per adapter when `batched`
+/// (see [`crate::batch`]), falling back to one event at a time if that rolls
+/// back; one event at a time otherwise.
 #[allow(clippy::too_many_arguments)]
-fn dispatch_batch(
+fn dispatch_sorted(
     sorted: &[SourcedEvent],
+    batched: bool,
     adapters: &mut [Box<dyn StorageAdapter>],
     failure_policy: crate::runtime::config::FailurePolicy,
     routing_rules: &HashMap<String, Vec<AdapterId>>,
@@ -135,16 +153,34 @@ fn dispatch_batch(
         skipped: 0,
         failed: 0,
         hard_failures: Vec::new(),
+        fell_back: false,
     };
     reports.clear();
-    for (idx, se) in sorted.iter().enumerate() {
-        let mut report = dispatch(
-            &se.event,
+    if batched {
+        let events: Vec<&Event> = sorted.iter().map(|se| &se.event).collect();
+        match dispatch_batch(
+            &events,
             adapters,
             failure_policy,
             routing_rules,
             adapter_meta,
-        );
+        ) {
+            BatchResult::Committed(committed) => *reports = committed,
+            BatchResult::RolledBack(_) => o.fell_back = true,
+        }
+    }
+    if !batched || o.fell_back {
+        for se in sorted {
+            reports.push(dispatch(
+                &se.event,
+                adapters,
+                failure_policy,
+                routing_rules,
+                adapter_meta,
+            ));
+        }
+    }
+    for (idx, (report, se)) in reports.iter_mut().zip(sorted).enumerate() {
         report.source_id = Some(source_id.to_string());
         report.source_position = Some(se.position.0.clone());
         for ar in &report.adapter_reports {
@@ -159,7 +195,6 @@ fn dispatch_batch(
         if report.status == ExecutionStatus::Failed {
             o.hard_failures.push(idx);
         }
-        reports.push(report);
     }
     o
 }
@@ -345,10 +380,14 @@ fn run_loop(
             let source_id = source.id().to_string();
 
             let mut retries = 0u32;
+            let mut fell_back = false;
             let (o, committed, dlq_count) = loop {
+                // A batch that failed once is retried one event at a time:
+                // the batch transaction would only roll back again.
                 let o = timed(Stage::Dispatch, || {
-                    dispatch_batch(
+                    dispatch_sorted(
                         &sorted,
+                        retries == 0,
                         &mut adapters,
                         failure_policy,
                         &routing_rules,
@@ -357,6 +396,7 @@ fn run_loop(
                         &mut reports_buf,
                     )
                 });
+                fell_back |= o.fell_back;
                 if o.hard_failures.is_empty() {
                     break (o, true, 0);
                 }
@@ -392,6 +432,7 @@ fn run_loop(
                 failed: o.failed,
                 dlq: dlq_count,
                 retries,
+                fell_back,
                 committed,
             });
 

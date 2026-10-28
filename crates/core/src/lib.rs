@@ -1,4 +1,5 @@
 pub mod adapter;
+pub mod batch;
 pub mod dispatch;
 pub mod event;
 pub mod execution;

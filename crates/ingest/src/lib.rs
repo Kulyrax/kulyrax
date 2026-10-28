@@ -403,7 +403,7 @@ impl Default for ServeOptions {
     fn default() -> Self {
         Self {
             listen: "tcp://127.0.0.1:50051".into(),
-            max_batch: 256,
+            max_batch: kulyrax_core::source::runner::DEFAULT_LIVE_BATCH,
             retry_budget: 3,
             dlq_dir: None,
             poll_interval: std::time::Duration::from_millis(200),

@@ -16,6 +16,7 @@ use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use kulyrax_core::adapter::sql::sqlite::SqliteAdapter;
 use kulyrax_core::adapter::{AdapterOutcome, SkipReason, StorageAdapter};
 use kulyrax_core::event::Event;
+use kulyrax_core::execution::stages;
 use kulyrax_core::runtime::config::MigrationPolicy;
 use kulyrax_core::upcast::UpcasterRegistry;
 
@@ -555,5 +556,173 @@ fn pg_prepare_twice_is_idempotent() -> R {
         )?
         .get(0);
     assert_eq!(tables, 1);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: one transaction per batch
+// ---------------------------------------------------------------------------
+
+/// Upsert, delete and facet mappings on `table`, under event types
+/// `{prefix}Up` / `{prefix}Del` / `{prefix}Mail`.
+fn batch_mappings(prefix: &str, table: &str) -> HashMap<String, SqlMapping> {
+    let mut m = HashMap::new();
+    let yaml = |s: String| serde_yaml::from_str::<SqlMapping>(&s).unwrap();
+    m.insert(
+        format!("{prefix}Up"),
+        yaml(format!(
+            "event: {prefix}Up\ntable: {table}\nprimary_key: id\nversion: 1\non_existing: replace\ncolumns:\n  id: payload.id\n  name: payload.name\n"
+        )),
+    );
+    m.insert(
+        format!("{prefix}Del"),
+        yaml(format!(
+            "event: {prefix}Del\ntable: {table}\nprimary_key: id\nversion: 1\noperation: delete\ncolumns:\n  id: payload.id\n"
+        )),
+    );
+    m.insert(
+        format!("{prefix}Mail"),
+        yaml(format!(
+            "event: {prefix}Mail\ntable: {table}\nprimary_key: id\nversion: 1\nfacet: contact\ncolumns:\n  id: payload.id\n  email: payload.email\n"
+        )),
+    );
+    m
+}
+
+/// One entity's lifecycle and a second entity deleted before it exists, all
+/// meant for one batch.
+fn batch_stream(prefix: &str) -> Vec<Event> {
+    let e = |kind: &str, seq: u64, payload: serde_json::Value| Event {
+        event_id: format!(
+            "evt-{prefix}{kind}-{}-{seq}",
+            payload["id"].as_str().unwrap_or("")
+        ),
+        ..ev(&format!("{prefix}{kind}"), seq, payload)
+    };
+    use serde_json::json;
+    vec![
+        e("Up", 1, json!({ "id": "u1", "name": "a" })),
+        e("Mail", 2, json!({ "id": "u1", "email": "a@x" })),
+        e("Up", 3, json!({ "id": "u1", "name": "b" })),
+        e("Del", 4, json!({ "id": "u1" })),
+        e("Mail", 5, json!({ "id": "u1", "email": "gone@x" })),
+        e("Up", 6, json!({ "id": "u1", "name": "c" })),
+        e("Mail", 7, json!({ "id": "u1", "email": "c@x" })),
+        e("Up", 3, json!({ "id": "u1", "name": "b" })),
+        e("Del", 1, json!({ "id": "u2" })),
+        e("Up", 1, json!({ "id": "u2", "name": "stale" })),
+        e("Up", 2, json!({ "id": "u2", "name": "g" })),
+    ]
+}
+
+type PgState = (
+    Vec<(String, Option<String>, Option<String>)>,
+    Vec<(String, String, i64, bool, bool)>,
+);
+
+fn pg_state(url: &str, table: &str) -> Result<PgState, Box<dyn std::error::Error>> {
+    let mut c = postgres::Client::connect(url, postgres::NoTls)?;
+    let rows = c
+        .query(
+            &format!("SELECT id, name, email FROM {table} ORDER BY id"),
+            &[],
+        )?
+        .iter()
+        .map(|r| (r.get(0), r.get(1), r.get(2)))
+        .collect();
+    let guards = c
+        .query(
+            "SELECT entity_key, facet, last_sequence, deleted, permanent
+             FROM conduit_projection_state WHERE target_table = $1 ORDER BY 1, 2",
+            &[&table],
+        )?
+        .iter()
+        .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3), r.get(4)))
+        .collect();
+    Ok((rows, guards))
+}
+
+fn fresh_batch_table(url: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let t = fresh_table();
+    pg_exec(
+        url,
+        &format!(
+            "DROP TABLE IF EXISTS {t}; CREATE TABLE {t} (id text primary key, name text, email text)"
+        ),
+    )?;
+    // No guard table yet on a fresh database: nothing to clear.
+    pg_exec(
+        url,
+        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+    )
+    .ok();
+    Ok(t)
+}
+
+#[test]
+fn pg_batch_matches_one_event_at_a_time() -> R {
+    require_pg!(url);
+    let (tb, ts) = (fresh_batch_table(&url)?, fresh_batch_table(&url)?);
+
+    let batched = pg_adapter(&url, batch_mappings("B", &tb));
+    let events = batch_stream("B");
+    let refs: Vec<&Event> = events.iter().collect();
+    stages::take();
+    batched.begin_batch(&refs).map_err(|e| e.to_string())?;
+    let batch_outcomes: Vec<String> = events
+        .iter()
+        .map(|e| format!("{:?}", batched.handle(e).outcome))
+        .collect();
+    batched.commit_batch().map_err(|e| e.to_string())?;
+    let t = stages::take();
+    assert_eq!(t.commit.calls, 1, "one transaction for the batch");
+    assert_eq!(t.read.calls, 1, "guard lanes loaded in one query");
+
+    let single = pg_adapter(&url, batch_mappings("S", &ts));
+    let single_outcomes: Vec<String> = batch_stream("S")
+        .iter()
+        .map(|e| format!("{:?}", single.handle(e).outcome))
+        .collect();
+
+    assert_eq!(batch_outcomes, single_outcomes);
+    assert!(
+        !batch_outcomes.iter().any(|o| o.starts_with("Failed")),
+        "{batch_outcomes:?}"
+    );
+    assert_eq!(pg_state(&url, &tb)?, pg_state(&url, &ts)?);
+    let (rows, _) = pg_state(&url, &tb)?;
+    assert_eq!(
+        rows,
+        vec![
+            ("u1".into(), Some("c".into()), Some("c@x".into())),
+            ("u2".into(), Some("g".into()), None),
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn pg_batch_rollback_leaves_nothing() -> R {
+    require_pg!(url);
+    let t = fresh_batch_table(&url)?;
+    let a = pg_adapter(&url, batch_mappings("R", &t));
+    let events = batch_stream("R");
+    let refs: Vec<&Event> = events.iter().collect();
+
+    a.begin_batch(&refs).map_err(|e| e.to_string())?;
+    for e in &events {
+        assert!(a.handle(e).is_success());
+    }
+    a.rollback_batch();
+    assert_eq!(pg_state(&url, &t)?, (vec![], vec![]), "nothing written");
+
+    // Outside a batch, each event commits on its own again.
+    let r = a.handle(&events[0]);
+    assert!(
+        matches!(r.outcome, AdapterOutcome::Created),
+        "{:?}",
+        r.outcome
+    );
+    assert_eq!(pg_state(&url, &t)?.0.len(), 1);
     Ok(())
 }

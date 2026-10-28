@@ -61,13 +61,31 @@ shapes satisfy it, and every built-in backend uses one of them:
 
 **Keep DDL out of that transaction.** A SQL backend creates the guard table
 in `StorageAdapter::prepare`, by passing a fresh transaction to
-`sql::exec::ensure_schema`, and records success in a `sql::exec::Prepared`
-that its `handle` checks first; `project` never creates the table. Every
-path that writes calls `prepare` once before projecting; `dry-run` never
-does. Some databases commit an open transaction implicitly on any DDL —
-MySQL does, even for `CREATE TABLE IF NOT EXISTS` on a table that exists —
-after which every statement autocommits on its own and the guard read,
-target write and guard write are no longer atomic.
+`sql::exec::ensure_schema`, and records success in a
+`kulyrax_core::adapter::Prepared` that its `handle` checks first; `project`
+never creates the table. Every path that writes calls `prepare` once before
+projecting; `dry-run` never does. Some databases commit an open transaction
+implicitly on any DDL — MySQL does, even for `CREATE TABLE IF NOT EXISTS` on a
+table that exists — after which every statement autocommits on its own and the
+guard read, target write and guard write are no longer atomic.
+
+**Batches (optional).** The run loop and `replay` hand events over in
+batches and commit the source position only after a whole batch lands. An
+adapter can share one transaction across the batch by implementing
+`StorageAdapter::begin_batch`, `commit_batch` and `rollback_batch`: between
+`begin_batch` and the end of the batch, `handle` writes into that transaction
+and does not commit. If any event fails, or any adapter fails to begin or
+commit, every adapter is rolled back and the batch is dispatched again one
+event at a time with no batch open, so `handle` must keep committing per
+event when no batch is open. The defaults do nothing, and an adapter that
+keeps them stays correct: it commits per event, and its guards skip the
+events a re-dispatch delivers again. For a SQL backend, `sql::exec` does most
+of it: hold one connection for the batch, `BEGIN` in `begin_batch`, load the
+batch's guard lanes with `prefetch_guards` (override
+`SqlTxn::read_guard_lanes` to make that one query instead of one per lane),
+call `project_in` with the batch's `GuardCache` from `handle`, and
+`COMMIT`/`ROLLBACK` in `commit_batch`/`rollback_batch`. SQLite and Postgres
+are the worked examples.
 
 Whichever shape you pick, get it right: a backend that merely "usually" makes
 the guard-and-write pair atomic will occasionally lose or duplicate an

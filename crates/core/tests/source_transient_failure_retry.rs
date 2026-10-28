@@ -1,5 +1,8 @@
 //! Phase 17.6 (17.5): an adapter that fails transiently then succeeds → the
-//! batch is retried and committed exactly once, with no double application.
+//! batch is re-dispatched and committed exactly once, with no double
+//! application. With batch transactions (Phase 2) the per-event fallback
+//! re-dispatches it within the same attempt; `fail_first: 2` also fails the
+//! fallback's first event and so needs a retry.
 
 mod common;
 
@@ -103,10 +106,11 @@ fn transient_failure_is_retried_and_committed_once() {
     assert_eq!(report.batches_committed, 1);
     assert_eq!(report.events_dlq, 0);
     assert_eq!(report.batches.len(), 1);
-    assert_eq!(
-        report.batches[0].retries, 1,
-        "one retry after the transient fail"
-    );
+    // The failure rolls the batch transaction back and the batch is
+    // re-dispatched one event at a time in the same attempt, which absorbs
+    // the transient failure without a retry.
+    assert!(report.batches[0].fell_back, "the batch fell back");
+    assert_eq!(report.batches[0].retries, 0, "no retry needed");
     assert_eq!(report.events_failed, 0, "the final attempt had no failures");
 
     assert_eq!(read_user(&db, "u1"), Some(("Ada L.".to_string(), 2)));
@@ -121,4 +125,53 @@ fn transient_failure_is_retried_and_committed_once() {
         Some(("Ada L.".to_string(), 2)),
         "no double apply"
     );
+}
+
+#[test]
+fn failure_in_the_fallback_is_retried() {
+    let dir = tempdir().unwrap();
+    let db = dir.path().join("test.db");
+    init_db(&db);
+    let events = dir.path().join("events");
+    write_event_file(&events, "01.json", &user_event(1, "u1", "Ada"));
+    write_event_file(&events, "02.json", &user_event(2, "u1", "Ada L."));
+
+    // Call 1 fails the batch, call 2 fails the fallback's first event; the
+    // fallback's second event lands, and the retry lands the first (a stale
+    // sequence by then, so it is skipped).
+    let adapter = FlakyAdapter {
+        inner: SqliteAdapter::new(
+            "sql-primary".to_string(),
+            db.to_string_lossy().to_string(),
+            10,
+            SqlRuntimeBuilder::new(sql_mappings()),
+            Arc::new(UpcasterRegistry::new()),
+            MigrationPolicy::default(),
+        ),
+        calls: Cell::new(0),
+        fail_first: 2,
+    };
+    let src: Box<dyn EventSource> =
+        Box::new(DirectorySource::new("dir", &events, dir.path().join("state")).unwrap());
+    let opts = SourceRunOptions {
+        mode: RunMode::Once,
+        max_batch: 256,
+        retry_budget: 3,
+        dlq_dir: None,
+    };
+    let report = run_sources_with_adapters(
+        &config(&db),
+        routing(),
+        vec![Box::new(adapter)],
+        vec![src],
+        &opts,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+
+    assert_eq!(report.batches_committed, 1);
+    assert_eq!(report.batches[0].retries, 1);
+    assert!(report.batches[0].fell_back);
+    assert_eq!(report.events_failed, 0);
+    assert_eq!(read_user(&db, "u1"), Some(("Ada L.".to_string(), 2)));
 }

@@ -410,6 +410,28 @@ pub trait StorageAdapter {
         Ok(())
     }
 
+    /// Open one transaction for a batch of events (Phase 2; see
+    /// [`crate::batch`]). Until [`StorageAdapter::commit_batch`] or
+    /// [`StorageAdapter::rollback_batch`], `handle` writes into it and does
+    /// not commit. `events` are the batch's events routed to this adapter, in
+    /// dispatch order, so it can load what `handle` will read (guard lanes)
+    /// up front. The default does nothing: the adapter keeps committing each
+    /// event in `handle`, which stays correct because a batch that is rolled
+    /// back is re-delivered and the guards skip what already landed.
+    fn begin_batch(&self, _events: &[&Event]) -> Result<(), AdapterError> {
+        Ok(())
+    }
+
+    /// Commit everything written since [`StorageAdapter::begin_batch`].
+    /// Without an open batch, does nothing.
+    fn commit_batch(&self) -> Result<(), AdapterError> {
+        Ok(())
+    }
+
+    /// Discard everything written since [`StorageAdapter::begin_batch`].
+    /// Without an open batch, does nothing.
+    fn rollback_batch(&self) {}
+
     /// Execute side effect
     fn handle(&self, event: &Event) -> AdapterResult;
 }

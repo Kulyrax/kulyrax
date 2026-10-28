@@ -14,8 +14,26 @@ Notable changes per release. Full notes, including upgrade steps, are in
   Custom adapters that don't override `prepare` are unaffected.
   ([notes](RELEASES/v0.10.0.md#upgrading-from-09))
 - New error variants `SourceError::Prepare` and `PipelineError::AdapterPrepare`.
+- New public fields: `ReplayRunOptions::max_batch` and `BatchSummary::fell_back`.
+  Struct literals that list every field need them (or `..Default::default()`).
+- Directory source checkpoints for a file larger than the batch are
+  `<file>#<index>` instead of the file name.
+
+### Changed
+- SQLite and Postgres commit once per batch instead of once per event: one
+  transaction per adapter per batch, guard lanes loaded in one query per batch,
+  and (Postgres) one pooled connection held for the batch with its statements
+  prepared once. A failing event rolls the batch back and it is re-dispatched one
+  event at a time, as before. Other backends still commit per event.
+  ([decision](docs/ledger/decisions/2026-10-28-batch-transactions.md))
+- Default batch size: 1,000 events for `run` and `ingest` (was 256), 5,000 for
+  `run --once` and `replay`. `replay` gains `--max-batch`.
+- The directory source splits a file larger than the batch instead of taking it
+  whole.
 
 ### Added
+- `StorageAdapter::begin_batch` / `commit_batch` / `rollback_batch`, with no-op
+  defaults; `SqlTxn::read_guard_lanes`, with a default that reads lane by lane.
 - Time per stage in the run report (`timings`) and in `kulyrax run` output.
 - `examples/benchmark` covers every backend, with a projection-lag probe and a
   rebuild-while-ingesting run.

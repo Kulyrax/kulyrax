@@ -61,33 +61,74 @@ impl DirectorySource {
     }
 }
 
+/// Position of the event at `index` (0-based) of a file taken in parts:
+/// `<file>#<index>`, zero-padded so positions within the file sort in order,
+/// after the file's own name and before the next file's. Once a file is
+/// split, all its remaining events use this form, so the committed position
+/// never moves back to the bare name.
+fn split_position(file: &str, index: usize) -> SourcePosition {
+    SourcePosition(format!("{file}#{index:012}"))
+}
+
+/// A committed position: the file, and for a file taken in parts, the index
+/// of its last committed event.
+fn parse_position(position: &str) -> (String, Option<usize>) {
+    if let Some((file, index)) = position.rsplit_once('#')
+        && let Ok(index) = index.parse::<usize>()
+    {
+        return (file.to_string(), Some(index));
+    }
+    (position.to_string(), None)
+}
+
 impl EventSource for DirectorySource {
     fn id(&self) -> &str {
         &self.id
     }
 
+    /// Whole files while they fit in `max_batch`. A file that does not fit
+    /// (or was partly taken already) is taken in parts: its events'
+    /// positions are `<file>#<index>`, see [`split_position`].
     fn poll(&mut self, max_batch: usize) -> Result<Vec<SourcedEvent>, SourceError> {
-        let after = self.committed.as_ref().map(|p| p.0.clone());
+        let max_batch = max_batch.max(1);
+        let after = self.committed.as_ref().map(|p| parse_position(&p.0));
         let mut out: Vec<SourcedEvent> = Vec::new();
 
         for file in self.event_files()? {
             let name = Self::file_name(&file);
-            if after.as_deref().is_some_and(|a| name.as_str() <= a) {
-                continue;
-            }
-            // A file is never split across batches — take whole files until the
-            // next one would exceed `max_batch` (but always take at least one).
-            if !out.is_empty() && out.len() >= max_batch {
+            // Events of this file already committed: all of a file before the
+            // committed one, or up to the committed index of a split file.
+            let skip = match &after {
+                Some((done, _)) if name.as_str() < done.as_str() => continue,
+                Some((done, None)) if name == *done => continue,
+                Some((done, Some(index))) if name == *done => index + 1,
+                _ => 0,
+            };
+            let room = max_batch.saturating_sub(out.len());
+            if room == 0 {
                 break;
             }
-            let position = SourcePosition(name);
-            for item in events_from_path(&file)? {
-                let event = item.map_err(|e| SourceError::Parse(e.to_string()))?;
-                out.push(SourcedEvent {
+            let events = events_from_path(&file)?
+                .map(|item| item.map_err(|e| SourceError::Parse(e.to_string())))
+                .collect::<Result<Vec<_>, _>>()?;
+            if skip >= events.len() {
+                continue;
+            }
+            if skip == 0 && events.len() <= room {
+                let position = SourcePosition(name);
+                out.extend(events.into_iter().map(|event| SourcedEvent {
                     event,
                     position: position.clone(),
-                });
+                }));
+                continue;
             }
+            out.extend(events.into_iter().enumerate().skip(skip).take(room).map(
+                |(index, event)| SourcedEvent {
+                    event,
+                    position: split_position(&name, index),
+                },
+            ));
+            break;
         }
         Ok(out)
     }

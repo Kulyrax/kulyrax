@@ -67,7 +67,8 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         once: bool,
 
-        /// Max events per source per poll (source loop only).
+        /// Max events per batch, committed in one transaction per adapter
+        /// (source loop only). Default 1,000; 5,000 with `--once`.
         #[arg(long)]
         max_batch: Option<usize>,
 
@@ -104,7 +105,8 @@ enum Commands {
         #[arg(long, default_value = "tcp://127.0.0.1:50051")]
         listen: String,
 
-        /// Max events per batch.
+        /// Max events per batch, committed in one transaction per adapter.
+        /// Default 1,000.
         #[arg(long)]
         max_batch: Option<usize>,
 
@@ -173,6 +175,11 @@ enum Commands {
         /// Fail events with no routing rule before calling adapters
         #[arg(long, default_value_t = false)]
         validate_routing: bool,
+
+        /// Events per batch, committed in one transaction per adapter.
+        /// Default 5,000; 1 projects one event at a time.
+        #[arg(long)]
+        max_batch: Option<usize>,
     },
 }
 
@@ -238,6 +245,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             max_per_event,
             progress_every,
             validate_routing,
+            max_batch,
         } => replay_cmd(
             config,
             mappings,
@@ -246,6 +254,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             max_per_event,
             progress_every,
             validate_routing,
+            max_batch,
         )?,
     };
 
@@ -287,7 +296,11 @@ fn run_cmd(
                 poll_interval: Duration::from_millis(poll_interval_ms.unwrap_or(1000)),
             }
         },
-        max_batch: max_batch.unwrap_or(256),
+        max_batch: max_batch.unwrap_or(if once {
+            kulyrax_core::replay::DEFAULT_REPLAY_BATCH
+        } else {
+            kulyrax_core::source::runner::DEFAULT_LIVE_BATCH
+        }),
         retry_budget: 3,
         dlq_dir: dlq,
     };
@@ -335,7 +348,7 @@ fn ingest_cmd(
 
     let opts = kulyrax_ingest::ServeOptions {
         listen,
-        max_batch: max_batch.unwrap_or(256),
+        max_batch: max_batch.unwrap_or(kulyrax_core::source::runner::DEFAULT_LIVE_BATCH),
         retry_budget: 3,
         dlq_dir: dlq,
         ..Default::default()
@@ -473,6 +486,7 @@ fn render_stage_timings(t: &StageTimings) {
 // Replay (Phase 7)
 // --------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn replay_cmd(
     config: PathBuf,
     mappings: PathBuf,
@@ -481,11 +495,13 @@ fn replay_cmd(
     max_per_event: Option<usize>,
     progress_every: Option<usize>,
     validate_routing: bool,
+    max_batch: Option<usize>,
 ) -> Result<i32, Box<dyn std::error::Error>> {
     let opts = ReplayRunOptions {
         max_per_event_summaries: max_per_event,
         progress_interval: progress_every,
         validate_routing,
+        max_batch,
     };
     let report = pipeline::replay(
         &config,

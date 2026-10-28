@@ -6,12 +6,21 @@
 //! and the orchestration are written a single time; SQLite and Postgres differ
 //! only in the four things a driver genuinely must own.
 
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+
 use serde_json::Value;
 
 use super::adapter::SqlError;
-use crate::adapter::{GuardState, OnExisting, Operation, WriteDecision, decide};
+use super::runtime::SqlRuntimeBuilder;
+use crate::adapter::{
+    AdapterError, AdapterResult, GuardState, OnExisting, Operation, SkipReason, WriteDecision,
+    decide,
+};
 use crate::event::Event;
 use crate::execution::stages::{Stage, timed};
+use crate::routing::StorageKind;
+use crate::runtime::config::MigrationPolicy;
+use crate::upcast::UpcasterRegistry;
 
 // ---------------------------------------------------------------------------
 // Neutral write description (Phase 19.1) — `SqlMapping::build` stops emitting a
@@ -169,6 +178,22 @@ pub trait SqlTxn: Sized {
         lock: bool,
     ) -> Result<Option<GuardState>, SqlError>;
 
+    /// Read many lanes of one table at once, for a batch (see
+    /// [`prefetch_guards`]); the result is positionally paired with `lanes`
+    /// (`(entity_key, facet)`). The default reads them one by one through
+    /// [`SqlTxn::read_guard_lane`]; a backend overrides it with one query.
+    fn read_guard_lanes(
+        &mut self,
+        table: &str,
+        lanes: &[(String, String)],
+        lock: bool,
+    ) -> Result<Vec<Option<GuardState>>, SqlError> {
+        lanes
+            .iter()
+            .map(|(key, facet)| self.read_guard_lane(table, key, facet, lock))
+            .collect()
+    }
+
     /// Apply the projection `INSERT [… ON CONFLICT …]`.
     fn execute_write(&mut self, w: &SqlWrite) -> Result<(), SqlError>;
 
@@ -243,35 +268,160 @@ pub fn ensure_schema<T: SqlTxn>(mut txn: T) -> Result<(), SqlError> {
     })
 }
 
-/// The Phase 11–15 SQL write path, once, over any [`SqlTxn`]. The adapter
-/// must have been prepared (see [`ensure_schema`] and
-/// [`crate::adapter::Prepared`]).
+/// Guard lanes already read or written in an open batch transaction, so
+/// `decide()` reads each lane from the store at most once per batch and later
+/// events for an entity see what earlier ones wrote. Keyed by
+/// `(table, entity_key)`, then facet; `None` means no guard row.
+#[derive(Debug, Default)]
+pub struct GuardCache {
+    entities: HashMap<(String, String), HashMap<String, Option<GuardState>>>,
+}
+
+impl GuardCache {
+    fn get(&self, table: &str, entity_key: &str, facet: &str) -> Option<Option<GuardState>> {
+        self.entities
+            .get(&(table.to_string(), entity_key.to_string()))
+            .and_then(|lanes| lanes.get(facet).copied())
+    }
+
+    fn set(&mut self, table: &str, entity_key: &str, facet: &str, state: Option<GuardState>) {
+        self.entities
+            .entry((table.to_string(), entity_key.to_string()))
+            .or_default()
+            .insert(facet.to_string(), state);
+    }
+
+    /// Apply [`SqlTxn::cascade_facets`] to the cached named-facet lanes of
+    /// this entity, as its `UPDATE` does to the stored ones: existing lanes
+    /// change, absent ones stay absent, and lanes not cached are read from
+    /// the store (which has the update) when needed.
+    fn cascade_facets(
+        &mut self,
+        table: &str,
+        entity_key: &str,
+        deleted: bool,
+        permanent: bool,
+        seq: u64,
+    ) {
+        let Some(lanes) = self
+            .entities
+            .get_mut(&(table.to_string(), entity_key.to_string()))
+        else {
+            return;
+        };
+        for (_, state) in lanes.iter_mut().filter(|(facet, _)| !facet.is_empty()) {
+            if let Some(s) = state {
+                if deleted {
+                    *s = GuardState {
+                        last_sequence: seq,
+                        deleted: true,
+                        permanent,
+                    };
+                } else {
+                    s.deleted = false;
+                    s.permanent = false;
+                }
+            }
+        }
+    }
+}
+
+/// Load every guard lane `plans` will read into `cache`, one
+/// [`SqlTxn::read_guard_lanes`] call per table, locked (`FOR UPDATE` where the
+/// backend supports it). A named facet also needs its entity's default lane.
+/// Tables and lanes go in sorted order, so concurrent writers lock rows in
+/// the same order.
+pub fn prefetch_guards<'p, T: SqlTxn>(
+    txn: &mut T,
+    plans: impl IntoIterator<Item = &'p SqlPlan>,
+    cache: &mut GuardCache,
+) -> Result<(), SqlError> {
+    let mut by_table: BTreeMap<&str, BTreeSet<(&str, &str)>> = BTreeMap::new();
+    for plan in plans {
+        let lanes = by_table.entry(plan.table.as_str()).or_default();
+        lanes.insert((plan.entity_key.as_str(), plan.facet.as_str()));
+        if !plan.facet.is_empty() {
+            lanes.insert((plan.entity_key.as_str(), ""));
+        }
+    }
+    for (table, lanes) in by_table {
+        let lanes: Vec<(String, String)> = lanes
+            .into_iter()
+            .filter(|(key, facet)| cache.get(table, key, facet).is_none())
+            .map(|(key, facet)| (key.to_string(), facet.to_string()))
+            .collect();
+        if lanes.is_empty() {
+            continue;
+        }
+        let states = timed(Stage::Read, || txn.read_guard_lanes(table, &lanes, true))?;
+        if states.len() != lanes.len() {
+            return Err(SqlError::ExecutionFailed(format!(
+                "read_guard_lanes returned {} states for {} lanes",
+                states.len(),
+                lanes.len()
+            )));
+        }
+        for ((key, facet), state) in lanes.iter().zip(states) {
+            cache.set(table, key, facet, state);
+        }
+    }
+    Ok(())
+}
+
+/// One lane, from `cache` if it holds it, else from the store (then cached).
+fn read_lane<T: SqlTxn>(
+    txn: &mut T,
+    cache: &mut GuardCache,
+    table: &str,
+    entity_key: &str,
+    facet: &str,
+) -> Result<Option<GuardState>, SqlError> {
+    if let Some(state) = cache.get(table, entity_key, facet) {
+        return Ok(state);
+    }
+    let state = timed(Stage::Read, || {
+        txn.read_guard_lane(table, entity_key, facet, true)
+    })?;
+    cache.set(table, entity_key, facet, state);
+    Ok(state)
+}
+
+/// The Phase 11–15 SQL write path, once, over any [`SqlTxn`], committing the
+/// transaction on success: one event, one transaction. The adapter must have
+/// been prepared (see [`ensure_schema`] and [`crate::adapter::Prepared`]).
 pub fn project<T: SqlTxn>(
     mut txn: T,
     plan: &SqlPlan,
     event: &Event,
 ) -> Result<SqlOutcome, SqlError> {
-    use crate::adapter::SkipReason;
+    let outcome = project_in(&mut txn, plan, event, &mut GuardCache::default())?;
+    timed(Stage::Commit, || txn.commit())?;
+    Ok(outcome)
+}
 
+/// [`project`] without the commit, for an event inside a batch transaction:
+/// guard lanes come from `cache` when it has them, and every guard write
+/// updates it. The caller commits (or rolls back) the whole batch.
+pub fn project_in<T: SqlTxn>(
+    txn: &mut T,
+    plan: &SqlPlan,
+    event: &Event,
+    cache: &mut GuardCache,
+) -> Result<SqlOutcome, SqlError> {
     let is_named_facet = !plan.facet.is_empty();
 
     // Phase 15.3: a named facet can only touch a row the default facet created
     // and has not tombstoned.
     if is_named_facet {
-        let default_state = timed(Stage::Read, || {
-            txn.read_guard_lane(&plan.table, &plan.entity_key, "", true)
-        })?;
+        let default_state = read_lane(txn, cache, &plan.table, &plan.entity_key, "")?;
         let present = matches!(default_state, Some(s) if !s.deleted);
         if !present {
-            timed(Stage::Commit, || txn.commit())?;
             return Ok(SqlOutcome::Skipped(SkipReason::EntityAbsent));
         }
     }
 
     // Phase 12.2 / 13.1 / 15.2: read this lane, decide, write — all in the txn.
-    let stored = timed(Stage::Read, || {
-        txn.read_guard_lane(&plan.table, &plan.entity_key, &plan.facet, true)
-    })?;
+    let stored = read_lane(txn, cache, &plan.table, &plan.entity_key, &plan.facet)?;
     let effective_mode = if is_named_facet {
         OnExisting::Replace
     } else {
@@ -280,19 +430,12 @@ pub fn project<T: SqlTxn>(
     let decision = decide(plan.operation, effective_mode, stored, event.sequence);
     let was_tombstoned_default = !is_named_facet && matches!(stored, Some(s) if s.deleted);
 
-    match decision {
+    let outcome = match decision {
         WriteDecision::SkipIdempotent => {
-            timed(Stage::Commit, || txn.commit())?;
             return Ok(SqlOutcome::Skipped(SkipReason::AlreadyProjected));
         }
-        WriteDecision::SkipStale => {
-            timed(Stage::Commit, || txn.commit())?;
-            return Ok(SqlOutcome::Skipped(SkipReason::StaleSequence));
-        }
-        WriteDecision::SkipTombstoned => {
-            timed(Stage::Commit, || txn.commit())?;
-            return Ok(SqlOutcome::Skipped(SkipReason::Tombstoned));
-        }
+        WriteDecision::SkipStale => return Ok(SqlOutcome::Skipped(SkipReason::StaleSequence)),
+        WriteDecision::SkipTombstoned => return Ok(SqlOutcome::Skipped(SkipReason::Tombstoned)),
         WriteDecision::SkipAlreadyDeleted => {
             // Phase 13.2: still bump last_sequence so a later resurrection
             // compares against the highest delete sequence seen.
@@ -305,11 +448,34 @@ pub fn project<T: SqlTxn>(
                     &event.event_id,
                 )
             })?;
-            timed(Stage::Commit, || txn.commit())?;
+            if let Some(state) = stored {
+                cache.set(
+                    &plan.table,
+                    &plan.entity_key,
+                    &plan.facet,
+                    Some(GuardState {
+                        last_sequence: event.sequence,
+                        ..state
+                    }),
+                );
+            }
             return Ok(SqlOutcome::Skipped(SkipReason::AlreadyDeleted));
         }
-        WriteDecision::Insert | WriteDecision::Update | WriteDecision::Delete => {}
-    }
+        WriteDecision::Insert => SqlOutcome::Created,
+        WriteDecision::Update => SqlOutcome::Updated,
+        WriteDecision::Delete => SqlOutcome::Deleted,
+    };
+
+    let (deleted, row_permanent) = if decision == WriteDecision::Delete {
+        (true, plan.permanent)
+    } else {
+        (false, false)
+    };
+    // Phase 15.3: a default-facet delete cascades its tombstone to every named
+    // facet; a resurrection clears them.
+    let cascade = !is_named_facet
+        && (decision == WriteDecision::Delete
+            || (was_tombstoned_default && decision == WriteDecision::Insert));
 
     // The target write and its guard row, timed as one stage.
     timed(Stage::Write, || -> Result<(), SqlError> {
@@ -319,11 +485,6 @@ pub fn project<T: SqlTxn>(
             txn.execute_write(&plan.write)?;
         }
 
-        let (deleted, row_permanent) = if decision == WriteDecision::Delete {
-            (true, plan.permanent)
-        } else {
-            (false, false)
-        };
         txn.upsert_guard_row(&GuardRow {
             table: plan.table.clone(),
             entity_key: plan.entity_key.clone(),
@@ -334,8 +495,7 @@ pub fn project<T: SqlTxn>(
             permanent: row_permanent,
         })?;
 
-        // Phase 15.3: default-facet delete cascade / resurrection clear.
-        if !is_named_facet && decision == WriteDecision::Delete {
+        if cascade && decision == WriteDecision::Delete {
             txn.cascade_facets(
                 &plan.table,
                 &plan.entity_key,
@@ -344,20 +504,119 @@ pub fn project<T: SqlTxn>(
                 event.sequence,
                 &event.event_id,
             )?;
-        } else if was_tombstoned_default && decision == WriteDecision::Insert {
+        } else if cascade {
             txn.cascade_facets(&plan.table, &plan.entity_key, false, false, 0, "")?;
         }
         Ok(())
     })?;
 
-    timed(Stage::Commit, || txn.commit())?;
+    cache.set(
+        &plan.table,
+        &plan.entity_key,
+        &plan.facet,
+        Some(GuardState {
+            last_sequence: event.sequence,
+            deleted,
+            permanent: row_permanent,
+        }),
+    );
+    if cascade {
+        cache.cascade_facets(
+            &plan.table,
+            &plan.entity_key,
+            deleted,
+            row_permanent,
+            event.sequence,
+        );
+    }
 
-    Ok(match decision {
-        WriteDecision::Insert => SqlOutcome::Created,
-        WriteDecision::Update => SqlOutcome::Updated,
-        WriteDecision::Delete => SqlOutcome::Deleted,
-        _ => unreachable!("skip decisions returned above"),
+    Ok(outcome)
+}
+
+/// An event's [`SqlPlan`] and its observed / target schema versions.
+pub struct PlannedEvent {
+    pub plan: SqlPlan,
+    pub source_version: u32,
+    pub projected_version: u32,
+}
+
+/// Build `event`'s plan, the step every SQL adapter's `handle` starts with.
+/// `Err` is the finished result to return instead: a skip or failure for a
+/// version with no upcaster chain (per `policy`), or a failure to build.
+pub fn plan_event(
+    adapter_id: &str,
+    builder: &SqlRuntimeBuilder,
+    upcasters: &UpcasterRegistry,
+    policy: MigrationPolicy,
+    event: &Event,
+) -> Result<PlannedEvent, AdapterResult> {
+    let projection = match builder.build(event, upcasters) {
+        Ok(p) => p,
+        Err(SqlError::UnsupportedVersion {
+            from_version,
+            to_version,
+            reason,
+            ..
+        }) => {
+            return Err(match policy {
+                MigrationPolicy::Strict => AdapterResult::unsupported_version(
+                    adapter_id.to_string(),
+                    StorageKind::Sql,
+                    reason,
+                    from_version,
+                    to_version,
+                ),
+                MigrationPolicy::IgnoreUnmatched => AdapterResult::skipped_versioned(
+                    adapter_id.to_string(),
+                    StorageKind::Sql,
+                    SkipReason::UnsupportedVersion,
+                    from_version,
+                    to_version,
+                ),
+            });
+        }
+        Err(e) => {
+            return Err(AdapterResult::failure(
+                adapter_id.to_string(),
+                StorageKind::Sql,
+                AdapterError::WriteFailed(e.to_string()),
+            ));
+        }
+    };
+    Ok(PlannedEvent {
+        source_version: projection.source_version,
+        projected_version: projection.projected_version,
+        plan: SqlPlan {
+            table: projection.table,
+            entity_key: projection.entity_key,
+            key_values: projection.key_values,
+            primary_key_columns: projection.primary_key_columns,
+            on_existing: projection.on_existing,
+            operation: projection.operation,
+            permanent: projection.permanent,
+            facet: projection.facet,
+            write: projection.write,
+        },
     })
+}
+
+/// The adapter result for a [`project`] / [`project_in`] outcome.
+pub fn outcome_result(
+    adapter_id: &str,
+    planned: &PlannedEvent,
+    outcome: Result<SqlOutcome, SqlError>,
+) -> AdapterResult {
+    let (id, kind) = (adapter_id.to_string(), StorageKind::Sql);
+    let (sv, pv) = (planned.source_version, planned.projected_version);
+    match outcome {
+        Ok(SqlOutcome::Created) => AdapterResult::created_versioned(id, kind, sv, pv),
+        Ok(SqlOutcome::Updated) => AdapterResult::updated_versioned(id, kind, sv, pv),
+        Ok(SqlOutcome::Deleted) => AdapterResult::deleted_versioned(id, kind, sv, pv),
+        Ok(SqlOutcome::Skipped(reason)) => {
+            AdapterResult::skipped_versioned(id, kind, reason, sv, pv)
+        }
+        Err(e) => AdapterResult::failure(id, kind, AdapterError::WriteFailed(e.to_string())),
+    }
 }
 
 // ---------------------------------------------------------------------------

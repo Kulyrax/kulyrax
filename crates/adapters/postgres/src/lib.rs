@@ -16,21 +16,20 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
-use postgres::NoTls;
 use postgres::types::ToSql;
+use postgres::{NoTls, Statement};
 use r2d2_postgres::PostgresConnectionManager;
 use serde::Deserialize;
 use serde_json::Value;
 
 use kulyrax_core::adapter::sql::adapter::SqlError;
 use kulyrax_core::adapter::sql::exec::{
-    self, GuardRow, Placeholders, SqlOutcome, SqlPlan, SqlTxn, SqlWrite,
+    self, GuardCache, GuardRow, Placeholders, SqlTxn, SqlWrite,
 };
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
-use kulyrax_core::adapter::{
-    AdapterError, AdapterResult, GuardState, Prepared, SkipReason, StorageAdapter,
-};
+use kulyrax_core::adapter::{AdapterError, AdapterResult, GuardState, Prepared, StorageAdapter};
 use kulyrax_core::event::Event;
+use kulyrax_core::execution::stages::{Stage, timed};
 use kulyrax_core::routing::StorageKind;
 use kulyrax_core::runtime::AdapterBuildContext;
 use kulyrax_core::runtime::config::{ConfigError, CustomAdapterConfig, MigrationPolicy};
@@ -112,8 +111,24 @@ pub struct PostgresAdapter {
     migration_policy: MigrationPolicy,
     /// Per-target-table `information_schema.columns` map, introspected once.
     col_types: Arc<Mutex<HashMap<String, Arc<ColTypes>>>>,
+    /// The open batch, from `begin_batch` to `commit_batch` /
+    /// `rollback_batch` (Phase 2).
+    batch: Mutex<Option<PgBatch>>,
     /// Set by `prepare` once the guard table exists.
     prepared: Prepared,
+}
+
+/// One batch's held connection, with its transaction open: one checkout and
+/// one `BEGIN` per batch instead of per event.
+struct PgBatch {
+    client: r2d2::PooledConnection<PostgresConnectionManager<NoTls>>,
+    /// Statements prepared on `client` during this batch.
+    statements: HashMap<String, Statement>,
+    cache: GuardCache,
+}
+
+fn poisoned() -> AdapterError {
+    AdapterError::WriteFailed("Postgres batch lock poisoned by an earlier panic".to_string())
 }
 
 impl PostgresAdapter {
@@ -148,6 +163,7 @@ impl PostgresAdapter {
             upcasters,
             migration_policy,
             col_types: Arc::new(Mutex::new(HashMap::new())),
+            batch: Mutex::new(None),
             prepared: Prepared::default(),
         }
     }
@@ -213,112 +229,127 @@ impl StorageAdapter for PostgresAdapter {
                 let mut client = pool
                     .get()
                     .map_err(|e| SqlError::ExecutionFailed(e.to_string()))?;
-                let tx = client.transaction().map_err(pg_err)?;
-                exec::ensure_schema(PostgresTxn {
-                    tx,
-                    col_types: Arc::default(),
-                })
+                exec::ensure_schema(PostgresTxn::begin(&mut client, Arc::default(), None)?)
             })
             .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+    }
+
+    /// Check out one connection for the whole batch, `BEGIN`, and lock and
+    /// load every guard lane the batch will read, one query per table.
+    fn begin_batch(&self, events: &[&Event]) -> Result<(), AdapterError> {
+        self.prepared.require().map_err(AdapterError::WriteFailed)?;
+        let mut batch = self.batch.lock().map_err(|_| poisoned())?;
+        if batch.is_some() {
+            return Err(AdapterError::WriteFailed(
+                "a batch is already open on this adapter".to_string(),
+            ));
+        }
+        let pool = self
+            .pool
+            .as_ref()
+            .map_err(|e| AdapterError::WriteFailed(e.clone()))?;
+        let mut client = pool
+            .get()
+            .map_err(|e| AdapterError::WriteFailed(e.to_string()))?;
+        // Events that fail to plan are left to `handle`, which reports them.
+        let plans: Vec<_> = events
+            .iter()
+            .filter_map(|e| {
+                exec::plan_event(
+                    &self.id,
+                    &self.builder,
+                    &self.upcasters,
+                    self.migration_policy,
+                    e,
+                )
+                .ok()
+            })
+            .collect();
+        let mut statements = HashMap::new();
+        let mut cache = GuardCache::default();
+        {
+            let mut txn = PostgresTxn::begin(&mut client, Arc::default(), Some(&mut statements))
+                .map_err(|e| AdapterError::WriteFailed(e.to_string()))?;
+            exec::prefetch_guards(&mut txn, plans.iter().map(|p| &p.plan), &mut cache)
+                .map_err(|e| AdapterError::WriteFailed(e.to_string()))?;
+            // From here the batch owns the transaction; `txn` must not roll it back.
+            txn.release();
+        }
+        *batch = Some(PgBatch {
+            client,
+            statements,
+            cache,
+        });
+        Ok(())
+    }
+
+    fn commit_batch(&self) -> Result<(), AdapterError> {
+        let mut batch = self.batch.lock().map_err(|_| poisoned())?;
+        let Some(mut b) = batch.take() else {
+            return Ok(());
+        };
+        // Close the batch's statements before the connection goes back to the pool.
+        b.statements.clear();
+        timed(Stage::Commit, || b.client.batch_execute("COMMIT")).map_err(|e| {
+            // A failed COMMIT can leave the transaction open; end it.
+            let _ = b.client.batch_execute("ROLLBACK");
+            AdapterError::WriteFailed(e.to_string())
+        })
+    }
+
+    fn rollback_batch(&self) {
+        let Ok(mut batch) = self.batch.lock() else {
+            return;
+        };
+        if let Some(mut b) = batch.take() {
+            b.statements.clear();
+            let _ = b.client.batch_execute("ROLLBACK");
+        }
     }
 
     fn handle(&self, event: &Event) -> AdapterResult {
         if let Err(e) = self.prepared.require() {
             return self.failure(AdapterError::WriteFailed(e));
         }
-        let projection = match self.builder.build(event, &self.upcasters) {
+        let planned = match exec::plan_event(
+            &self.id,
+            &self.builder,
+            &self.upcasters,
+            self.migration_policy,
+            event,
+        ) {
             Ok(p) => p,
-            Err(SqlError::UnsupportedVersion {
-                from_version,
-                to_version,
-                reason,
-                ..
-            }) => {
-                return match self.migration_policy {
-                    MigrationPolicy::Strict => AdapterResult::unsupported_version(
-                        self.id.clone(),
-                        StorageKind::Sql,
-                        reason,
-                        from_version,
-                        to_version,
-                    ),
-                    MigrationPolicy::IgnoreUnmatched => AdapterResult::skipped_versioned(
-                        self.id.clone(),
-                        StorageKind::Sql,
-                        SkipReason::UnsupportedVersion,
-                        from_version,
-                        to_version,
-                    ),
+            Err(result) => return result,
+        };
+        let plan = &planned.plan;
+
+        let mut batch = match self.batch.lock() {
+            Ok(b) => b,
+            Err(_) => return self.failure(poisoned()),
+        };
+        let outcome = match batch.as_mut() {
+            Some(b) => self
+                .column_types(&mut b.client, &plan.table)
+                .and_then(|col_types| {
+                    let mut txn =
+                        PostgresTxn::joined(&mut b.client, col_types, Some(&mut b.statements));
+                    exec::project_in(&mut txn, plan, event, &mut b.cache)
+                }),
+            None => {
+                let pool = match &self.pool {
+                    Ok(p) => p,
+                    Err(e) => return self.failure(AdapterError::WriteFailed(e.clone())),
                 };
+                let mut client = match pool.get() {
+                    Ok(c) => c,
+                    Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
+                };
+                self.column_types(&mut client, &plan.table)
+                    .and_then(|col_types| PostgresTxn::begin(&mut client, col_types, None))
+                    .and_then(|txn| exec::project(txn, plan, event))
             }
-            Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
         };
-
-        let source_version = projection.source_version;
-        let projected_version = projection.projected_version;
-        let plan = SqlPlan {
-            table: projection.table,
-            entity_key: projection.entity_key,
-            key_values: projection.key_values,
-            primary_key_columns: projection.primary_key_columns,
-            on_existing: projection.on_existing,
-            operation: projection.operation,
-            permanent: projection.permanent,
-            facet: projection.facet,
-            write: projection.write,
-        };
-
-        let pool = match &self.pool {
-            Ok(p) => p,
-            Err(e) => return self.failure(AdapterError::WriteFailed(e.clone())),
-        };
-        let mut client = match pool.get() {
-            Ok(c) => c,
-            Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
-        };
-
-        let col_types = match self.column_types(&mut client, &plan.table) {
-            Ok(c) => c,
-            Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
-        };
-
-        let tx = match client
-            .build_transaction()
-            .isolation_level(postgres::IsolationLevel::ReadCommitted)
-            .start()
-        {
-            Ok(tx) => tx,
-            Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
-        };
-
-        match exec::project(PostgresTxn { tx, col_types }, &plan, event) {
-            Ok(SqlOutcome::Created) => AdapterResult::created_versioned(
-                self.id.clone(),
-                StorageKind::Sql,
-                source_version,
-                projected_version,
-            ),
-            Ok(SqlOutcome::Updated) => AdapterResult::updated_versioned(
-                self.id.clone(),
-                StorageKind::Sql,
-                source_version,
-                projected_version,
-            ),
-            Ok(SqlOutcome::Deleted) => AdapterResult::deleted_versioned(
-                self.id.clone(),
-                StorageKind::Sql,
-                source_version,
-                projected_version,
-            ),
-            Ok(SqlOutcome::Skipped(reason)) => AdapterResult::skipped_versioned(
-                self.id.clone(),
-                StorageKind::Sql,
-                reason,
-                source_version,
-                projected_version,
-            ),
-            Err(e) => self.failure(AdapterError::WriteFailed(e.to_string())),
-        }
+        exec::outcome_result(&self.id, &planned, outcome)
     }
 }
 
@@ -326,9 +357,96 @@ impl StorageAdapter for PostgresAdapter {
 // PostgresTxn
 // ---------------------------------------------------------------------------
 
+/// A transaction on one connection: its own (`begin`: `BEGIN`, committed by
+/// `commit`, rolled back if dropped uncommitted), or a share of an open batch
+/// transaction (`joined`: `commit` and drop leave it alone).
 pub struct PostgresTxn<'a> {
-    tx: postgres::Transaction<'a>,
+    client: &'a mut postgres::Client,
     col_types: Arc<ColTypes>,
+    /// Statements prepared on this connection for the batch, by SQL text, so
+    /// each runs in one round trip instead of a prepare plus an execute.
+    /// `None` outside a batch.
+    statements: Option<&'a mut HashMap<String, Statement>>,
+    /// `true` while this value must still end the transaction itself.
+    owns: bool,
+}
+
+impl<'a> PostgresTxn<'a> {
+    fn begin(
+        client: &'a mut postgres::Client,
+        col_types: Arc<ColTypes>,
+        statements: Option<&'a mut HashMap<String, Statement>>,
+    ) -> Result<Self, SqlError> {
+        client
+            .batch_execute("BEGIN ISOLATION LEVEL READ COMMITTED")
+            .map_err(pg_err)?;
+        Ok(Self {
+            client,
+            col_types,
+            statements,
+            owns: true,
+        })
+    }
+
+    fn joined(
+        client: &'a mut postgres::Client,
+        col_types: Arc<ColTypes>,
+        statements: Option<&'a mut HashMap<String, Statement>>,
+    ) -> Self {
+        Self {
+            client,
+            col_types,
+            statements,
+            owns: false,
+        }
+    }
+
+    /// Hand the open transaction over to the caller.
+    fn release(&mut self) {
+        self.owns = false;
+    }
+
+    /// The batch's prepared statement for `sql`, preparing it on first use.
+    fn statement(&mut self, sql: &str) -> Result<Option<Statement>, SqlError> {
+        let Some(cache) = self.statements.as_deref_mut() else {
+            return Ok(None);
+        };
+        if let Some(stmt) = cache.get(sql) {
+            return Ok(Some(stmt.clone()));
+        }
+        let stmt = self.client.prepare(sql).map_err(pg_err)?;
+        cache.insert(sql.to_string(), stmt.clone());
+        Ok(Some(stmt))
+    }
+
+    fn execute(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<(), SqlError> {
+        match self.statement(sql)? {
+            Some(stmt) => self.client.execute(&stmt, params),
+            None => self.client.execute(sql, params),
+        }
+        .map(|_| ())
+        .map_err(pg_err)
+    }
+
+    fn query(
+        &mut self,
+        sql: &str,
+        params: &[&(dyn ToSql + Sync)],
+    ) -> Result<Vec<postgres::Row>, SqlError> {
+        match self.statement(sql)? {
+            Some(stmt) => self.client.query(&stmt, params),
+            None => self.client.query(sql, params),
+        }
+        .map_err(pg_err)
+    }
+}
+
+impl Drop for PostgresTxn<'_> {
+    fn drop(&mut self) {
+        if self.owns {
+            let _ = self.client.batch_execute("ROLLBACK");
+        }
+    }
 }
 
 fn pg_err(e: postgres::Error) -> SqlError {
@@ -441,6 +559,14 @@ impl PostgresTxn<'_> {
     }
 }
 
+fn guard_state(row: &postgres::Row, from: usize) -> GuardState {
+    GuardState {
+        last_sequence: row.get::<_, i64>(from) as u64,
+        deleted: row.get(from + 1),
+        permanent: row.get(from + 2),
+    }
+}
+
 impl SqlTxn for PostgresTxn<'_> {
     fn ensure_guard_table(&mut self) -> Result<(), SqlError> {
         // `IF NOT EXISTS` isn't safe under concurrent first creation: two
@@ -451,8 +577,10 @@ impl SqlTxn for PostgresTxn<'_> {
         // aborting the caller's whole transaction, and swallow exactly that
         // one error code — by definition the winner already created the
         // table, so there is nothing left to do.
-        let mut sp = self.tx.transaction().map_err(pg_err)?;
-        let result = sp.batch_execute(
+        self.client
+            .batch_execute("SAVEPOINT kulyrax_guard_table")
+            .map_err(pg_err)?;
+        let result = self.client.batch_execute(
             "CREATE TABLE IF NOT EXISTS conduit_projection_state (
                     target_table  text        NOT NULL,
                     entity_key    text        NOT NULL,
@@ -466,10 +594,14 @@ impl SqlTxn for PostgresTxn<'_> {
                 )",
         );
         match result {
-            Ok(()) => sp.commit().map_err(pg_err),
-            Err(e) if e.code() == Some(&postgres::error::SqlState::UNIQUE_VIOLATION) => {
-                sp.rollback().map_err(pg_err)
-            }
+            Ok(()) => self
+                .client
+                .batch_execute("RELEASE SAVEPOINT kulyrax_guard_table")
+                .map_err(pg_err),
+            Err(e) if e.code() == Some(&postgres::error::SqlState::UNIQUE_VIOLATION) => self
+                .client
+                .batch_execute("ROLLBACK TO SAVEPOINT kulyrax_guard_table")
+                .map_err(pg_err),
             Err(e) => Err(pg_err(e)),
         }
     }
@@ -489,25 +621,47 @@ impl SqlTxn for PostgresTxn<'_> {
             "SELECT last_sequence, deleted, permanent FROM conduit_projection_state
              WHERE target_table = $1 AND entity_key = $2 AND facet = $3"
         };
-        let row = self
-            .tx
-            .query_opt(sql, &[&table, &entity_key, &facet])
-            .map_err(pg_err)?;
-        Ok(row.map(|r| GuardState {
-            last_sequence: r.get::<_, i64>(0) as u64,
-            deleted: r.get(1),
-            permanent: r.get(2),
-        }))
+        let rows = self.query(sql, &[&table, &entity_key, &facet])?;
+        Ok(rows.first().map(|r| guard_state(r, 0)))
+    }
+
+    /// Every lane of the requested entities in one query, locked in
+    /// `(entity_key, facet)` order.
+    fn read_guard_lanes(
+        &mut self,
+        table: &str,
+        lanes: &[(String, String)],
+        lock: bool,
+    ) -> Result<Vec<Option<GuardState>>, SqlError> {
+        let mut keys: Vec<&str> = lanes.iter().map(|(k, _)| k.as_str()).collect();
+        keys.sort_unstable();
+        keys.dedup();
+        let sql = if lock {
+            "SELECT entity_key, facet, last_sequence, deleted, permanent
+             FROM conduit_projection_state
+             WHERE target_table = $1 AND entity_key = ANY($2)
+             ORDER BY entity_key, facet FOR UPDATE"
+        } else {
+            "SELECT entity_key, facet, last_sequence, deleted, permanent
+             FROM conduit_projection_state
+             WHERE target_table = $1 AND entity_key = ANY($2)"
+        };
+        let rows = self.query(sql, &[&table, &keys])?;
+        let found: HashMap<(String, String), GuardState> = rows
+            .iter()
+            .map(|r| ((r.get(0), r.get(1)), guard_state(r, 2)))
+            .collect();
+        Ok(lanes
+            .iter()
+            .map(|(k, f)| found.get(&(k.clone(), f.clone())).copied())
+            .collect())
     }
 
     fn execute_write(&mut self, w: &SqlWrite) -> Result<(), SqlError> {
         let sql = w.render(Placeholders::Dollar);
         let bounds = self.bind_write(w)?;
         let params: Vec<&(dyn ToSql + Sync)> = bounds.iter().map(|b| b.as_sql()).collect();
-        self.tx
-            .execute(sql.as_str(), &params)
-            .map(|_| ())
-            .map_err(pg_err)
+        self.execute(&sql, &params)
     }
 
     fn delete_row(&mut self, table: &str, cols: &[String], vals: &[Value]) -> Result<(), SqlError> {
@@ -525,36 +679,30 @@ impl SqlTxn for PostgresTxn<'_> {
             bounds.push(bind_value(v, ct)?);
         }
         let params: Vec<&(dyn ToSql + Sync)> = bounds.iter().map(|b| b.as_sql()).collect();
-        self.tx
-            .execute(sql.as_str(), &params)
-            .map(|_| ())
-            .map_err(pg_err)
+        self.execute(&sql, &params)
     }
 
     fn upsert_guard_row(&mut self, row: &GuardRow) -> Result<(), SqlError> {
-        self.tx
-            .execute(
-                "INSERT INTO conduit_projection_state
-                    (target_table, entity_key, facet, last_sequence, last_event_id, deleted, permanent, processed_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, now())
-                 ON CONFLICT (target_table, entity_key, facet) DO UPDATE SET
-                    last_sequence = excluded.last_sequence,
-                    last_event_id = excluded.last_event_id,
-                    deleted = excluded.deleted,
-                    permanent = excluded.permanent,
-                    processed_at = excluded.processed_at",
-                &[
-                    &row.table,
-                    &row.entity_key,
-                    &row.facet,
-                    &(row.last_sequence as i64),
-                    &row.last_event_id,
-                    &row.deleted,
-                    &row.permanent,
-                ],
-            )
-            .map(|_| ())
-            .map_err(pg_err)
+        self.execute(
+            "INSERT INTO conduit_projection_state
+                (target_table, entity_key, facet, last_sequence, last_event_id, deleted, permanent, processed_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+             ON CONFLICT (target_table, entity_key, facet) DO UPDATE SET
+                last_sequence = excluded.last_sequence,
+                last_event_id = excluded.last_event_id,
+                deleted = excluded.deleted,
+                permanent = excluded.permanent,
+                processed_at = excluded.processed_at",
+            &[
+                &row.table,
+                &row.entity_key,
+                &row.facet,
+                &(row.last_sequence as i64),
+                &row.last_event_id,
+                &row.deleted,
+                &row.permanent,
+            ],
+        )
     }
 
     fn bump_guard_lane(
@@ -565,15 +713,12 @@ impl SqlTxn for PostgresTxn<'_> {
         seq: u64,
         event_id: &str,
     ) -> Result<(), SqlError> {
-        self.tx
-            .execute(
-                "UPDATE conduit_projection_state
-                    SET last_sequence = $4, last_event_id = $5, processed_at = now()
-                 WHERE target_table = $1 AND entity_key = $2 AND facet = $3",
-                &[&table, &entity_key, &facet, &(seq as i64), &event_id],
-            )
-            .map(|_| ())
-            .map_err(pg_err)
+        self.execute(
+            "UPDATE conduit_projection_state
+                SET last_sequence = $4, last_event_id = $5, processed_at = now()
+             WHERE target_table = $1 AND entity_key = $2 AND facet = $3",
+            &[&table, &entity_key, &facet, &(seq as i64), &event_id],
+        )
     }
 
     fn cascade_facets(
@@ -586,7 +731,7 @@ impl SqlTxn for PostgresTxn<'_> {
         event_id: &str,
     ) -> Result<(), SqlError> {
         if deleted {
-            self.tx.execute(
+            self.execute(
                 "UPDATE conduit_projection_state
                     SET deleted = true, permanent = $4, last_sequence = $3,
                         last_event_id = $5, processed_at = now()
@@ -594,19 +739,24 @@ impl SqlTxn for PostgresTxn<'_> {
                 &[&table, &entity_key, &(seq as i64), &permanent, &event_id],
             )
         } else {
-            self.tx.execute(
+            self.execute(
                 "UPDATE conduit_projection_state
                     SET deleted = false, permanent = false
                  WHERE target_table = $1 AND entity_key = $2 AND facet <> ''",
                 &[&table, &entity_key],
             )
         }
-        .map(|_| ())
-        .map_err(pg_err)
     }
 
-    fn commit(self) -> Result<(), SqlError> {
-        self.tx.commit().map_err(pg_err)
+    /// Commits a transaction this value began; inside a batch, the batch
+    /// commits instead (`StorageAdapter::commit_batch`).
+    fn commit(mut self) -> Result<(), SqlError> {
+        if !self.owns {
+            return Ok(());
+        }
+        self.client.batch_execute("COMMIT").map_err(pg_err)?;
+        self.owns = false;
+        Ok(())
     }
 }
 
