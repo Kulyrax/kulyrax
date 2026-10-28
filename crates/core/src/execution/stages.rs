@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 /// One timed stage. A call can count towards more than one: `Dispatch`
-/// contains `Adapter`, which contains `Read`, `Write` and `Commit`. `Schema`
-/// runs in `StorageAdapter::prepare`, before any dispatch.
+/// contains `Adapter` and `Batch`, which contain `Read`, `Write` and `Commit`.
+/// `Schema` runs in `StorageAdapter::prepare`, before any dispatch.
 #[derive(Debug, Clone, Copy)]
 pub enum Stage {
     /// `EventSource::poll`: reading the source and parsing its events.
@@ -24,6 +24,10 @@ pub enum Stage {
     Dispatch,
     /// One `StorageAdapter::handle` call.
     Adapter,
+    /// Opening or ending one adapter's batch transaction:
+    /// `StorageAdapter::begin_batch` (which loads the batch's guard lanes,
+    /// timed as `Read`), `commit_batch` (`Commit`) or `rollback_batch`.
+    Batch,
     /// Store set-up in `StorageAdapter::prepare`: the SQL guard table, the
     /// MongoDB guard index, the Neo4j guard constraint.
     Schema,
@@ -60,6 +64,7 @@ pub struct StageTimings {
     pub source_read: StageTotal,
     pub dispatch: StageTotal,
     pub adapter: StageTotal,
+    pub batch: StageTotal,
     pub schema: StageTotal,
     pub read: StageTotal,
     pub write: StageTotal,
@@ -73,6 +78,7 @@ impl StageTimings {
             Stage::SourceRead => &mut self.source_read,
             Stage::Dispatch => &mut self.dispatch,
             Stage::Adapter => &mut self.adapter,
+            Stage::Batch => &mut self.batch,
             Stage::Schema => &mut self.schema,
             Stage::Read => &mut self.read,
             Stage::Write => &mut self.write,

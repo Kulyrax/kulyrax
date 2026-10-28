@@ -5,6 +5,7 @@
 #
 #   bash run.sh <backend> [events] [per_file]    # defaults: 100000, 1000
 #   bash run.sh all [events] [per_file]          # every backend in turn
+#   MAX_BATCH=1000 bash run.sh …                 # batch size (default: kulyrax's, 5,000 for --once)
 #
 # Backends: sqlite postgres mysql redis mongodb elasticsearch neo4j
 #           file-document file-keyvalue file-graph
@@ -32,7 +33,7 @@ trap 'stop_store "$backend"' EXIT
 fresh_store "$backend"
 
 start=$(date +%s.%N)
-"$bin" run --config "$backend.yaml" --mappings "$mappings" --once > work/run.log
+"$bin" run --config "$backend.yaml" --mappings "$mappings" --once ${MAX_BATCH:+--max-batch "$MAX_BATCH"} > work/run.log
 end=$(date +%s.%N)
 
 found=$(count_projected "$backend" | tr -d '[:space:]')
@@ -42,9 +43,9 @@ if [ "$found" != "$n" ]; then
 fi
 
 {
-  awk -v n="$n" -v per="$per_file" -v s="$start" -v e="$end" -v b="$backend" 'BEGIN {
+  awk -v n="$n" -v per="$per_file" -v s="$start" -v e="$end" -v b="$backend" -v mb="${MAX_BATCH:-default}" 'BEGIN {
   t = e - s
-  printf "%s: %d events (%d per file) in %.2f s = %.0f events/s (%d entities verified)\n", b, n, per, t, n / t, n
+  printf "%s: %d events (%d per file, batch %s) in %.2f s = %.0f events/s (%d entities verified)\n", b, n, per, mb, t, n / t, n
 }'
   sed -n '/^Time per stage/,/^---/p' work/run.log | sed '$d'
 } | record "$backend"

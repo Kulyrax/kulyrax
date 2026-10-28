@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use crate::adapter::StorageAdapter;
 use crate::dispatch::dispatch;
 use crate::event::Event;
+use crate::execution::stages::{Stage, timed};
 use crate::execution::{ExecutionReport, ExecutionStatus};
 use crate::routing::{AdapterId, route_with_rules};
 use crate::runtime::config::FailurePolicy;
@@ -89,7 +90,7 @@ pub fn dispatch_batch(
             .get(adapters[i].id())
             .map(Vec::as_slice)
             .unwrap_or_default();
-        if let Err(e) = adapters[i].begin_batch(batch_events) {
+        if let Err(e) = timed(Stage::Batch, || adapters[i].begin_batch(batch_events)) {
             let reason = RollbackReason::Begin {
                 adapter_id: adapters[i].id().to_string(),
                 message: e.to_string(),
@@ -110,7 +111,7 @@ pub fn dispatch_batch(
     }
 
     for (n, &i) in indices.iter().enumerate() {
-        if let Err(e) = adapters[i].commit_batch() {
+        if let Err(e) = timed(Stage::Batch, || adapters[i].commit_batch()) {
             let reason = RollbackReason::Commit {
                 adapter_id: adapters[i].id().to_string(),
                 message: e.to_string(),
@@ -125,6 +126,6 @@ pub fn dispatch_batch(
 /// Roll back these adapters' batches, last in dependency order first.
 fn rollback(adapters: &[Box<dyn StorageAdapter>], indices: &[usize]) {
     for &i in indices.iter().rev() {
-        adapters[i].rollback_batch();
+        timed(Stage::Batch, || adapters[i].rollback_batch());
     }
 }

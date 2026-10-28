@@ -67,6 +67,7 @@ fn run_report_counts_each_stage() {
     for (stage, s) in [("read", t.read), ("commit", t.commit)] {
         assert_eq!(s.calls, 2, "{stage}: one call per batch");
     }
+    assert_eq!(t.batch.calls, 4, "begin and commit per batch");
     assert!(report.batches.iter().all(|b| !b.fell_back));
     assert!(
         t.dispatch.total_us >= t.adapter.total_us,
