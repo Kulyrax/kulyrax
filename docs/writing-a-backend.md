@@ -209,7 +209,7 @@ implements `SqlTxn` for MySQL in its own crate, exactly as an out-of-tree
 backend would:
 
 - **Which trait:** `SqlTxn`, because the target is a SQL table.
-- **Atomicity contract:** the pessimistic-lock shape — a `REPEATABLE READ`
+- **Atomicity contract:** the pessimistic-lock shape — a `READ COMMITTED`
   transaction with `SELECT … FOR UPDATE` on the guard row, the same shape
   Postgres uses (`InnoDB` supports the same row lock).
 - **The stress test the trait had to survive:** MySQL's upsert syntax is

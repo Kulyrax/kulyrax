@@ -6,8 +6,15 @@
 //! column types: each JSON scalar binds by its own shape (`bool` → 0/1 to
 //! match `TINYINT(1)`, number → int or double, string → bytes, `null` → NULL).
 //!
-//! Multi-writer safety matches Postgres: a `REPEATABLE READ` transaction with
-//! `SELECT … FOR UPDATE` on the guard row, so no retry loop is needed.
+//! Multi-writer safety matches Postgres: a `READ COMMITTED` transaction with
+//! `SELECT … FOR UPDATE` on the guard row. Not `REPEATABLE READ`: there, a
+//! locking read of a guard row that does not exist yet locks the *gap* where
+//! it would go, and every projection in the database shares
+//! `conduit_projection_state`, so two writers adding new entities — even to
+//! different target tables — deadlocked on neighbouring gaps (ERROR 1213).
+//! `READ COMMITTED` takes no gap locks for these reads, as on Postgres.
+//! Requires row-based binary logging (`binlog_format=ROW`, the MySQL 8
+//! default) when the binary log is on.
 
 use std::sync::Arc;
 
@@ -197,7 +204,8 @@ impl StorageAdapter for MySqlAdapter {
             Err(e) => return self.failure(AdapterError::WriteFailed(e.clone())),
         };
 
-        let tx_opts = TxOpts::default().set_isolation_level(Some(IsolationLevel::RepeatableRead));
+        // READ COMMITTED, not REPEATABLE READ: see the module docs.
+        let tx_opts = TxOpts::default().set_isolation_level(Some(IsolationLevel::ReadCommitted));
         let tx = match pool.start_transaction(tx_opts) {
             Ok(tx) => tx,
             Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),

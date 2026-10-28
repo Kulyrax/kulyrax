@@ -148,7 +148,8 @@ pub struct GuardRow {
 /// - **Postgres** (`kulyrax-adapter-postgres`): `READ COMMITTED` with
 ///   `SELECT … FOR UPDATE` on the guard row when `lock` is set.
 /// - **MySQL** (`kulyrax-adapter-mysql`): the same pessimistic lock under
-///   `REPEATABLE READ`.
+///   `READ COMMITTED` (not `REPEATABLE READ`, whose gap locks on missing guard
+///   rows deadlock writers adding neighbouring entities).
 ///
 /// **This seam has no built-in retry path** — unlike the KV/Document/Graph
 /// traits below, `SqlError` carries no "someone else changed this, retry"

@@ -41,6 +41,10 @@ Notable changes per release. Full notes, including upgrade steps, are in
 ### Fixed
 - MySQL: the guard read, target write and guard write were not atomic, because the
   guard table's DDL ran inside each event's transaction and MySQL commits on DDL.
+- MySQL: writers adding new entities could deadlock each other (ERROR 1213), even
+  on different target tables, through gap locks on the shared guard table. The
+  MySQL transaction now runs at `READ COMMITTED`, like Postgres. Needs
+  `binlog_format=ROW` (the MySQL 8 default) if the binary log is on.
 
 ## Earlier releases
 

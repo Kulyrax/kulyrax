@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # Adapters set up their store in an explicit prepare step
@@ -37,8 +37,8 @@ Approved by the owner on 2026-10-26, before Phase 2.
 - [x] fmt, clippy `-D warnings` and `cargo test --workspace` pass; the Postgres and
   MySQL suites pass against the benchmark containers.
 - [x] MySQL 10k benchmark rerun after the fix, recorded as its baseline.
-- [ ] The MySQL suite passes when its tests run in parallel, as CI's `test (mysql)`
-  job runs them. Blocked: see Risks (deadlocks); needs an owner decision.
+- [x] The MySQL suite passes when its tests run in parallel, as CI's `test (mysql)`
+  job runs them (fixed: `READ COMMITTED`; see Risks).
 
 ## Constraints and assumptions
 
@@ -99,18 +99,33 @@ Checks run on 2026-10-28, at `b22fb1b`:
 
 ## Risks and open questions
 
-- **MySQL deadlocks between concurrent writers (exposed by this fix; open, needs
-  an owner decision).** Run in parallel against one database, the MySQL suite
-  intermittently fails with `ERROR 1213 (40001): Deadlock found` (2 of 6 runs; 0 of 6
-  on `cb9a21b`). Before this change the per-event DDL committed implicitly, so the
-  `SELECT … FOR UPDATE` that followed ran in autocommit and locked nothing. Now the
-  transaction is real: under `REPEATABLE READ`, `FOR UPDATE` on a guard row that
-  doesn't exist yet takes a gap lock, and two writers inserting new entities into
-  the same gap deadlock. A single Kulyrax instance dispatches synchronously and
-  never hits it; CI's parallel `test (mysql)` job will. The adapter's module doc
-  ("no retry loop is needed") is wrong. Options: (1, recommended) retry the
-  transaction in the MySQL adapter on 1213/1205, bounded at 3 attempts, with a test;
-  (2) `READ COMMITTED`; (3) run the suite single-threaded in CI (hides it).
+- **MySQL deadlocks (exposed by this fix; root cause found and fixed).** Run in
+  parallel against one database, the MySQL suite intermittently failed with
+  `ERROR 1213 (40001): Deadlock found` (2 of 6 runs; 0 of 6 on `cb9a21b`, where the
+  per-event DDL's implicit commit meant `FOR UPDATE` ran in autocommit and locked
+  nothing). Retry was not approved (owner, 2026-10-28: with one writer per
+  projection, a deadlock means a bug). `SHOW ENGINE INNODB STATUS` for one
+  occurrence:
+  - Transaction 1 inserting guard row `('t_3', '["u1"]', '')`; transaction 2
+    inserting `('t_2', '["u1"]', 'login')`: different target tables, different
+    tests, no logical conflict.
+  - Both **held** `lock_mode X locks gap before rec` on the gap before
+    `('t_4', '["u1"]', '')`, and both **waited** for `lock_mode X locks gap before
+    rec insert intention` in that gap. InnoDB rolled back transaction 1.
+  - Cause: our lock pattern. Under `REPEATABLE READ`, the guard read
+    `SELECT … FOR UPDATE` on a row that does not exist yet locks the gap where it
+    would go. Gap locks don't conflict with each other, insert intention locks do,
+    and every projection in the database shares `conduit_projection_state`, so any
+    two writers adding neighbouring guard rows could deadlock (in production: two
+    Kulyrax instances owning different projections in one MySQL database).
+  - Fix: the MySQL transaction runs at `READ COMMITTED`, as Postgres does; InnoDB
+    takes no gap locks for locking reads there, and an existing guard row is still
+    row-locked by `FOR UPDATE`. No retry. Requires row-based binary logging
+    (`binlog_format=ROW`, the MySQL 8 default) when the binary log is on.
+  - Test `mysql_new_guard_rows_take_no_gap_lock` (deterministic: a raw connection
+    holds the gap, the adapter projects into it, the raw connection inserts):
+    fails with 1213 under `REPEATABLE READ`, passes under `READ COMMITTED`.
+    The full parallel suite then passed 10 of 10 runs without a deadlock.
 - `mysql_column_missing_rejected` fails on old and new code against a reused
   container: table names restart at `t_0` each run and that test doesn't clear guard
   rows. CI uses a fresh container. Test-only; not fixed.
@@ -121,7 +136,7 @@ Checks run on 2026-10-28, at `b22fb1b`:
 
 ## Outcome
 
-Blocked on one item: the fix is done and verified (atomicity test fails on the old
-code, passes on the new; all gates green), but the MySQL suite deadlocks
-intermittently when run in parallel, which CI does. Not mergeable until the owner
-picks a deadlock fix.
+Completed 2026-10-28. DDL is out of the event path for all five adapters (explicit
+`prepare`); the MySQL atomicity test fails on the old code and passes on the new;
+the deadlocks the real transaction exposed were our own gap-lock pattern, fixed by
+running MySQL at `READ COMMITTED` (no retry). Gates and every backend suite green.
