@@ -34,7 +34,10 @@ sed -e 's|/bench$|/rebuild|' -e 's|\./work/events|./rebuild-events|' \
 cp routing.yaml work/
 
 start=$(date +%s.%N)
-"$bin" run --config work/rebuild.yaml --mappings mappings-sql --once > work/rebuild.log &
+# The rebuild records its own end time: waiting for it after the live run
+# would stretch its time to the live run's when it finishes first.
+( "$bin" run --config work/rebuild.yaml --mappings mappings-sql --once > work/rebuild.log
+  date +%s.%N > work/rebuild.end ) &
 rebuild_pid=$!
 
 live=$(benchtool/target/release/benchmark-benchtool lag \
@@ -45,7 +48,7 @@ live=$(benchtool/target/release/benchmark-benchtool lag \
 overlapped=yes
 kill -0 "$rebuild_pid" 2>/dev/null || overlapped="NO (the rebuild finished first; raise the history size)"
 wait "$rebuild_pid"
-end=$(date +%s.%N)
+end=$(cat work/rebuild.end)
 
 rebuilt=$(dc exec -T postgres psql -U postgres -d rebuild -tAc "SELECT count(*) FROM users" | tr -d '[:space:]')
 live_found=$(count_projected postgres | tr -d '[:space:]')
@@ -57,4 +60,5 @@ live_found=$(count_projected postgres | tr -d '[:space:]')
     printf "postgres rebuild: %d events in %.2f s = %.0f events/s (%d rows verified)\n", n, e - s, n / (e - s), n
   }'
   echo "live lag during rebuild at $rate events/s for ${seconds} s (live run inside the rebuild: $overlapped): $live"
+  sed -n '/^Time per stage/,/^---/p' work/rebuild.log | sed '$d'
 } | record postgres-rebuild
