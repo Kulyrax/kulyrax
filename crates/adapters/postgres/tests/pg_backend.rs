@@ -726,3 +726,128 @@ fn pg_batch_rollback_leaves_nothing() -> R {
     assert_eq!(pg_state(&url, &t)?.0.len(), 1);
     Ok(())
 }
+
+/// One batch writes the same keys many times: updates, a delete and a
+/// re-create, facet writes, interleaved across keys. The bulk write collapses
+/// each key to its final state (one statement cannot touch a row twice) and
+/// must end exactly where one-event-at-a-time does.
+#[test]
+fn pg_bulk_repeated_keys_in_one_batch() -> R {
+    require_pg!(url);
+    let stream = |prefix: &str| {
+        use serde_json::json;
+        let mut events = Vec::new();
+        let mut seq = 0u64;
+        let mut next = || {
+            seq += 1;
+            seq
+        };
+        for round in 0..5 {
+            for key in ["a", "b", "c"] {
+                let s = next();
+                events.push(Event {
+                    event_id: format!("evt-{prefix}-{key}-{s}"),
+                    ..ev(
+                        &format!("{prefix}Up"),
+                        s,
+                        json!({ "id": key, "name": format!("{key}{round}") }),
+                    )
+                });
+                let s = next();
+                events.push(Event {
+                    event_id: format!("evt-{prefix}-{key}-{s}"),
+                    ..ev(
+                        &format!("{prefix}Mail"),
+                        s,
+                        json!({ "id": key, "email": format!("{key}{round}@x") }),
+                    )
+                });
+            }
+            if round == 2 {
+                // Delete `b` mid-batch; the next rounds re-create it.
+                let s = next();
+                events.push(Event {
+                    event_id: format!("evt-{prefix}-b-{s}"),
+                    ..ev(&format!("{prefix}Del"), s, json!({ "id": "b" }))
+                });
+            }
+        }
+        // And delete `c` at the end, for good.
+        let s = next();
+        events.push(Event {
+            event_id: format!("evt-{prefix}-c-{s}"),
+            ..ev(&format!("{prefix}Del"), s, json!({ "id": "c" }))
+        });
+        events
+    };
+    let (tb, ts) = (fresh_batch_table(&url)?, fresh_batch_table(&url)?);
+
+    let batched = pg_adapter(&url, batch_mappings("K", &tb));
+    let events = stream("K");
+    let refs: Vec<&Event> = events.iter().collect();
+    batched.begin_batch(&refs).map_err(|e| e.to_string())?;
+    for e in &events {
+        let r = batched.handle(e);
+        assert!(r.is_success(), "{:?}", r.outcome);
+    }
+    batched.commit_batch().map_err(|e| e.to_string())?;
+
+    let single = pg_adapter(&url, batch_mappings("L", &ts));
+    for e in stream("L") {
+        assert!(single.handle(&e).is_success());
+    }
+
+    let (rows, guards) = pg_state(&url, &tb)?;
+    let (rows_s, guards_s) = pg_state(&url, &ts)?;
+    assert_eq!(rows, rows_s);
+    // Event ids differ by prefix; compare the rest of every guard lane.
+    assert_eq!(guards, guards_s);
+    assert_eq!(
+        rows,
+        vec![
+            ("a".into(), Some("a4".into()), Some("a4@x".into())),
+            ("b".into(), Some("b4".into()), Some("b4@x".into())),
+        ]
+    );
+    Ok(())
+}
+
+/// A row the database rejects (here a `CHECK` constraint) is only seen when
+/// the batch's bulk write runs: `commit_batch` fails and nothing is left,
+/// and the per-event path the run loop then falls back to fails just that
+/// event.
+#[test]
+fn pg_bulk_failure_fails_the_commit_and_per_event_isolates_it() -> R {
+    require_pg!(url);
+    let t = fresh_batch_table(&url)?;
+    pg_exec(
+        &url,
+        &format!("ALTER TABLE {t} ADD CONSTRAINT {t}_no_bad CHECK (name <> 'bad')"),
+    )?;
+    let a = pg_adapter(&url, batch_mappings("F", &t));
+    let events: Vec<Event> = ["ok1", "bad", "ok2"]
+        .iter()
+        .enumerate()
+        .map(|(i, name)| Event {
+            event_id: format!("evt-F-{i}"),
+            ..ev(
+                "FUp",
+                1,
+                serde_json::json!({ "id": format!("u{i}"), "name": name }),
+            )
+        })
+        .collect();
+    let refs: Vec<&Event> = events.iter().collect();
+
+    a.begin_batch(&refs).map_err(|e| e.to_string())?;
+    for e in &events {
+        assert!(a.handle(e).is_success(), "recorded, not yet written");
+    }
+    assert!(a.commit_batch().is_err(), "the bulk write is rejected");
+    assert_eq!(pg_state(&url, &t)?, (vec![], vec![]), "nothing written");
+
+    let outcomes: Vec<bool> = events.iter().map(|e| a.handle(e).is_success()).collect();
+    assert_eq!(outcomes, [true, false, true]);
+    assert_eq!(pg_state(&url, &t)?.0.len(), 2);
+    Ok(())
+}

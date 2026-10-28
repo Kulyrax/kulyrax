@@ -35,6 +35,10 @@ use kulyrax_core::runtime::AdapterBuildContext;
 use kulyrax_core::runtime::config::{ConfigError, CustomAdapterConfig, MigrationPolicy};
 use kulyrax_core::upcast::UpcasterRegistry;
 
+mod bulk;
+
+use bulk::Pending;
+
 type PgPool = r2d2::Pool<PostgresConnectionManager<NoTls>>;
 
 /// Introspected column type — enough to bind a JSON scalar correctly (Phase 19.3).
@@ -125,6 +129,8 @@ struct PgBatch {
     /// Statements prepared on `client` during this batch.
     statements: HashMap<String, Statement>,
     cache: GuardCache,
+    /// The batch's writes, sent in bulk by `commit_batch` (see [`bulk`]).
+    pending: Pending,
 }
 
 fn poisoned() -> AdapterError {
@@ -279,15 +285,28 @@ impl StorageAdapter for PostgresAdapter {
             client,
             statements,
             cache,
+            pending: Pending::default(),
         });
         Ok(())
     }
 
+    /// Send the batch's writes in bulk, then `COMMIT`. A failure leaves the
+    /// transaction to be rolled back, and the batch falls back to one event
+    /// at a time.
     fn commit_batch(&self) -> Result<(), AdapterError> {
         let mut batch = self.batch.lock().map_err(|_| poisoned())?;
         let Some(mut b) = batch.take() else {
             return Ok(());
         };
+        let flushed = timed(Stage::Write, || {
+            let mut txn =
+                PostgresTxn::joined(&mut b.client, Arc::default(), Some(&mut b.statements));
+            txn.flush(&mut b.pending)
+        });
+        if let Err(e) = flushed {
+            let _ = b.client.batch_execute("ROLLBACK");
+            return Err(AdapterError::WriteFailed(e.to_string()));
+        }
         // Close the batch's statements before the connection goes back to the pool.
         b.statements.clear();
         timed(Stage::Commit, || b.client.batch_execute("COMMIT")).map_err(|e| {
@@ -332,7 +351,8 @@ impl StorageAdapter for PostgresAdapter {
                 .column_types(&mut b.client, &plan.table)
                 .and_then(|col_types| {
                     let mut txn =
-                        PostgresTxn::joined(&mut b.client, col_types, Some(&mut b.statements));
+                        PostgresTxn::joined(&mut b.client, col_types, Some(&mut b.statements))
+                            .deferred(&mut b.pending, &plan.entity_key);
                     exec::project_in(&mut txn, plan, event, &mut b.cache)
                 }),
             None => {
@@ -367,6 +387,9 @@ pub struct PostgresTxn<'a> {
     /// each runs in one round trip instead of a prepare plus an execute.
     /// `None` outside a batch.
     statements: Option<&'a mut HashMap<String, Statement>>,
+    /// Inside a batch: where target and guard writes are recorded instead of
+    /// sent (see [`bulk`]), and the entity they belong to.
+    deferred: Option<(&'a mut Pending, &'a str)>,
     /// `true` while this value must still end the transaction itself.
     owns: bool,
 }
@@ -384,6 +407,7 @@ impl<'a> PostgresTxn<'a> {
             client,
             col_types,
             statements,
+            deferred: None,
             owns: true,
         })
     }
@@ -397,6 +421,7 @@ impl<'a> PostgresTxn<'a> {
             client,
             col_types,
             statements,
+            deferred: None,
             owns: false,
         }
     }
@@ -404,6 +429,21 @@ impl<'a> PostgresTxn<'a> {
     /// Hand the open transaction over to the caller.
     fn release(&mut self) {
         self.owns = false;
+    }
+
+    /// Record target and guard writes for `entity_key` in `pending` instead
+    /// of sending them.
+    fn deferred(mut self, pending: &'a mut Pending, entity_key: &'a str) -> Self {
+        self.deferred = Some((pending, entity_key));
+        self
+    }
+
+    /// Send everything recorded in `pending`.
+    fn flush(&mut self, pending: &mut Pending) -> Result<(), SqlError> {
+        if pending.is_empty() {
+            return Ok(());
+        }
+        pending.flush(|sql, params| self.execute(sql, params))
     }
 
     /// The batch's prepared statement for `sql`, preparing it on first use.
@@ -658,13 +698,33 @@ impl SqlTxn for PostgresTxn<'_> {
     }
 
     fn execute_write(&mut self, w: &SqlWrite) -> Result<(), SqlError> {
-        let sql = w.render(Placeholders::Dollar);
+        // Bound here, inside or outside a batch, so a value that doesn't fit
+        // its column fails this event's `handle`.
         let bounds = self.bind_write(w)?;
+        if let Some((pending, entity_key)) = self.deferred.as_mut() {
+            return pending.write(entity_key, &self.col_types, w, bounds);
+        }
+        let sql = w.render(Placeholders::Dollar);
         let params: Vec<&(dyn ToSql + Sync)> = bounds.iter().map(|b| b.as_sql()).collect();
         self.execute(&sql, &params)
     }
 
     fn delete_row(&mut self, table: &str, cols: &[String], vals: &[Value]) -> Result<(), SqlError> {
+        // The key columns' types come from the same introspected map.
+        let mut bounds = Vec::with_capacity(vals.len());
+        for (col, v) in cols.iter().zip(vals) {
+            let ct = self.col_types.get(col).copied().unwrap_or(PgColType::Text);
+            bounds.push(bind_value(v, ct)?);
+        }
+        if let Some((pending, entity_key)) = self.deferred.as_mut() {
+            pending.delete(
+                table,
+                entity_key,
+                &self.col_types,
+                cols.iter().cloned().zip(bounds).collect(),
+            );
+            return Ok(());
+        }
         let where_clause = cols
             .iter()
             .enumerate()
@@ -672,17 +732,15 @@ impl SqlTxn for PostgresTxn<'_> {
             .collect::<Vec<_>>()
             .join(" AND ");
         let sql = format!("DELETE FROM {table} WHERE {where_clause}");
-        // The key columns' types come from the same introspected map.
-        let mut bounds = Vec::with_capacity(vals.len());
-        for (col, v) in cols.iter().zip(vals) {
-            let ct = self.col_types.get(col).copied().unwrap_or(PgColType::Text);
-            bounds.push(bind_value(v, ct)?);
-        }
         let params: Vec<&(dyn ToSql + Sync)> = bounds.iter().map(|b| b.as_sql()).collect();
         self.execute(&sql, &params)
     }
 
     fn upsert_guard_row(&mut self, row: &GuardRow) -> Result<(), SqlError> {
+        if let Some((pending, _)) = self.deferred.as_mut() {
+            pending.guard(row);
+            return Ok(());
+        }
         self.execute(
             "INSERT INTO conduit_projection_state
                 (target_table, entity_key, facet, last_sequence, last_event_id, deleted, permanent, processed_at)
@@ -713,6 +771,10 @@ impl SqlTxn for PostgresTxn<'_> {
         seq: u64,
         event_id: &str,
     ) -> Result<(), SqlError> {
+        if let Some((pending, _)) = self.deferred.as_mut() {
+            pending.bump(table, entity_key, facet, seq, event_id);
+            return Ok(());
+        }
         self.execute(
             "UPDATE conduit_projection_state
                 SET last_sequence = $4, last_event_id = $5, processed_at = now()
@@ -730,6 +792,14 @@ impl SqlTxn for PostgresTxn<'_> {
         seq: u64,
         event_id: &str,
     ) -> Result<(), SqlError> {
+        // The cascade updates every named-facet lane of the entity, including
+        // lanes this batch never loaded, so it runs as a statement of its own,
+        // after everything recorded so far.
+        if let Some((pending, key)) = self.deferred.take() {
+            let flushed = self.flush(pending);
+            self.deferred = Some((pending, key));
+            flushed?;
+        }
         if deleted {
             self.execute(
                 "UPDATE conduit_projection_state
