@@ -492,8 +492,16 @@ fn pg_failed_guard_write_leaves_neither_row() -> R {
     let a = pg_adapter(&url, m);
 
     // An ordinary write first, for contrast with the forced failure.
-    let ok = a.handle(&ev("Atomic", 1, serde_json::json!({ "id": "u1", "name": "a" })));
-    assert!(matches!(ok.outcome, AdapterOutcome::Created), "{:?}", ok.outcome);
+    let ok = a.handle(&ev(
+        "Atomic",
+        1,
+        serde_json::json!({ "id": "u1", "name": "a" }),
+    ));
+    assert!(
+        matches!(ok.outcome, AdapterOutcome::Created),
+        "{:?}",
+        ok.outcome
+    );
 
     let fail = ev("Atomic", 2, serde_json::json!({ "id": "u2", "name": "b" }));
     let check = format!("chk_{}_{t}", std::process::id());
@@ -510,7 +518,11 @@ fn pg_failed_guard_write_leaves_neither_row() -> R {
         &format!("ALTER TABLE conduit_projection_state DROP CONSTRAINT {check}"),
     );
 
-    assert!(matches!(r.outcome, AdapterOutcome::Failed(_)), "{:?}", r.outcome);
+    assert!(
+        matches!(r.outcome, AdapterOutcome::Failed(_)),
+        "{:?}",
+        r.outcome
+    );
     let mut c = postgres::Client::connect(&url, postgres::NoTls)?;
     let target = c.query_opt(&format!("SELECT name FROM {t} WHERE id = 'u2'"), &[])?;
     let guards: i64 = c
@@ -522,7 +534,10 @@ fn pg_failed_guard_write_leaves_neither_row() -> R {
         )?
         .get(0);
     dropped?;
-    assert!(target.is_none(), "the target row must roll back with the guard write");
+    assert!(
+        target.is_none(),
+        "the target row must roll back with the guard write"
+    );
     assert_eq!(guards, 0, "no guard row");
     Ok(())
 }

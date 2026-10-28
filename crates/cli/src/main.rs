@@ -435,7 +435,9 @@ fn render_source_run_report(
 }
 
 fn render_stage_timings(t: &StageTimings) {
-    println!("Time per stage (dispatch contains adapter, which contains read/write/commit; schema runs once, before ingesting):");
+    println!(
+        "Time per stage (dispatch contains adapter, which contains read/write/commit; schema runs once, before ingesting):"
+    );
     for (name, s) in [
         ("source read", t.source_read),
         ("dispatch", t.dispatch),

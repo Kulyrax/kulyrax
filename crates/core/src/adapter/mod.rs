@@ -431,10 +431,7 @@ pub struct Prepared {
 impl Prepared {
     /// Run `setup` and, if it succeeds, mark the adapter prepared. Runs
     /// `setup` again on every call, so the set-up must be idempotent.
-    pub fn prepare<E: fmt::Display>(
-        &self,
-        setup: impl FnOnce() -> Result<(), E>,
-    ) -> Result<(), E> {
+    pub fn prepare<E: fmt::Display>(&self, setup: impl FnOnce() -> Result<(), E>) -> Result<(), E> {
         let result = setup();
         let mut last = self.last_error.lock().unwrap_or_else(|e| e.into_inner());
         match &result {

@@ -80,15 +80,14 @@ fn adapter(db_path: &Path, upcasters: UpcasterRegistry, policy: MigrationPolicy)
     let mut mappings = HashMap::new();
     mappings.insert("UserCreated".to_string(), sql_mapping_v2());
     let builder = SqlRuntimeBuilder::new(mappings);
-    let adapter = prepared(SqliteAdapter::new(
+    prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         builder,
         Arc::new(upcasters),
         policy,
-    ));
-    adapter
+    ))
 }
 
 // ------------------------------------------------------------

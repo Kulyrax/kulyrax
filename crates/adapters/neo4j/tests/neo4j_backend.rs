@@ -564,9 +564,17 @@ fn neo4j_prepare_does_the_setup_and_events_do_not() -> R {
     a.prepare().map_err(|e| e.to_string())?;
     for id in ["n1", "n2", "n3"] {
         let r = a.handle(&ev("Prep", 1, serde_json::json!({ "id": id })));
-        assert!(matches!(r.outcome, AdapterOutcome::Created), "{:?}", r.outcome);
+        assert!(
+            matches!(r.outcome, AdapterOutcome::Created),
+            "{:?}",
+            r.outcome
+        );
     }
-    assert_eq!(stages::take().schema.calls, 1, "only prepare creates the constraint");
+    assert_eq!(
+        stages::take().schema.calls,
+        1,
+        "only prepare creates the constraint"
+    );
     Ok(())
 }
 

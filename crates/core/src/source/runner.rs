@@ -14,11 +14,11 @@ use std::time::Duration;
 use serde::Serialize;
 
 use super::{EventSource, SourceError, SourcePosition, SourcedEvent};
-use crate::adapter::{StorageAdapter, prepare_adapters};
 use crate::adapter::document::mapping::DocumentMapping;
 use crate::adapter::graph::mapping::GraphMapping;
 use crate::adapter::keyvalue::mapping::KvMapping;
 use crate::adapter::sql::mapping::SqlMapping;
+use crate::adapter::{StorageAdapter, prepare_adapters};
 use crate::dispatch::dispatch;
 use crate::execution::stages::{self, Stage, StageTimings, timed};
 use crate::execution::{AdapterOutcome, ExecutionReport, ExecutionStatus};

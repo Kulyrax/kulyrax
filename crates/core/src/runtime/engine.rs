@@ -175,7 +175,8 @@ impl KulyraxRuntime {
     /// does. Safe to call again.
     pub fn prepare_adapters(&mut self) -> Result<(), PipelineError> {
         self.ensure_adapters_built();
-        let failures = crate::adapter::prepare_adapters(self.adapters.as_deref().unwrap_or_default());
+        let failures =
+            crate::adapter::prepare_adapters(self.adapters.as_deref().unwrap_or_default());
         if failures.is_empty() {
             Ok(())
         } else {

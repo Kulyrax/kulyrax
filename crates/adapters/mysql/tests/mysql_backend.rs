@@ -502,8 +502,16 @@ fn mysql_failed_guard_write_leaves_neither_row() -> R {
     let a = my_adapter(&url, m);
 
     // An ordinary write first, for contrast with the forced failure.
-    let ok = a.handle(&ev("Atomic", 1, serde_json::json!({ "id": "u1", "name": "a" })));
-    assert!(matches!(ok.outcome, AdapterOutcome::Created), "{:?}", ok.outcome);
+    let ok = a.handle(&ev(
+        "Atomic",
+        1,
+        serde_json::json!({ "id": "u1", "name": "a" }),
+    ));
+    assert!(
+        matches!(ok.outcome, AdapterOutcome::Created),
+        "{:?}",
+        ok.outcome
+    );
 
     let fail = ev("Atomic", 2, serde_json::json!({ "id": "u2", "name": "b" }));
     let check = format!("chk_{}_{t}", std::process::id());
@@ -520,10 +528,15 @@ fn mysql_failed_guard_write_leaves_neither_row() -> R {
         &format!("ALTER TABLE conduit_projection_state DROP CHECK {check}"),
     );
 
-    assert!(matches!(r.outcome, AdapterOutcome::Failed(_)), "{:?}", r.outcome);
+    assert!(
+        matches!(r.outcome, AdapterOutcome::Failed(_)),
+        "{:?}",
+        r.outcome
+    );
     let pool = mysql::Pool::new(url.as_str())?;
     let mut conn = pool.get_conn()?;
-    let target: Option<String> = conn.exec_first(format!("SELECT name FROM {t} WHERE id = 'u2'"), ())?;
+    let target: Option<String> =
+        conn.exec_first(format!("SELECT name FROM {t} WHERE id = 'u2'"), ())?;
     let guards: Option<i64> = conn.exec_first(
         format!(
             "SELECT count(*) FROM conduit_projection_state WHERE target_table = '{t}' AND entity_key = '[\"u2\"]'"
@@ -531,7 +544,10 @@ fn mysql_failed_guard_write_leaves_neither_row() -> R {
         (),
     )?;
     dropped?;
-    assert_eq!(target, None, "the target row must roll back with the guard write");
+    assert_eq!(
+        target, None,
+        "the target row must roll back with the guard write"
+    );
     assert_eq!(guards, Some(0), "no guard row");
     Ok(())
 }

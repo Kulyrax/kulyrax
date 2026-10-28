@@ -96,7 +96,10 @@ fn handle_before_prepare_fails_and_creates_nothing() {
         AdapterOutcome::Failed(e) => assert!(e.to_string().contains("not prepared"), "{e}"),
         other => panic!("expected a failure, got {other:?}"),
     }
-    assert!(!guard_table_exists(&db), "no table created as a side effect");
+    assert!(
+        !guard_table_exists(&db),
+        "no table created as a side effect"
+    );
     assert_eq!(read_user(&db, "u1"), None);
 }
 
