@@ -25,6 +25,9 @@ Notable changes per release. Full notes, including upgrade steps, are in
   and (Postgres) one pooled connection held for the batch with its statements
   prepared once. A failing event rolls the batch back and it is re-dispatched one
   event at a time, as before. Other backends still commit per event.
+- Postgres writes each batch in bulk: `decide()` still runs per event, in memory;
+  each row and guard lane collapses to its final state and the batch is sent as a
+  few multi-row statements (`unnest`) before the commit.
   ([decision](docs/ledger/decisions/2026-10-28-batch-transactions.md))
 - Default batch size: 1,000 events for `run` and `ingest` (was 256), 5,000 for
   `run --once` and `replay`. `replay` gains `--max-batch`.

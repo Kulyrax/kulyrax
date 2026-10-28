@@ -45,7 +45,8 @@ Approved by the owner on 2026-10-28.
 ## Constraints and assumptions
 
 - Constraint: per-event order kept: events in sequence order, each through its
-  adapters in dependency order. No savepoints. No reordering or bulk writes.
+  adapters in dependency order. No savepoints. No reordering of events; bulk
+  writes only for Postgres, from round 2 (owner, 2026-10-28).
 - Constraint: SQLite and Postgres only. No other backend changes until both are
   benchmarked. No Phase 3 or 4 work.
 - Constraint: Zero Panic Rule in `kulyrax-core`; no behaviour change outside the
@@ -94,37 +95,90 @@ live batch 1,000 at half the live throughput): rebuild **554 events/s**, live la
 p50 317 ms / p99 1,062 ms (not scored). Rebuild is 0.57× live, against ≥ 2×: fail.
 Postgres served about 1,040 events/s in total, its ceiling here.
 
+### Round 2 (owner, 2026-10-28): Postgres bulk writes, rebuild, MySQL
+
+Code at `54d9aa8` (bulk), `59d551d` (rebuild timing fix), `5a93a75` (MySQL).
+
+| Criterion | Check | Observed result |
+|---|---|---|
+| Gates | fmt, clippy `-D warnings`, `cargo test --workspace` | clean; clean; 111 binaries, 343 passed, 0 failed |
+| Postgres suite | `cargo test -p kulyrax-adapter-postgres` against a container | 13/13 |
+| Repeated keys in one batch | `pg_bulk_repeated_keys_in_one_batch` (3 keys × 5 rounds of update + facet, a delete and re-create mid-batch, a final delete) | rows and guard lanes identical to one event at a time |
+| Bulk failure | `pg_bulk_failure_fails_the_commit_and_per_event_isolates_it` (`CHECK` rejects one row) | `commit_batch` fails, nothing written; per event, only that event fails |
+
+Throughput, 100k events (µs per event):
+
+| Postgres | events/s | adapter | write (record + flush) | read | commit | other | Target ≥ 5,000 |
+|---|---|---|---|---|---|---|---|
+| Round 1, batch 1,000 | 970 | 965 | 952 | 8.6 | 28.6 | 31 | fail |
+| Bulk, batch 1,000 | 5,041 | 6.8 | 110 | 11.2 | 34.4 | 16 | pass (barely) |
+| Bulk, batch 5,000 | 10,934 | 8.6 | 40.7 | 11.1 | 16.1 | 17 | pass |
+
+Write at batch 1,000 is ~110 ms per flush; the same 1,000-row statements take
+~13 ms (data) + ~17 ms (guards) inside the container (`psql \timing`), so ~80 ms
+per flush is spent outside the server, most likely moving the arrays through
+Docker Desktop's port forwarding. Not proven.
+
+**Why the rebuild was slower than live (554 vs 970 events/s):**
+
+1. Mostly a measurement bug: `rebuild.sh` stopped the rebuild's clock after
+   waiting for it, which happened after the 180 s live run; the rebuild had
+   finished first, so its time was stretched to 180 s. Fixed (`59d551d`); the same
+   run timed correctly is **796 events/s**.
+2. It did use 5,000-event batches (20 batches for 100k).
+3. Contention with the live writer: the write round trip rose from 958 to
+   1,189 µs per event (+25%) while the live writer ran, with neither the Postgres
+   container (19–41% of a core) nor the host (38–65%) saturated, so the shared
+   resource is most likely the Docker Desktop network path. Not proven.
+4. And by design: before bulk writes, rebuild and live did the same two round
+   trips per event, so a larger batch only shrank the commit share (1–3% of the
+   time). A rebuild can only outrun live once the per-event cost is gone.
+
+Rebuild while ingesting, bulk path (live at 2,500 events/s, batch 1,000):
+
+| History | Rebuild events/s | vs live (5,041) | Overlap |
+|---|---|---|---|
+| 100k | 10,527 | 2.09× | rebuild took 9.5 s of the 180 s live run |
+| 1,000,000 | 9,942 | **1.97×** | rebuild took 100.6 s, live throughout |
+
+At 1M the rebuild's guard read is 106 ms per 5,000-event batch (56 ms at 100k: a
+10× larger guard table, shared with the live writer) and its source read 42 ms
+per poll (15 ms: the directory source lists and sorts every file on each poll).
+
+**MySQL root cause:** recorded in
+[2026-10-26-sql-schema-out-of-transaction](2026-10-26-sql-schema-out-of-transaction.md):
+gap locks from the guard read under `REPEATABLE READ` on the shared guard table;
+fixed with `READ COMMITTED`, no retry.
+
 ## Risks and open questions
 
-- **Confirmed: Postgres is round-trip bound.** 952 µs of its 1,031 µs per event is
-  the write stage: the target write and the guard write, one statement and one
-  round trip each (~476 µs per round trip through Docker Desktop's VM network,
-  down from ~1.4 ms per statement in Phase 1 now that each is one round trip, not
-  two). Commit is 1–3% of the time, so a larger batch barely helps (970 → 984).
-  Closing the gap needs fewer round trips per event; the candidates, none started,
-  need an owner decision:
-  - combine the target write and guard write into one statement (a data-modifying
-    CTE): ~2× at best here, still short of 5,000;
-  - pipeline the batch's statements (`tokio-postgres` pipelining) or write the
-    batch as multi-row statements per table: the bulk path the decision record
-    deferred, and the only one that removes per-event round trips;
-  - measure on the Linux VM first: a local round trip there is likely ~10× shorter
-    than through Docker Desktop, which changes how far the current code gets.
-    Not measured.
+- **Round 1 (resolved by round 2): Postgres was round-trip bound** at 952 of its
+  1,031 µs per event (target write and guard write, one round trip each). The owner
+  chose bulk writes per batch (see the decision record's amendment).
+- **Postgres at the live batch size is only just over target** (5,041 vs 5,000).
+  About 80 ms of each ~110 ms flush of 1,000 rows is outside the server (see Round
+  2). Unverified; the Linux VM run will show how much of it is Docker Desktop.
+- **Rebuild with a 1M-event history is 1.97× live**, just under 2×. Its guard read
+  and source read grow with history size (Round 2). The directory source lists
+  and sorts every file on each poll; with 1,000 files that is ~40 ms per poll.
 - **SQLite at the live batch size is commit bound.** At 1,000 events per batch the
   WAL fsync costs 28.9 µs per event (one ~29 ms `FlushFileBuffers` per batch on
-  this laptop), more than half of the 50 µs budget; everything else is ~34 µs.
-  At 5,000 it passes (25,855 events/s).
-- Rebuild runs into the same Postgres ceiling as live ingest (they share it), so
-  "≥ 2× live" needs the round-trip fix above, not a larger rebuild batch.
-- MySQL deadlock decision (from the `prepare()` change) is still open; MySQL is out
-  of scope here.
+  this laptop), more than half of the 50 µs budget. At 5,000 it passes (25,855
+  events/s). Owner, 2026-10-28: 5,000 is acceptable; a time-based flush
+  (`max_batch_delay`, default 100 ms) then lets live run at 5,000 without hurting
+  lag. Not started.
 
 ## Outcome
 
-**Stopped short of the exit target** (2026-10-28), per the owner's rule; no Phase 3
-or 4 work started. Batching is implemented, tested and pushed for SQLite and
-Postgres: SQLite 42 → 15,883 events/s at batch 1,000 (378×) and 25,855 at 5,000;
-Postgres 30 → 970 events/s (32×). Exit target: SQLite passes at 5,000 and misses at
-1,000 (15,883 vs 20,000); Postgres misses (970 vs 5,000); rebuild misses (0.57× live
-vs 2×). Next step is the owner's call between the options under Risks.
+**Round 1** stopped short of the exit target; **round 2** (2026-10-28) stops after
+the owner's three items, as instructed:
+
+- Postgres bulk writes: 970 → 5,041 events/s at batch 1,000 and 10,934 at 5,000.
+  Target ≥ 5,000: met, at 1,000 by 0.8%.
+- Rebuild: the 554 events/s was a timing bug plus contention; with bulk writes,
+  10,527 events/s (2.09× live) over 100k and 9,942 (1.97×) over 1M, against ≥ 2×.
+- MySQL deadlocks: our gap-lock pattern; fixed with `READ COMMITTED`, no retry.
+- SQLite: unchanged (15,883 at 1,000; 25,855 at 5,000).
+
+Not started: the time-based flush (owner's item 3), the lag reruns at 1,000/s and
+5,000/s, other backends, Phase 3/4.

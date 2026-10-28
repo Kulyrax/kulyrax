@@ -131,3 +131,29 @@ MySQL, MongoDB, Neo4j, Redis, Elasticsearch and the file stores keep the default
   remaining per-event round trips (target write, guard write) are then the next
   candidate, via bulk writes.
 - A backend cannot keep a transaction open across many `handle` calls.
+
+## Amendment (2026-10-28): Postgres writes each batch in bulk
+
+The first round left Postgres round-trip bound (952 of 1,031 µs per event: one
+round trip each for the target write and the guard write). The owner chose bulk
+writes per batch over merging the two statements into one (a ~2× half-fix).
+
+- `decide()` stays per event, in memory, against the batch's guard lanes
+  (`project_in`, unchanged). The Postgres adapter records the writes it asks for
+  instead of sending them (`kulyrax-adapter-postgres` `bulk.rs`).
+- Each target row and guard lane collapses to its net effect for the batch, since
+  one `INSERT … ON CONFLICT DO UPDATE` cannot touch the same row twice: writes merge
+  (union of columns, latest value), a delete discards what came before it and
+  writes after it build a new row, a guard lane keeps its final state.
+- `commit_batch` sends, per table, one `DELETE … USING unnest(…)` and one
+  `INSERT … SELECT FROM unnest(…)` per row shape (`ON CONFLICT … DO UPDATE` for
+  upserts), one guard upsert and one guard update, then `COMMIT`.
+- A facet cascade updates lanes the batch never loaded, so the adapter flushes
+  what it has recorded and runs the cascade directly: per-entity order holds.
+- Values are bound per event, so a value that doesn't fit its column still fails
+  its own `handle`. A row the database rejects fails the bulk write and
+  `commit_batch`; the batch rolls back and falls back to one event at a time.
+
+This reverses "no bulk writes" in Options considered for Postgres only: the
+per-event order of `decide()` is unchanged; only the sending is batched. Other
+backends are unchanged.
