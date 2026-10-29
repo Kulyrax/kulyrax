@@ -160,7 +160,7 @@ database backend.
 
 ## Status
 
-Latest release notes: **[`RELEASES/v0.9.0.md`](RELEASES/v0.9.0.md)**.
+Latest release notes: **[`RELEASES/v0.10.0.md`](RELEASES/v0.10.0.md)**.
 
 Kulyrax is in an **alpha** phase — core architecture and execution semantics are stable,
 but public APIs may still evolve. Intended for early feedback, not production

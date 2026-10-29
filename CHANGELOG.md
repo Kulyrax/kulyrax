@@ -3,7 +3,7 @@
 Notable changes per release. Full notes, including upgrade steps, are in
 [`RELEASES/`](RELEASES/).
 
-## Unreleased
+## v0.10.0
 
 ### Breaking
 - Adapters you build yourself need `prepare()` before `handle()`. SQL, MongoDB and
@@ -33,12 +33,17 @@ Notable changes per release. Full notes, including upgrade steps, are in
 - Default batch size 5,000 events (was 256). In continuous `run` and `ingest` a
   batch also closes after `--max-batch-delay-ms` (default 100 ms), so a quiet
   stream is not held back waiting for 5,000 events. `replay` gains `--max-batch`.
+- A rebuild into an empty table skips guard lookups for entities it has not written
+  (`SqlTxn::has_guard_rows`, `sql::exec::KnownGuards`); assumes one writer per
+  projection.
+- The directory source lists its files once per backlog instead of on every poll.
 - The directory source splits a file larger than the batch instead of taking it
   whole.
 
 ### Added
 - `StorageAdapter::begin_batch` / `commit_batch` / `rollback_batch`, with no-op
-  defaults; `SqlTxn::read_guard_lanes`, with a default that reads lane by lane.
+  defaults; `SqlTxn::read_guard_lanes` and `SqlTxn::has_guard_rows`, with defaults
+  that read every lane.
 - Time per stage in the run report (`timings`) and in `kulyrax run` output.
 - `examples/benchmark` covers every backend, with a projection-lag probe and a
   rebuild-while-ingesting run.

@@ -20,7 +20,7 @@ members = [
 exclude = ["examples"]
 
 [workspace.package]
-version = "0.9.0"
+version = "0.10.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Kulyrax/kulyrax"
@@ -28,13 +28,13 @@ authors = ["Kulyrax Contributors"]
 rust-version = "1.88"
 
 [workspace.dependencies]
-kulyrax-core = { path = "crates/core", version = "0.9.0" }
-kulyrax-ingest = { path = "crates/ingest", version = "0.9.0" }
-kulyrax-client = { path = "crates/client", version = "0.9.0" }
-kulyrax-adapter-postgres = { path = "crates/adapters/postgres", version = "0.9.0" }
-kulyrax-adapter-elasticsearch = { path = "crates/adapters/elasticsearch", version = "0.9.0" }
-kulyrax-adapter-mysql = { path = "crates/adapters/mysql", version = "0.9.0" }
-kulyrax-adapter-redis = { path = "crates/adapters/redis", version = "0.9.0" }
-kulyrax-adapter-mongodb = { path = "crates/adapters/mongodb", version = "0.9.0" }
-kulyrax-adapter-neo4j = { path = "crates/adapters/neo4j", version = "0.9.0" }
-kulyrax-backends = { path = "crates/backends", version = "0.9.0" }
+kulyrax-core = { path = "crates/core", version = "0.10.0" }
+kulyrax-ingest = { path = "crates/ingest", version = "0.10.0" }
+kulyrax-client = { path = "crates/client", version = "0.10.0" }
+kulyrax-adapter-postgres = { path = "crates/adapters/postgres", version = "0.10.0" }
+kulyrax-adapter-elasticsearch = { path = "crates/adapters/elasticsearch", version = "0.10.0" }
+kulyrax-adapter-mysql = { path = "crates/adapters/mysql", version = "0.10.0" }
+kulyrax-adapter-redis = { path = "crates/adapters/redis", version = "0.10.0" }
+kulyrax-adapter-mongodb = { path = "crates/adapters/mongodb", version = "0.10.0" }
+kulyrax-adapter-neo4j = { path = "crates/adapters/neo4j", version = "0.10.0" }
+kulyrax-backends = { path = "crates/backends", version = "0.10.0" }

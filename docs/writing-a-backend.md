@@ -84,8 +84,12 @@ of it: hold one connection for the batch, `BEGIN` in `begin_batch`, load the
 batch's guard lanes with `prefetch_guards` (override
 `SqlTxn::read_guard_lanes` to make that one query instead of one per lane),
 call `project_in` with the batch's `GuardCache` from `handle`, and
-`COMMIT`/`ROLLBACK` in `commit_batch`/`rollback_batch`. SQLite and Postgres
-are the worked examples.
+`COMMIT`/`ROLLBACK` in `commit_batch`/`rollback_batch`. `prefetch_guards`
+also takes the adapter's `KnownGuards`: implement `SqlTxn::has_guard_rows`
+(the default says "yes", which reads every lane) and call
+`KnownGuards::note` for every entity before writing it, inside a batch or
+not, and a rebuild into an empty table skips the guard lookups that cannot
+find anything. SQLite and Postgres are the worked examples.
 
 Whichever shape you pick, get it right: a backend that merely "usually" makes
 the guard-and-write pair atomic will occasionally lose or duplicate an

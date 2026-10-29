@@ -175,3 +175,36 @@ Owner, 2026-10-28: a batch closes at `max_batch` events or `max_batch_delay`
   and `ServeOptions::max_batch_delay`. Zero disables it.
 - Added latency: at most the delay per batch, on top of the batch's own time.
   Measured by the lag reruns at 1,000/s and 5,000/s.
+
+## Amendment (2026-10-29): the rebuild target
+
+The Phase 1 target, "rebuild at least 2× live", measured live as the live path's
+**maximum throughput**. That was the wrong proxy. Once live and rebuild share the
+batch path, a rebuild differs from live only in skipping guard reads for an empty
+projection, so its throughput can never be far above the live path's maximum. The
+ratio then measures how much work the two paths share, not whether a rebuild can
+catch up. Catching up depends on how fast events *arrive*, not on how fast live
+could go:
+
+    catch-up time = history / (rebuild throughput − arrival rate)
+
+A rebuild only finishes if it outruns arrivals, and finishes in reasonable time only
+if it outruns them by a margin.
+
+**New target (owner, 2026-10-29):** rebuild throughput at least 2× the target live
+arrival rate of 5,000 events/s, that is at least **10,000 events/s**, rebuilding a
+**1M-event** history **with live ingest running alongside at 5,000 events/s**. At
+exactly 10,000/s, a 1M history catches up in 1,000,000 / (10,000 − 5,000) = 200 s.
+
+Raw numbers (Postgres, this laptop, internal baselines), reported side by side:
+
+- Rebuild of a 1M-event history, batch 5,000: **13,022 events/s** with live ingesting
+  at 5,000/s alongside (13,366 with live at 2,500/s). Passes: catch-up time
+  1,000,000 / (13,022 − 5,000) ≈ 125 s.
+- Live path into a projection that already has a 1M-event history, batch 5,000,
+  measured as a backlog: **11,415 events/s**. This is live's maximum throughput, not a
+  target; it shows that live has headroom over its 5,000/s arrival rate.
+
+A rebuild path that does not go through per-event guards at all (COPY into a shadow
+table, then an atomic swap) would raise the rebuild number further. It is logged as
+post-merge work, not part of this phase.

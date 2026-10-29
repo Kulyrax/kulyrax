@@ -106,7 +106,7 @@ impl EventSource for DirectorySource {
 
     /// Whole files while they fit in `max_batch`. A file that does not fit
     /// (or was partly taken already) is taken in parts: its events'
-    /// positions are `<file>#<index>`, see [`split_position`].
+    /// positions are `<file>#<index>` (see `split_position`).
     fn poll(&mut self, max_batch: usize) -> Result<Vec<SourcedEvent>, SourceError> {
         let max_batch = max_batch.max(1);
         let after = self.committed.as_ref().map(|p| parse_position(&p.0));

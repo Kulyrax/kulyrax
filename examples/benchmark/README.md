@@ -35,17 +35,25 @@ The stages nest:
 - `schema`: setting up the store when adapters are prepared, once before anything
   is ingested (SQL guard table, MongoDB guard index, Neo4j guard constraint).
 - `source read`: polling the source (reading and parsing event files).
-- `dispatch`: projecting a batch, which contains every `adapter` call.
-- `adapter`: one adapter handling one event, which contains:
-  - `read`: guard reads that feed `decide()`.
-  - `write`: the target write and the guard write.
-  - `commit`: the transaction commit (SQL, MongoDB, Neo4j; the file stores, Redis and
-    Elasticsearch commit inside `write`).
-  - what's left: building the mapping, checking out a connection, beginning a
-    transaction.
+- `dispatch`: projecting a batch, which contains every `adapter` and `batch` call.
+- `adapter`: one adapter handling one event. Per-event backends do their `read`,
+  `write` and `commit` here. Inside a batch, SQLite writes each event into the open
+  transaction (`write`) and commits at the end; Postgres only records the event's
+  writes (`write`, microseconds) and sends them at commit.
+- `batch`: opening and ending one adapter's batch transaction (SQLite, Postgres):
+  `begin_batch` loads the batch's guard lanes (`read`, one per table), and
+  `commit_batch` sends Postgres's bulk writes (`write`, one per batch) and commits
+  (`commit`).
+- `read`: guard reads that feed `decide()`; `write`: the target and guard writes;
+  `commit`: the transaction commit (SQL, MongoDB, Neo4j; the file stores, Redis and
+  Elasticsearch commit inside `write`).
 - `checkpoint`: advancing the source position after a batch.
+- The two derived lines: adapter and batch time outside read/write/commit (building
+  the mapping, connections, `BEGIN`), and dispatch time outside adapter and batch
+  calls (routing, reports).
 
-Each event is projected in its own durable transaction per adapter, so throughput is
-usually bounded by how fast the storage can flush a commit. That varies a lot between
-machines, operating systems and Docker setups: always report the CPU, disk, OS and
-database version with a number (`suite.sh` writes `results/machine.txt`).
+SQLite and Postgres commit once per batch (5,000 events by default; `MAX_BATCH=1000
+bash run.sh …` to change it); the other backends commit once per event, so their
+throughput is usually bounded by how fast the storage can flush a commit. Both vary
+a lot between machines, operating systems and Docker setups: always report the CPU,
+disk, OS and database version with a number (`suite.sh` writes `results/machine.txt`).
