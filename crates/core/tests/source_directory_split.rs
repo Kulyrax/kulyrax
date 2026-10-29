@@ -76,3 +76,34 @@ fn whole_files_that_fit_keep_their_plain_position() {
     assert_eq!(ids(&batch), ["evt-a-1", "evt-b-1"]);
     assert_eq!(max_position(&batch).0, "b.json");
 }
+
+/// The directory is listed once per backlog, not on every poll; files that
+/// appear later are still read once the listed ones are done.
+#[test]
+fn files_added_after_listing_are_read_after_the_backlog() {
+    let tmp = tempdir().unwrap();
+    let dir = tmp.path().join("events");
+    std::fs::create_dir_all(&dir).unwrap();
+    let write = |name: &str, id: &str| {
+        std::fs::write(
+            dir.join(name),
+            serde_json::to_string(&user_event(1, id, "x")).unwrap(),
+        )
+        .unwrap();
+    };
+    write("a.json", "a");
+    write("b.json", "b");
+    let mut src = DirectorySource::new("dir", &dir, tmp.path().join("state")).unwrap();
+
+    let first = src.poll(1).unwrap();
+    assert_eq!(ids(&first), ["evt-a-1"]);
+    src.commit(max_position(&first)).unwrap();
+    write("c.json", "c"); // after the listing
+    let second = src.poll(1).unwrap();
+    assert_eq!(ids(&second), ["evt-b-1"]);
+    src.commit(max_position(&second)).unwrap();
+    let third = src.poll(1).unwrap();
+    assert_eq!(ids(&third), ["evt-c-1"]);
+    src.commit(max_position(&third)).unwrap();
+    assert!(src.poll(1).unwrap().is_empty());
+}

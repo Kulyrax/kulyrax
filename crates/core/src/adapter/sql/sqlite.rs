@@ -5,7 +5,7 @@ use rusqlite::{Connection, params, params_from_iter};
 
 use crate::{
     adapter::sql::adapter::SqlError,
-    adapter::sql::exec::{self, GuardCache, GuardRow, Placeholders, SqlTxn, SqlWrite},
+    adapter::sql::exec::{self, GuardCache, GuardRow, KnownGuards, Placeholders, SqlTxn, SqlWrite},
     adapter::sql::runtime::SqlRuntimeBuilder,
     adapter::{AdapterError, AdapterResult, GuardState, Prepared, StorageAdapter},
     event::Event,
@@ -31,6 +31,8 @@ pub struct SqliteAdapter {
     /// The open batch's guard cache, while a batch transaction is open on
     /// `conn` (Phase 2). Always locked after `conn`.
     batch: Mutex<Option<GuardCache>>,
+    /// Entities that can have guard lanes (see [`KnownGuards`]). Locked last.
+    known: Mutex<KnownGuards>,
     /// Set by `prepare` once the guard table exists.
     prepared: Prepared,
 }
@@ -72,6 +74,7 @@ impl SqliteAdapter {
             migration_policy,
             conn: Mutex::new(None),
             batch: Mutex::new(None),
+            known: Mutex::default(),
             prepared: Prepared::default(),
         }
     }
@@ -162,8 +165,14 @@ impl StorageAdapter for SqliteAdapter {
         let mut txn =
             SqliteTxn::begin(conn).map_err(|e| AdapterError::WriteFailed(e.to_string()))?;
         let mut cache = GuardCache::default();
-        exec::prefetch_guards(&mut txn, plans.iter().map(|p| &p.plan), &mut cache)
-            .map_err(|e| AdapterError::WriteFailed(e.to_string()))?;
+        let mut known = self.known.lock().map_err(|_| poisoned())?;
+        exec::prefetch_guards(
+            &mut txn,
+            plans.iter().map(|p| &p.plan),
+            &mut cache,
+            &mut known,
+        )
+        .map_err(|e| AdapterError::WriteFailed(e.to_string()))?;
         // From here the batch owns the transaction; `txn` must not roll it back.
         txn.release();
         *batch = Some(cache);
@@ -208,6 +217,11 @@ impl StorageAdapter for SqliteAdapter {
             Ok(p) => p,
             Err(result) => return result,
         };
+        // Before any write: this entity may have guard lanes from now on.
+        match self.known.lock() {
+            Ok(mut known) => known.note(&planned.plan.table, &planned.plan.entity_key),
+            Err(_) => return self.failure(poisoned()),
+        }
 
         let (conn, mut batch) = match self.lock() {
             Ok(locks) => locks,
@@ -305,6 +319,16 @@ impl SqlTxn for SqliteTxn<'_> {
                 [],
             )
             .map(|_| ())
+            .map_err(sql_err)
+    }
+
+    fn has_guard_rows(&mut self, table: &str) -> Result<bool, SqlError> {
+        self.conn
+            .prepare_cached(
+                "SELECT EXISTS (SELECT 1 FROM conduit_projection_state WHERE target_table = ?1)",
+            )
+            .and_then(|mut stmt| stmt.query_row(params![table], |row| row.get::<_, i64>(0)))
+            .map(|n| n != 0)
             .map_err(sql_err)
     }
 

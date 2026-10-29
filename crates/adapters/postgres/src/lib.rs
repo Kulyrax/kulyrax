@@ -24,7 +24,7 @@ use serde_json::Value;
 
 use kulyrax_core::adapter::sql::adapter::SqlError;
 use kulyrax_core::adapter::sql::exec::{
-    self, GuardCache, GuardRow, Placeholders, SqlTxn, SqlWrite,
+    self, GuardCache, GuardRow, KnownGuards, Placeholders, SqlTxn, SqlWrite,
 };
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use kulyrax_core::adapter::{AdapterError, AdapterResult, GuardState, Prepared, StorageAdapter};
@@ -118,6 +118,9 @@ pub struct PostgresAdapter {
     /// The open batch, from `begin_batch` to `commit_batch` /
     /// `rollback_batch` (Phase 2).
     batch: Mutex<Option<PgBatch>>,
+    /// Entities that can have guard lanes (see [`KnownGuards`]). Locked
+    /// after `batch`.
+    known: Mutex<KnownGuards>,
     /// Set by `prepare` once the guard table exists.
     prepared: Prepared,
 }
@@ -170,6 +173,7 @@ impl PostgresAdapter {
             migration_policy,
             col_types: Arc::new(Mutex::new(HashMap::new())),
             batch: Mutex::new(None),
+            known: Mutex::default(),
             prepared: Prepared::default(),
         }
     }
@@ -276,8 +280,14 @@ impl StorageAdapter for PostgresAdapter {
         {
             let mut txn = PostgresTxn::begin(&mut client, Arc::default(), Some(&mut statements))
                 .map_err(|e| AdapterError::WriteFailed(e.to_string()))?;
-            exec::prefetch_guards(&mut txn, plans.iter().map(|p| &p.plan), &mut cache)
-                .map_err(|e| AdapterError::WriteFailed(e.to_string()))?;
+            let mut known = self.known.lock().map_err(|_| poisoned())?;
+            exec::prefetch_guards(
+                &mut txn,
+                plans.iter().map(|p| &p.plan),
+                &mut cache,
+                &mut known,
+            )
+            .map_err(|e| AdapterError::WriteFailed(e.to_string()))?;
             // From here the batch owns the transaction; `txn` must not roll it back.
             txn.release();
         }
@@ -341,6 +351,11 @@ impl StorageAdapter for PostgresAdapter {
             Err(result) => return result,
         };
         let plan = &planned.plan;
+        // Before any write: this entity may have guard lanes from now on.
+        match self.known.lock() {
+            Ok(mut known) => known.note(&plan.table, &plan.entity_key),
+            Err(_) => return self.failure(poisoned()),
+        }
 
         let mut batch = match self.batch.lock() {
             Ok(b) => b,
@@ -644,6 +659,14 @@ impl SqlTxn for PostgresTxn<'_> {
                 .map_err(pg_err),
             Err(e) => Err(pg_err(e)),
         }
+    }
+
+    fn has_guard_rows(&mut self, table: &str) -> Result<bool, SqlError> {
+        let rows = self.query(
+            "SELECT EXISTS (SELECT 1 FROM conduit_projection_state WHERE target_table = $1)",
+            &[&table],
+        )?;
+        Ok(rows.first().is_none_or(|r| r.get::<_, bool>(0)))
     }
 
     fn read_guard_lane(

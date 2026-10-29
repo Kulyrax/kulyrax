@@ -179,6 +179,13 @@ pub trait SqlTxn: Sized {
         lock: bool,
     ) -> Result<Option<GuardState>, SqlError>;
 
+    /// Whether `table` has any guard rows yet (see [`KnownGuards`]). The
+    /// default answers `true`, which makes [`prefetch_guards`] read every
+    /// lane, as without this check.
+    fn has_guard_rows(&mut self, _table: &str) -> Result<bool, SqlError> {
+        Ok(true)
+    }
+
     /// Read many lanes of one table at once, for a batch (see
     /// [`prefetch_guards`]); the result is positionally paired with `lanes`
     /// (`(entity_key, facet)`). The default reads them one by one through
@@ -327,15 +334,69 @@ impl GuardCache {
     }
 }
 
+/// Most entities a [`KnownGuards`] tracks per table before it stops trusting
+/// the table to be fresh and reads every lane again (~24 bytes each).
+pub const KNOWN_GUARDS_CAP: usize = 5_000_000;
+
+/// Which entities can have guard lanes, per target table, so a rebuild into
+/// an empty projection does not look up guards that cannot exist.
+///
+/// The first time an adapter sees a table, [`prefetch_guards`] asks the store
+/// whether it has any guard rows ([`SqlTxn::has_guard_rows`]). If not, the
+/// table is *fresh*: from then on a lane can only exist for an entity this
+/// adapter wrote, so every write path calls [`KnownGuards::note`] first, and
+/// `prefetch_guards` reads only lanes of noted entities; the rest are absent
+/// without a lookup. Entities are kept as 64-bit hashes: a collision only
+/// costs an unneeded read, never a missed lane. Past [`KNOWN_GUARDS_CAP`]
+/// entities, or for a table that had guard rows, every lane is read.
+///
+/// Assumes one writer per projection: a second writer adding guard rows to a
+/// fresh table would not be seen.
+#[derive(Debug, Default)]
+pub struct KnownGuards {
+    tables: HashMap<String, Option<std::collections::HashSet<u64>>>,
+}
+
+impl KnownGuards {
+    /// `entity_key` of `table` may be written from now on.
+    pub fn note(&mut self, table: &str, entity_key: &str) {
+        let Some(Some(keys)) = self.tables.get_mut(table) else {
+            return;
+        };
+        keys.insert(key_hash(entity_key));
+        if keys.len() > KNOWN_GUARDS_CAP {
+            self.tables.insert(table.to_string(), None);
+        }
+    }
+
+    /// `false` only when `table` is fresh and `entity_key` was never noted.
+    fn may_have_lanes(&self, table: &str, entity_key: &str) -> bool {
+        match self.tables.get(table) {
+            Some(Some(keys)) => keys.contains(&key_hash(entity_key)),
+            _ => true,
+        }
+    }
+}
+
+fn key_hash(entity_key: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    entity_key.hash(&mut h);
+    h.finish()
+}
+
 /// Load every guard lane `plans` will read into `cache`, one
 /// [`SqlTxn::read_guard_lanes`] call per table, locked (`FOR UPDATE` where the
 /// backend supports it). A named facet also needs its entity's default lane.
 /// Tables and lanes go in sorted order, so concurrent writers lock rows in
-/// the same order.
+/// the same order. Lanes `known` rules out are cached as absent without a
+/// read; every entity in `plans` is then noted in `known`, since the batch
+/// may write it.
 pub fn prefetch_guards<'p, T: SqlTxn>(
     txn: &mut T,
     plans: impl IntoIterator<Item = &'p SqlPlan>,
     cache: &mut GuardCache,
+    known: &mut KnownGuards,
 ) -> Result<(), SqlError> {
     let mut by_table: BTreeMap<&str, BTreeSet<(&str, &str)>> = BTreeMap::new();
     for plan in plans {
@@ -346,11 +407,30 @@ pub fn prefetch_guards<'p, T: SqlTxn>(
         }
     }
     for (table, lanes) in by_table {
-        let lanes: Vec<(String, String)> = lanes
-            .into_iter()
-            .filter(|(key, facet)| cache.get(table, key, facet).is_none())
-            .map(|(key, facet)| (key.to_string(), facet.to_string()))
-            .collect();
+        if !known.tables.contains_key(table) {
+            let fresh = !timed(Stage::Read, || txn.has_guard_rows(table))?;
+            known
+                .tables
+                .insert(table.to_string(), fresh.then(Default::default));
+        }
+        let batch_keys: BTreeSet<&str> = lanes.iter().map(|(key, _)| *key).collect();
+        let mut to_read: Vec<(String, String)> = Vec::new();
+        for (key, facet) in lanes {
+            if cache.get(table, key, facet).is_some() {
+                continue;
+            }
+            if known.may_have_lanes(table, key) {
+                to_read.push((key.to_string(), facet.to_string()));
+            } else {
+                cache.set(table, key, facet, None);
+            }
+        }
+        let lanes = to_read;
+        // After the check above (so this batch's new entities read as
+        // absent) and before any write.
+        for key in batch_keys {
+            known.note(table, key);
+        }
         if lanes.is_empty() {
             continue;
         }

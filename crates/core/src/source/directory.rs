@@ -3,6 +3,7 @@
 //! line) and hands them over in file-name order. Formalises today's `replay`
 //! loader as a resumable, checkpointed source.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use super::checkpoint::{read_checkpoint, write_checkpoint};
@@ -14,6 +15,14 @@ pub struct DirectorySource {
     path: PathBuf,
     state_dir: PathBuf,
     committed: Option<SourcePosition>,
+    /// Event files listed but not yet passed by the committed position, in
+    /// name order. Polls read from the front; the directory is listed again
+    /// only when this runs out, so a backlog of files is listed once rather
+    /// than on every poll. A new listing adds only names after the last one
+    /// listed: files must appear in name order (a file named before one
+    /// already listed is not read, as a file named before the committed
+    /// position never was).
+    listed: VecDeque<String>,
 }
 
 impl DirectorySource {
@@ -30,17 +39,32 @@ impl DirectorySource {
             path: path.into(),
             state_dir,
             committed,
+            listed: VecDeque::new(),
         })
     }
 
-    /// Event files in the watched directory, in file-name order.
-    fn event_files(&self) -> Result<Vec<PathBuf>, SourceError> {
-        let mut files: Vec<PathBuf> = std::fs::read_dir(&self.path)?
+    /// Append to `listed`, in name order, the event files named after the
+    /// last one already listed and not yet passed by the committed position
+    /// `after` (a file taken in parts, `(name, Some(_))`, is not passed yet).
+    fn list_more(&mut self, after: Option<&(String, Option<usize>)>) -> Result<(), SourceError> {
+        let last = self.listed.back().cloned();
+        let wanted = |name: &str| {
+            last.as_deref().is_none_or(|l| name > l)
+                && match after {
+                    None => true,
+                    Some((done, None)) => name > done.as_str(),
+                    Some((done, Some(_))) => name >= done.as_str(),
+                }
+        };
+        let mut names: Vec<String> = std::fs::read_dir(&self.path)?
             .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.is_file())
-            .filter(|p| {
-                p.extension()
+            // The entry's own type: no extra metadata call per file.
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|name| wanted(name))
+            .filter(|name| {
+                Path::new(name)
+                    .extension()
                     .and_then(|s| s.to_str())
                     .map(|ext| {
                         let ext = ext.to_ascii_lowercase();
@@ -49,15 +73,9 @@ impl DirectorySource {
                     .unwrap_or(false)
             })
             .collect();
-        files.sort();
-        Ok(files)
-    }
-
-    fn file_name(p: &Path) -> String {
-        p.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default()
-            .to_string()
+        names.sort();
+        self.listed.extend(names);
+        Ok(())
     }
 }
 
@@ -94,13 +112,35 @@ impl EventSource for DirectorySource {
         let after = self.committed.as_ref().map(|p| parse_position(&p.0));
         let mut out: Vec<SourcedEvent> = Vec::new();
 
-        for file in self.event_files()? {
-            let name = Self::file_name(&file);
-            // Events of this file already committed: all of a file before the
-            // committed one, or up to the committed index of a split file.
+        // Files the committed position has passed.
+        while let Some(front) = self.listed.front() {
+            let passed = match &after {
+                Some((done, None)) => front.as_str() <= done.as_str(),
+                Some((done, Some(_))) => front.as_str() < done.as_str(),
+                None => false,
+            };
+            if !passed {
+                break;
+            }
+            self.listed.pop_front();
+        }
+
+        let mut relisted = false;
+        let mut i = 0;
+        loop {
+            if i == self.listed.len() {
+                if relisted {
+                    break;
+                }
+                self.list_more(after.as_ref())?;
+                relisted = true;
+                continue;
+            }
+            let name = self.listed[i].clone();
+            i += 1;
+            // Events of this file already committed: up to the committed
+            // index of a split file.
             let skip = match &after {
-                Some((done, _)) if name.as_str() < done.as_str() => continue,
-                Some((done, None)) if name == *done => continue,
                 Some((done, Some(index))) if name == *done => index + 1,
                 _ => 0,
             };
@@ -108,7 +148,7 @@ impl EventSource for DirectorySource {
             if room == 0 {
                 break;
             }
-            let events = events_from_path(&file)?
+            let events = events_from_path(self.path.join(&name))?
                 .map(|item| item.map_err(|e| SourceError::Parse(e.to_string())))
                 .collect::<Result<Vec<_>, _>>()?;
             if skip >= events.len() {

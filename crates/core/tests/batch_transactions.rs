@@ -470,3 +470,81 @@ fn failed_commit_falls_back_without_loss_or_doubling() {
         assert!(guards.iter().all(|g| g.3 == 1), "each entity written once");
     }
 }
+
+#[test]
+fn fresh_table_skips_guard_reads_for_new_entities() {
+    let tmp = tempdir().unwrap();
+    let db = tmp.path().join("t.db");
+    init_users(&db);
+    let a = sqlite("sql-primary", &db);
+    a.prepare().unwrap();
+    let run = |events: &[Event]| {
+        let refs: Vec<&Event> = events.iter().collect();
+        a.begin_batch(&refs).unwrap();
+        for e in events {
+            assert!(a.handle(e).is_success());
+        }
+        a.commit_batch().unwrap();
+    };
+    let name = |n| Some(("name", n));
+
+    // Batch 1, into an empty projection: one "has guard rows?" check, no
+    // lane reads.
+    stages::take();
+    run(&[
+        ev(1, "UserCreated", "u1", name("a")),
+        ev(1, "UserCreated", "u2", name("b")),
+    ]);
+    assert_eq!(stages::take().read.calls, 1);
+
+    // Batch 2: u1 was written, so its lane is read; u3 is new, so it isn't.
+    run(&[
+        ev(1, "UserCreated", "u1", name("stale")),
+        ev(1, "UserCreated", "u3", name("c")),
+    ]);
+    assert_eq!(stages::take().read.calls, 1, "one read, for u1");
+    let (users, _) = dump(&db);
+    assert_eq!(users[0].1.as_deref(), Some("a"), "u1's redelivery skipped");
+    assert_eq!(users.len(), 3);
+}
+
+#[test]
+fn entity_written_by_a_fallback_is_still_guarded_later() {
+    let tmp = tempdir().unwrap();
+    let db = tmp.path().join("t.db");
+    init_users(&db);
+    let dir = tmp.path().join("events");
+    // Batch 1 (files 0–1): u1 at sequence 5, then an event that fails, so
+    // the batch falls back and u1 is written one event at a time. Batch 2
+    // (file 2): a stale u1 at sequence 3, which must be skipped.
+    write_stream(
+        &dir,
+        &[
+            ev(5, "UserCreated", "u1", Some(("name", "five"))),
+            ev(6, "UserBroken", "u9", None),
+            ev(3, "UserCreated", "u1", Some(("name", "three"))),
+        ],
+    );
+    let src: Box<dyn EventSource> =
+        Box::new(DirectorySource::new("dir", &dir, tmp.path().join("state")).unwrap());
+    let report = run_sources_with_adapters(
+        &config(&db),
+        routing(&["sql-primary"]),
+        vec![Box::new(sqlite("sql-primary", &db))],
+        vec![src],
+        &SourceRunOptions {
+            mode: RunMode::Once,
+            max_batch: 2,
+            max_batch_delay: std::time::Duration::ZERO,
+            retry_budget: 0,
+            dlq_dir: Some(tmp.path().join("dlq")),
+        },
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+
+    assert_eq!(report.batches.len(), 2);
+    assert!(report.batches[0].fell_back);
+    assert_eq!(report.batches[1].skipped, 1, "{report:?}");
+    assert_eq!(dump(&db).0[0].1.as_deref(), Some("five"));
+}
