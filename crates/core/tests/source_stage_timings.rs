@@ -38,6 +38,7 @@ fn run_report_counts_each_stage() {
         mode: RunMode::Once,
         max_batch: 3,
         retry_budget: 0,
+        max_batch_delay: std::time::Duration::ZERO,
         dlq_dir: None,
     };
 

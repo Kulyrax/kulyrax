@@ -36,6 +36,7 @@ fn two_sources_project_and_checkpoint_independently() {
         mode: RunMode::Once,
         max_batch: 256,
         retry_budget: 0,
+        max_batch_delay: std::time::Duration::ZERO,
         dlq_dir: None,
     };
     run_sources(

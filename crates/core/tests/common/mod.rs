@@ -82,6 +82,7 @@ pub fn run_once(
         mode: kulyrax_core::RunMode::Once,
         max_batch: 256,
         retry_budget: 2,
+        max_batch_delay: std::time::Duration::ZERO,
         dlq_dir: None,
     });
     let stop = std::sync::atomic::AtomicBool::new(false);

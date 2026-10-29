@@ -9,7 +9,7 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -34,7 +34,10 @@ use std::sync::Arc;
 
 /// Default events per batch for continuous ingest (`run`, `ingest`). Catch-up
 /// (`run --once`, `replay`) uses [`crate::replay::DEFAULT_REPLAY_BATCH`].
-pub const DEFAULT_LIVE_BATCH: usize = 1000;
+pub const DEFAULT_LIVE_BATCH: usize = 5000;
+
+/// Default [`SourceRunOptions::max_batch_delay`].
+pub const DEFAULT_BATCH_DELAY: Duration = Duration::from_millis(100);
 
 /// Whether to drain every source once and exit, or keep polling.
 #[derive(Debug, Clone, Copy)]
@@ -51,6 +54,14 @@ pub struct SourceRunOptions {
     /// Max events per source per poll: one batch, committed in one
     /// transaction per adapter (see [`crate::batch`]).
     pub max_batch: usize,
+    /// Continuous mode: how long a batch may wait to fill. A batch closes
+    /// when `max_batch` events are waiting, or when this much time has passed
+    /// since the previous poll came back short, whichever comes first: after
+    /// a short poll the loop waits out the rest of the delay before polling
+    /// again, so the next batch collects what arrived meanwhile. A full poll
+    /// (a backlog) never waits, and neither does `RunMode::Once`. Zero
+    /// disables it.
+    pub max_batch_delay: Duration,
     /// Across-batch retries before a batch is DLQ'd (if `dlq_dir` set) or the loop halts.
     pub retry_budget: u32,
     /// Where poison events are parked. `None` → a persistently-failing batch halts the loop.
@@ -62,6 +73,7 @@ impl Default for SourceRunOptions {
         Self {
             mode: RunMode::Once,
             max_batch: DEFAULT_LIVE_BATCH,
+            max_batch_delay: DEFAULT_BATCH_DELAY,
             retry_budget: 3,
             dlq_dir: None,
         }
@@ -359,6 +371,10 @@ fn run_loop(
         }
 
         let mut progressed = false;
+        // For `max_batch_delay`: when this iteration's polls started, and
+        // whether any came back full (a backlog: don't wait).
+        let polled_at = Instant::now();
+        let mut any_full = false;
 
         for source in sources.iter_mut() {
             let batch = timed(Stage::SourceRead, || source.poll(opts.max_batch))?;
@@ -366,6 +382,7 @@ fn run_loop(
                 continue;
             }
             progressed = true;
+            any_full |= batch.len() >= opts.max_batch;
 
             // Phase 15.5 (as in replay): a stable sort by `sequence` delivers
             // every entity's events in the order `decide()` needs.
@@ -462,6 +479,13 @@ fn run_loop(
                         return Ok(report);
                     }
                     sleep_interruptible(poll_interval, stop);
+                } else if !any_full {
+                    // Every poll came back short: let the next batch collect
+                    // what arrives during the rest of the delay.
+                    let waited = polled_at.elapsed();
+                    if waited < opts.max_batch_delay {
+                        sleep_interruptible(opts.max_batch_delay - waited, stop);
+                    }
                 }
             }
         }

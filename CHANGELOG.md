@@ -14,7 +14,8 @@ Notable changes per release. Full notes, including upgrade steps, are in
   Custom adapters that don't override `prepare` are unaffected.
   ([notes](RELEASES/v0.10.0.md#upgrading-from-09))
 - New error variants `SourceError::Prepare` and `PipelineError::AdapterPrepare`.
-- New public fields: `ReplayRunOptions::max_batch` and `BatchSummary::fell_back`.
+- New public fields: `ReplayRunOptions::max_batch`, `BatchSummary::fell_back`,
+  `SourceRunOptions::max_batch_delay` and `kulyrax_ingest::ServeOptions::max_batch_delay`.
   Struct literals that list every field need them (or `..Default::default()`).
 - Directory source checkpoints for a file larger than the batch are
   `<file>#<index>` instead of the file name.
@@ -29,8 +30,9 @@ Notable changes per release. Full notes, including upgrade steps, are in
   each row and guard lane collapses to its final state and the batch is sent as a
   few multi-row statements (`unnest`) before the commit.
   ([decision](docs/ledger/decisions/2026-10-28-batch-transactions.md))
-- Default batch size: 1,000 events for `run` and `ingest` (was 256), 5,000 for
-  `run --once` and `replay`. `replay` gains `--max-batch`.
+- Default batch size 5,000 events (was 256). In continuous `run` and `ingest` a
+  batch also closes after `--max-batch-delay-ms` (default 100 ms), so a quiet
+  stream is not held back waiting for 5,000 events. `replay` gains `--max-batch`.
 - The directory source splits a file larger than the batch instead of taking it
   whole.
 

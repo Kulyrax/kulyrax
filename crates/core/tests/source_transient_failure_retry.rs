@@ -86,6 +86,7 @@ fn transient_failure_is_retried_and_committed_once() {
         mode: RunMode::Once,
         max_batch: 256,
         retry_budget: 3,
+        max_batch_delay: std::time::Duration::ZERO,
         dlq_dir: None,
     };
     let stop = AtomicBool::new(false);
@@ -157,6 +158,7 @@ fn failure_in_the_fallback_is_retried() {
         mode: RunMode::Once,
         max_batch: 256,
         retry_budget: 3,
+        max_batch_delay: std::time::Duration::ZERO,
         dlq_dir: None,
     };
     let report = run_sources_with_adapters(

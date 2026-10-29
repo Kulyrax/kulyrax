@@ -394,6 +394,9 @@ pub struct ServeOptions {
     pub listen: String,
     pub max_batch: usize,
     pub retry_budget: u32,
+    /// How long a batch may wait to fill; see
+    /// [`kulyrax_core::SourceRunOptions::max_batch_delay`].
+    pub max_batch_delay: std::time::Duration,
     pub dlq_dir: Option<std::path::PathBuf>,
     /// Poll cadence when caught up — the max ingest→dispatch latency.
     pub poll_interval: std::time::Duration,
@@ -405,6 +408,7 @@ impl Default for ServeOptions {
             listen: "tcp://127.0.0.1:50051".into(),
             max_batch: kulyrax_core::source::runner::DEFAULT_LIVE_BATCH,
             retry_budget: 3,
+            max_batch_delay: kulyrax_core::source::runner::DEFAULT_BATCH_DELAY,
             dlq_dir: None,
             poll_interval: std::time::Duration::from_millis(200),
         }
@@ -471,6 +475,7 @@ pub fn serve(
         },
         max_batch: opts.max_batch,
         retry_budget: opts.retry_budget,
+        max_batch_delay: opts.max_batch_delay,
         dlq_dir: opts.dlq_dir.clone(),
     };
 

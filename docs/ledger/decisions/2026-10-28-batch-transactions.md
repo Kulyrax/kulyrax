@@ -157,3 +157,21 @@ writes per batch over merging the two statements into one (a ~2× half-fix).
 This reverses "no bulk writes" in Options considered for Postgres only: the
 per-event order of `decide()` is unchanged; only the sending is batched. Other
 backends are unchanged.
+
+## Amendment (2026-10-29): time-based flush, live batch 5,000
+
+Owner, 2026-10-28: a batch closes at `max_batch` events or `max_batch_delay`
+(default 100 ms), whichever comes first; the live default rises to 5,000.
+
+- Implemented in the source loop, for every source and backend: in continuous
+  mode, when every source's poll came back short of `max_batch`, the loop waits out
+  the rest of the delay (measured from that poll) before polling again, so the next
+  batch collects what arrived meanwhile. A full poll means a backlog and never
+  waits; `RunMode::Once` never waits.
+- Sources are polled once per batch, as before. Accumulating across several polls
+  would need a change to `EventSource`: the directory source re-reads from its
+  committed position, so a second poll before the commit returns the same events.
+- `--max-batch-delay-ms` on `run` and `ingest`; `SourceRunOptions::max_batch_delay`
+  and `ServeOptions::max_batch_delay`. Zero disables it.
+- Added latency: at most the delay per batch, on top of the batch's own time.
+  Measured by the lag reruns at 1,000/s and 5,000/s.

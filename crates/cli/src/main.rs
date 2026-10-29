@@ -68,9 +68,15 @@ enum Commands {
         once: bool,
 
         /// Max events per batch, committed in one transaction per adapter
-        /// (source loop only). Default 1,000; 5,000 with `--once`.
+        /// (source loop only). Default 5,000.
         #[arg(long)]
         max_batch: Option<usize>,
+
+        /// Continuous mode: how long a batch may wait to fill, in ms. A batch
+        /// closes at `--max-batch` events or after this delay, whichever
+        /// comes first. Default 100; 0 disables it.
+        #[arg(long)]
+        max_batch_delay_ms: Option<u64>,
 
         /// Poll interval in ms when all sources are caught up (continuous mode).
         #[arg(long)]
@@ -106,9 +112,15 @@ enum Commands {
         listen: String,
 
         /// Max events per batch, committed in one transaction per adapter.
-        /// Default 1,000.
+        /// Default 5,000.
         #[arg(long)]
         max_batch: Option<usize>,
+
+        /// How long a batch may wait to fill, in ms. A batch closes at
+        /// `--max-batch` events or after this delay, whichever comes first.
+        /// Default 100; 0 disables it.
+        #[arg(long)]
+        max_batch_delay_ms: Option<u64>,
 
         /// Directory to park poison events.
         #[arg(long)]
@@ -198,6 +210,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             event,
             once,
             max_batch,
+            max_batch_delay_ms,
             poll_interval_ms,
             dlq,
             output,
@@ -207,6 +220,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             event,
             once,
             max_batch,
+            max_batch_delay_ms,
             poll_interval_ms,
             dlq,
             output,
@@ -219,9 +233,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             mappings,
             listen,
             max_batch,
+            max_batch_delay_ms,
             dlq,
             output,
-        } => ingest_cmd(config, mappings, listen, max_batch, dlq, output)?,
+        } => ingest_cmd(
+            config,
+            mappings,
+            listen,
+            max_batch,
+            max_batch_delay_ms,
+            dlq,
+            output,
+        )?,
 
         Commands::Explain {
             config,
@@ -272,6 +295,7 @@ fn run_cmd(
     event: Option<PathBuf>,
     once: bool,
     max_batch: Option<usize>,
+    max_batch_delay_ms: Option<u64>,
     poll_interval_ms: Option<u64>,
     dlq: Option<PathBuf>,
     output: OutputFormat,
@@ -301,6 +325,7 @@ fn run_cmd(
         } else {
             kulyrax_core::source::runner::DEFAULT_LIVE_BATCH
         }),
+        max_batch_delay: batch_delay(max_batch_delay_ms),
         retry_budget: 3,
         dlq_dir: dlq,
     };
@@ -332,11 +357,18 @@ fn run_cmd(
 // Ingest — the gRPC ingestion service (Phase 20)
 // --------------------------------------------------
 
+/// `--max-batch-delay-ms`, or the default.
+fn batch_delay(ms: Option<u64>) -> Duration {
+    ms.map(Duration::from_millis)
+        .unwrap_or(kulyrax_core::source::runner::DEFAULT_BATCH_DELAY)
+}
+
 fn ingest_cmd(
     config: PathBuf,
     mappings: PathBuf,
     listen: String,
     max_batch: Option<usize>,
+    max_batch_delay_ms: Option<u64>,
     dlq: Option<PathBuf>,
     output: OutputFormat,
 ) -> Result<i32, Box<dyn std::error::Error>> {
@@ -349,6 +381,7 @@ fn ingest_cmd(
     let opts = kulyrax_ingest::ServeOptions {
         listen,
         max_batch: max_batch.unwrap_or(kulyrax_core::source::runner::DEFAULT_LIVE_BATCH),
+        max_batch_delay: batch_delay(max_batch_delay_ms),
         retry_budget: 3,
         dlq_dir: dlq,
         ..Default::default()
