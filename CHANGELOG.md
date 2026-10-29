@@ -47,7 +47,8 @@ Notable changes per release. Full notes, including upgrade steps, are in
 - MySQL: writers adding new entities could deadlock each other (ERROR 1213), even
   on different target tables, through gap locks on the shared guard table. The
   MySQL transaction now runs at `READ COMMITTED`, like Postgres. Needs
-  `binlog_format=ROW` (the MySQL 8 default) if the binary log is on.
+  `binlog_format=ROW` or `MIXED` (the MySQL 8 default is `ROW`) if the binary log
+  is on; `prepare` fails with a clear error on `STATEMENT`.
 
 ## Earlier releases
 

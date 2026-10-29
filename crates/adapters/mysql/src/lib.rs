@@ -14,7 +14,8 @@
 //! different target tables — deadlocked on neighbouring gaps (ERROR 1213).
 //! `READ COMMITTED` takes no gap locks for these reads, as on Postgres.
 //! Requires row-based binary logging (`binlog_format=ROW`, the MySQL 8
-//! default) when the binary log is on.
+//! default, or `MIXED`) when the binary log is on; `prepare` refuses
+//! `STATEMENT` (see `check_binlog_format`).
 
 use std::sync::Arc;
 
@@ -147,6 +148,13 @@ impl StorageAdapter for MySqlAdapter {
             .map_err(|e| AdapterError::WriteFailed(e.clone()))?;
         self.prepared
             .prepare(|| {
+                let mut conn = pool.get_conn().map_err(my_err)?;
+                let (log_bin, format): (i64, String) = conn
+                    .query_first("SELECT @@log_bin, @@SESSION.binlog_format")
+                    .map_err(my_err)?
+                    .unwrap_or((0, String::new()));
+                check_binlog_format(log_bin != 0, &format)?;
+                drop(conn);
                 let tx = pool.start_transaction(TxOpts::default()).map_err(my_err)?;
                 exec::ensure_schema(MySqlTxn { tx })
             })
@@ -248,6 +256,22 @@ pub struct MySqlTxn<'a> {
 
 fn my_err(e: mysql::Error) -> SqlError {
     SqlError::ExecutionFailed(e.to_string())
+}
+
+/// Writes run in `READ COMMITTED` transactions (see the module docs), which
+/// InnoDB can only log row by row: with the binary log on and
+/// `binlog_format=STATEMENT`, every write would fail with ERROR 1665. Caught
+/// in `prepare`, before anything is ingested. `ROW` and `MIXED` work.
+fn check_binlog_format(log_bin: bool, format: &str) -> Result<(), SqlError> {
+    if log_bin && format.eq_ignore_ascii_case("STATEMENT") {
+        return Err(SqlError::ExecutionFailed(
+            "MySQL has the binary log on with binlog_format=STATEMENT; Kulyrax writes in \
+             READ COMMITTED transactions, which need binlog_format=ROW (or MIXED). \
+             Set binlog_format=ROW on the server."
+                .to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Binds by the JSON value's own shape; see the module docs for why there is
@@ -430,6 +454,16 @@ impl SqlTxn for MySqlTxn<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn statement_binlog_is_rejected_only_when_the_binlog_is_on() {
+        let err = check_binlog_format(true, "STATEMENT").unwrap_err();
+        assert!(err.to_string().contains("binlog_format=ROW"), "{err}");
+        assert!(check_binlog_format(true, "statement").is_err());
+        assert!(check_binlog_format(true, "ROW").is_ok());
+        assert!(check_binlog_format(true, "MIXED").is_ok());
+        assert!(check_binlog_format(false, "STATEMENT").is_ok());
+    }
 
     fn build(url: &str) -> Result<Box<dyn StorageAdapter>, ConfigError> {
         let raw = serde_yaml::to_value(serde_json::json!({
