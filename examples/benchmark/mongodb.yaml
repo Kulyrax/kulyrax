@@ -1,0 +1,15 @@
+version: 1
+routing:
+  file: routing.yaml
+adapters:
+  - type: mongodb
+    id: store
+    priority: 10
+    config:
+      url: mongodb://localhost:27018/?directConnection=true
+      database: bench
+sources:
+  - type: directory
+    id: bench
+    path: ./work/events
+    state_dir: ./work/state

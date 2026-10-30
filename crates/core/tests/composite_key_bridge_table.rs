@@ -3,6 +3,9 @@
 //! identifies a row. Two different `event_id`s that resolve to the same
 //! `(post_id, tag_id)` pair are deduplicated; a genuinely different pair is not.
 
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use kulyrax_core::adapter::sql::sqlite::SqliteAdapter;
@@ -56,14 +59,14 @@ columns:
         )?,
     );
 
-    let adapter = SqliteAdapter::new(
+    let adapter = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(sql_mappings),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
 
     // Same (post_id, tag_id) pair, two different event_ids.
     let first = tag_assigned("evt-1", 1, "post-1", "tag-a");

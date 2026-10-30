@@ -1,0 +1,14 @@
+version: 1
+routing:
+  file: routing.yaml
+adapters:
+  - type: keyvalue
+    id: store
+    priority: 10
+    config:
+      root: ./work/store
+sources:
+  - type: directory
+    id: bench
+    path: ./work/events
+    state_dir: ./work/state

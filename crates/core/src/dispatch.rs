@@ -3,6 +3,7 @@ use std::time::SystemTime;
 
 use crate::adapter::{AdapterOutcome, StorageAdapter};
 use crate::event::Event;
+use crate::execution::stages::{Stage, timed};
 use crate::execution::{AdapterExecutionReport, AdapterReportError, ExecutionReport};
 use crate::routing::{AdapterId, StorageKind, route_with_rules};
 use crate::runtime::config::FailurePolicy;
@@ -92,7 +93,7 @@ pub fn dispatch(
 
         let adapter = &mut adapters[idx];
         let adapter_started_at = SystemTime::now();
-        let result = adapter.handle(event);
+        let result = timed(Stage::Adapter, || adapter.handle(event));
         let adapter_finished_at = SystemTime::now();
 
         let adapter_report = AdapterExecutionReport::new(

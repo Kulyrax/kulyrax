@@ -3,6 +3,9 @@
 //! (the seq-3 contact event is stale within its lane) → both back ends end
 //! with the seq-5 email, the seq-6 login, and the create's display_name.
 
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::StorageAdapter;
 use kulyrax_core::adapter::document::file::FileDocumentAdapter;
 use kulyrax_core::adapter::document::mapping::DocumentMapping;
@@ -124,14 +127,14 @@ fn sql_and_document_facets_converge() -> Result<(), Box<dyn std::error::Error>> 
             [],
         )?;
     }
-    let sql = SqliteAdapter::new(
+    let sql = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(sql_mappings()),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
     let doc_root = dir.path().join("docs");
     let doc = FileDocumentAdapter::new(
         "file".to_string(),

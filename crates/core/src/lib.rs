@@ -1,4 +1,5 @@
 pub mod adapter;
+pub mod batch;
 pub mod dispatch;
 pub mod event;
 pub mod execution;
@@ -146,6 +147,9 @@ pub fn execute_event_with_upcasters(
         upcasters,
         &runtime::AdapterRegistry::new(),
     );
+    // An adapter that fails to prepare fails this event, with the prepare
+    // error in the report.
+    let _ = crate::adapter::prepare_adapters(&adapters);
     let adapter_meta = crate::runtime::adapter_metadata_map(config);
     dispatch(
         &event,

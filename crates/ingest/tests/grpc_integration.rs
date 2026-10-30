@@ -137,6 +137,7 @@ impl Harness {
                     },
                     max_batch: 64,
                     retry_budget: 1,
+                    max_batch_delay: std::time::Duration::ZERO,
                     dlq_dir: dlq,
                 },
                 &stop2,
@@ -369,6 +370,7 @@ fn grpc_vs_directory_converge() {
             mode: RunMode::Once,
             max_batch: 64,
             retry_budget: 0,
+            max_batch_delay: std::time::Duration::ZERO,
             dlq_dir: None,
         },
         &stop,
@@ -531,6 +533,7 @@ fn grpc_dlq_count_reflects_a_real_cross_backend_failure() {
                 },
                 max_batch: 64,
                 retry_budget: 1,
+                max_batch_delay: std::time::Duration::ZERO,
                 dlq_dir: Some(
                     std::env::temp_dir().join(format!("kulyrax-dlq-cross-{}", std::process::id())),
                 ),

@@ -7,10 +7,10 @@ adapters:
     priority: 10
     capabilities: [write, upsert, delete, transactions]
     config:
-      url: ${DATABASE_URL}
+      url: postgres://postgres:kulyrax@localhost:15432/bench
       pool_size: 4
 sources:
   - type: directory
     id: bench
-    path: ./events
-    state_dir: ./.kulyrax/state
+    path: ./work/events
+    state_dir: ./work/state

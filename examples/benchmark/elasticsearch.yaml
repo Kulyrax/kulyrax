@@ -1,0 +1,14 @@
+version: 1
+routing:
+  file: routing.yaml
+adapters:
+  - type: elasticsearch
+    id: store
+    priority: 10
+    config:
+      url: http://localhost:19200
+sources:
+  - type: directory
+    id: bench
+    path: ./work/events
+    state_dir: ./work/state

@@ -23,7 +23,7 @@
 //! property per lane — a nested map isn't a valid property value at all, and
 //! even a JSON-string blob couldn't be compared in a Cypher `WHERE`.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use neo4rs::{BoltList, BoltMap, BoltType, ConfigBuilder, Graph, Neo4jErrorKind, Query, Row, Txn};
 use serde::Deserialize;
@@ -36,8 +36,9 @@ use kulyrax_core::adapter::graph::exec::{
 };
 use kulyrax_core::adapter::graph::mapping::{ResolvedRecord, canonical_edge_key};
 use kulyrax_core::adapter::graph::runtime::GraphRuntimeBuilder;
-use kulyrax_core::adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter};
+use kulyrax_core::adapter::{AdapterError, AdapterResult, Prepared, SkipReason, StorageAdapter};
 use kulyrax_core::event::Event;
+use kulyrax_core::execution::stages::{Stage, timed};
 use kulyrax_core::routing::StorageKind;
 use kulyrax_core::runtime::AdapterBuildContext;
 use kulyrax_core::runtime::config::{
@@ -192,9 +193,8 @@ pub struct Neo4jAdapter {
     builder: GraphRuntimeBuilder,
     upcasters: Arc<UpcasterRegistry>,
     migration_policy: MigrationPolicy,
-    /// Guarded so the uniqueness constraint is created at most once per
-    /// adapter instance.
-    constraint_ensured: Mutex<bool>,
+    /// Set by `prepare` once the guard uniqueness constraint exists.
+    prepared: Prepared,
 }
 
 impl Neo4jAdapter {
@@ -232,7 +232,7 @@ impl Neo4jAdapter {
             builder,
             upcasters,
             migration_policy,
-            constraint_ensured: Mutex::new(false),
+            prepared: Prepared::default(),
         }
     }
 
@@ -240,18 +240,10 @@ impl Neo4jAdapter {
         AdapterResult::failure(self.id.clone(), StorageKind::Graph, error)
     }
 
+    /// Create the guard uniqueness constraint (idempotent: `IF NOT EXISTS`).
     fn ensure_constraint(&self, rt: &Runtime, graph: &Graph) -> Result<(), GraphError> {
-        let mut ensured = self
-            .constraint_ensured
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        if *ensured {
-            return Ok(());
-        }
         rt.block_on(graph.run(Query::new(GUARD_CONSTRAINT.to_string())))
-            .map_err(neo_err)?;
-        *ensured = true;
-        Ok(())
+            .map_err(neo_err)
     }
 }
 
@@ -266,7 +258,20 @@ impl StorageAdapter for Neo4jAdapter {
         self.priority
     }
 
+    fn prepare(&self) -> Result<(), AdapterError> {
+        let (rt, graph) = self
+            .conn
+            .as_ref()
+            .map_err(|e| AdapterError::WriteFailed(e.clone()))?;
+        self.prepared
+            .prepare(|| timed(Stage::Schema, || self.ensure_constraint(rt, graph)))
+            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+    }
+
     fn handle(&self, event: &Event) -> AdapterResult {
+        if let Err(e) = self.prepared.require() {
+            return self.failure(AdapterError::WriteFailed(e));
+        }
         let projection = match self.builder.build(event, &self.upcasters) {
             Ok(p) => p,
             Err(GraphError::UnsupportedVersion {
@@ -299,9 +304,6 @@ impl StorageAdapter for Neo4jAdapter {
             Ok(pair) => pair,
             Err(e) => return self.failure(AdapterError::WriteFailed(e.clone())),
         };
-        if let Err(e) = self.ensure_constraint(rt, graph) {
-            return self.failure(AdapterError::WriteFailed(e.to_string()));
-        }
 
         let source_version = projection.source_version;
         let projected_version = projection.projected_version;
@@ -355,7 +357,7 @@ impl StorageAdapter for Neo4jAdapter {
                 };
                 match outcome {
                     Ok(o) => {
-                        rt.block_on(txn.commit()).map_err(neo_err)?;
+                        timed(Stage::Commit, || rt.block_on(txn.commit())).map_err(neo_err)?;
                         Ok(o)
                     }
                     Err(e) => {

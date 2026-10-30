@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use kulyrax_core::adapter::SkipReason;
+use kulyrax_core::execution::stages::StageTimings;
 use kulyrax_core::execution::{
     AdapterOutcome, AdapterReportError, ExecutionReport, ExecutionStatus,
 };
@@ -66,9 +67,16 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         once: bool,
 
-        /// Max events per source per poll (source loop only).
+        /// Max events per batch, committed in one transaction per adapter
+        /// (source loop only). Default 5,000.
         #[arg(long)]
         max_batch: Option<usize>,
+
+        /// Continuous mode: how long a batch may wait to fill, in ms. A batch
+        /// closes at `--max-batch` events or after this delay, whichever
+        /// comes first. Default 100; 0 disables it.
+        #[arg(long)]
+        max_batch_delay_ms: Option<u64>,
 
         /// Poll interval in ms when all sources are caught up (continuous mode).
         #[arg(long)]
@@ -103,9 +111,16 @@ enum Commands {
         #[arg(long, default_value = "tcp://127.0.0.1:50051")]
         listen: String,
 
-        /// Max events per batch.
+        /// Max events per batch, committed in one transaction per adapter.
+        /// Default 5,000.
         #[arg(long)]
         max_batch: Option<usize>,
+
+        /// How long a batch may wait to fill, in ms. A batch closes at
+        /// `--max-batch` events or after this delay, whichever comes first.
+        /// Default 100; 0 disables it.
+        #[arg(long)]
+        max_batch_delay_ms: Option<u64>,
 
         /// Directory to park poison events.
         #[arg(long)]
@@ -172,6 +187,11 @@ enum Commands {
         /// Fail events with no routing rule before calling adapters
         #[arg(long, default_value_t = false)]
         validate_routing: bool,
+
+        /// Events per batch, committed in one transaction per adapter.
+        /// Default 5,000; 1 projects one event at a time.
+        #[arg(long)]
+        max_batch: Option<usize>,
     },
 }
 
@@ -190,6 +210,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             event,
             once,
             max_batch,
+            max_batch_delay_ms,
             poll_interval_ms,
             dlq,
             output,
@@ -199,6 +220,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             event,
             once,
             max_batch,
+            max_batch_delay_ms,
             poll_interval_ms,
             dlq,
             output,
@@ -211,9 +233,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             mappings,
             listen,
             max_batch,
+            max_batch_delay_ms,
             dlq,
             output,
-        } => ingest_cmd(config, mappings, listen, max_batch, dlq, output)?,
+        } => ingest_cmd(
+            config,
+            mappings,
+            listen,
+            max_batch,
+            max_batch_delay_ms,
+            dlq,
+            output,
+        )?,
 
         Commands::Explain {
             config,
@@ -237,6 +268,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             max_per_event,
             progress_every,
             validate_routing,
+            max_batch,
         } => replay_cmd(
             config,
             mappings,
@@ -245,6 +277,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             max_per_event,
             progress_every,
             validate_routing,
+            max_batch,
         )?,
     };
 
@@ -262,6 +295,7 @@ fn run_cmd(
     event: Option<PathBuf>,
     once: bool,
     max_batch: Option<usize>,
+    max_batch_delay_ms: Option<u64>,
     poll_interval_ms: Option<u64>,
     dlq: Option<PathBuf>,
     output: OutputFormat,
@@ -286,7 +320,12 @@ fn run_cmd(
                 poll_interval: Duration::from_millis(poll_interval_ms.unwrap_or(1000)),
             }
         },
-        max_batch: max_batch.unwrap_or(256),
+        max_batch: max_batch.unwrap_or(if once {
+            kulyrax_core::replay::DEFAULT_REPLAY_BATCH
+        } else {
+            kulyrax_core::source::runner::DEFAULT_LIVE_BATCH
+        }),
+        max_batch_delay: batch_delay(max_batch_delay_ms),
         retry_budget: 3,
         dlq_dir: dlq,
     };
@@ -318,11 +357,18 @@ fn run_cmd(
 // Ingest — the gRPC ingestion service (Phase 20)
 // --------------------------------------------------
 
+/// `--max-batch-delay-ms`, or the default.
+fn batch_delay(ms: Option<u64>) -> Duration {
+    ms.map(Duration::from_millis)
+        .unwrap_or(kulyrax_core::source::runner::DEFAULT_BATCH_DELAY)
+}
+
 fn ingest_cmd(
     config: PathBuf,
     mappings: PathBuf,
     listen: String,
     max_batch: Option<usize>,
+    max_batch_delay_ms: Option<u64>,
     dlq: Option<PathBuf>,
     output: OutputFormat,
 ) -> Result<i32, Box<dyn std::error::Error>> {
@@ -334,7 +380,8 @@ fn ingest_cmd(
 
     let opts = kulyrax_ingest::ServeOptions {
         listen,
-        max_batch: max_batch.unwrap_or(256),
+        max_batch: max_batch.unwrap_or(kulyrax_core::source::runner::DEFAULT_LIVE_BATCH),
+        max_batch_delay: batch_delay(max_batch_delay_ms),
         retry_budget: 3,
         dlq_dir: dlq,
         ..Default::default()
@@ -423,6 +470,7 @@ fn render_source_run_report(
             if let Some(ref p) = report.halt_position {
                 println!("Halt position: {}", p);
             }
+            render_stage_timings(&report.timings);
             println!("------------------");
         }
         OutputFormat::Json => {
@@ -432,10 +480,56 @@ fn render_source_run_report(
     Ok(())
 }
 
+fn render_stage_timings(t: &StageTimings) {
+    println!(
+        "Time per stage (dispatch contains adapter and batch, which contain read/write/commit; schema runs once, before ingesting):"
+    );
+    for (name, s) in [
+        ("source read", t.source_read),
+        ("dispatch", t.dispatch),
+        ("adapter", t.adapter),
+        ("batch", t.batch),
+        ("schema", t.schema),
+        ("read", t.read),
+        ("write", t.write),
+        ("commit", t.commit),
+        ("checkpoint", t.checkpoint),
+    ] {
+        if s.calls == 0 {
+            continue;
+        }
+        println!(
+            "  {name:<12} {:>10} calls  {:>12.1} ms  {:>10.1} µs/call",
+            s.calls,
+            s.total_us as f64 / 1000.0,
+            s.total_us as f64 / s.calls as f64
+        );
+    }
+    if t.adapter.calls > 0 {
+        let inner = t.read.total_us + t.write.total_us + t.commit.total_us;
+        let other = (t.adapter.total_us + t.batch.total_us).saturating_sub(inner);
+        println!(
+            "  adapter and batch time outside read/write/commit (mapping, connection, begin): {:.1} ms, {:.1} µs/event",
+            other as f64 / 1000.0,
+            other as f64 / t.adapter.calls as f64
+        );
+        let outside = t
+            .dispatch
+            .total_us
+            .saturating_sub(t.adapter.total_us + t.batch.total_us);
+        println!(
+            "  dispatch time outside adapter and batch calls (routing, reports): {:.1} ms, {:.1} µs/event",
+            outside as f64 / 1000.0,
+            outside as f64 / t.adapter.calls as f64
+        );
+    }
+}
+
 // --------------------------------------------------
 // Replay (Phase 7)
 // --------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn replay_cmd(
     config: PathBuf,
     mappings: PathBuf,
@@ -444,11 +538,13 @@ fn replay_cmd(
     max_per_event: Option<usize>,
     progress_every: Option<usize>,
     validate_routing: bool,
+    max_batch: Option<usize>,
 ) -> Result<i32, Box<dyn std::error::Error>> {
     let opts = ReplayRunOptions {
         max_per_event_summaries: max_per_event,
         progress_interval: progress_every,
         validate_routing,
+        max_batch,
     };
     let report = pipeline::replay(
         &config,

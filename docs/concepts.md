@@ -199,10 +199,11 @@ mappings write into (`users`, `orders`, ...) — Kulyrax never issues `CREATE
 TABLE`. You own that schema.
 
 **Kulyrax creates:** the guard state alongside it — `conduit_projection_state`
-in the same SQL database (via `ensure_guard_table`, called automatically),
-or the `.conduit/` sidecar tree next to file-backed document/KV/graph output.
-Both are Kulyrax's own bookkeeping, safe to inspect, unsafe to hand-edit —
-treat them the way you'd treat a database's own internal indexes.
+in the same SQL database (created when `run`, `ingest` or `replay` prepares
+the adapter, before anything is written; `dry-run` never creates it), or the
+`.conduit/` sidecar tree next to file-backed document/KV/graph output. Both
+are Kulyrax's own bookkeeping, safe to inspect, unsafe to hand-edit — treat
+them the way you'd treat a database's own internal indexes.
 
 ## Next
 

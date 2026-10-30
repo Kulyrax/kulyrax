@@ -19,6 +19,7 @@ use kulyrax_core::adapter::graph::mapping::GraphMapping;
 use kulyrax_core::adapter::graph::runtime::GraphRuntimeBuilder;
 use kulyrax_core::adapter::graph::store::GraphStore;
 use kulyrax_core::event::Event;
+use kulyrax_core::execution::stages;
 use kulyrax_core::runtime::config::MigrationPolicy;
 use kulyrax_core::upcast::UpcasterRegistry;
 
@@ -83,6 +84,16 @@ fn query_one_row(
 }
 
 fn neo4j_adapter(uri: &str, mappings: HashMap<String, GraphMapping>) -> Neo4jAdapter {
+    prepared(unprepared_neo4j_adapter(uri, mappings))
+}
+
+/// Prepare an adapter the way every write path does before projecting.
+fn prepared<A: StorageAdapter>(adapter: A) -> A {
+    adapter.prepare().expect("prepare adapter");
+    adapter
+}
+
+fn unprepared_neo4j_adapter(uri: &str, mappings: HashMap<String, GraphMapping>) -> Neo4jAdapter {
     Neo4jAdapter::new(
         "neo4j".into(),
         uri,
@@ -504,5 +515,85 @@ fn graph_cross_backend() -> R {
     )
     .expect("node must exist");
     assert_eq!(file_value["state"], row.get::<String>("state")?);
+    Ok(())
+}
+
+fn prep_mapping(label: &str) -> HashMap<String, GraphMapping> {
+    let mut m = HashMap::new();
+    m.insert(
+        "Prep".into(),
+        graph_mapping(&format!(
+            "kind: node\nevent: Prep\nlabel: {label}\nkey: payload.id\nversion: 1\nproperties:\n  id: payload.id\n"
+        )),
+    );
+    m
+}
+
+/// Constraint creation is an explicit `prepare` step: before it, `handle`
+/// fails and writes nothing.
+#[test]
+fn neo4j_handle_before_prepare_fails_and_writes_nothing() -> R {
+    require_neo4j!(uri);
+    let label = fresh_label();
+    let a = unprepared_neo4j_adapter(&uri, prep_mapping(&label));
+
+    let r = a.handle(&ev("Prep", 1, serde_json::json!({ "id": "n1" })));
+    match &r.outcome {
+        AdapterOutcome::Failed(e) => assert!(e.to_string().contains("not prepared"), "{e}"),
+        other => panic!("expected a failure, got {other:?}"),
+    }
+    let rt = verify_rt();
+    let graph = connect(&rt, &uri)?;
+    let row = query_one_row(
+        &rt,
+        &graph,
+        neo4rs::Query::new(format!("MATCH (n:`{label}`) RETURN count(n) AS c")),
+    )
+    .expect("count query must return a row");
+    assert_eq!(row.get::<i64>("c")?, 0);
+    Ok(())
+}
+
+#[test]
+fn neo4j_prepare_does_the_setup_and_events_do_not() -> R {
+    require_neo4j!(uri);
+    let label = fresh_label();
+    let a = unprepared_neo4j_adapter(&uri, prep_mapping(&label));
+
+    stages::take();
+    a.prepare().map_err(|e| e.to_string())?;
+    for id in ["n1", "n2", "n3"] {
+        let r = a.handle(&ev("Prep", 1, serde_json::json!({ "id": id })));
+        assert!(
+            matches!(r.outcome, AdapterOutcome::Created),
+            "{:?}",
+            r.outcome
+        );
+    }
+    assert_eq!(
+        stages::take().schema.calls,
+        1,
+        "only prepare creates the constraint"
+    );
+    Ok(())
+}
+
+#[test]
+fn neo4j_prepare_twice_is_idempotent() -> R {
+    require_neo4j!(uri);
+    let a = neo4j_adapter(&uri, HashMap::new()); // prepared once by the helper
+    a.prepare().map_err(|e| e.to_string())?;
+    let rt = verify_rt();
+    let graph = connect(&rt, &uri)?;
+    let row = query_one_row(
+        &rt,
+        &graph,
+        neo4rs::Query::new(
+            "SHOW CONSTRAINTS YIELD labelsOrTypes WHERE '__ConduitGuard' IN labelsOrTypes RETURN count(*) AS c"
+                .to_string(),
+        ),
+    )
+    .expect("count query must return a row");
+    assert_eq!(row.get::<i64>("c")?, 1);
     Ok(())
 }

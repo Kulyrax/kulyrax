@@ -1,0 +1,10 @@
+# File-backed key-value store and Redis.
+event: UserRegistered
+namespace: users
+key: payload.id
+version: 1
+value:
+  name: payload.name
+  email: payload.email
+  bio: payload.bio
+  followers: payload.followers

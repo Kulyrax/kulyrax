@@ -2,6 +2,9 @@
 //! sequence 5 (which would otherwise resurrect the entity) → `Skipped(Tombstoned)`.
 //! The entity stays absent forever — a permanent tombstone is terminal.
 
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::document::file::FileDocumentAdapter;
 use kulyrax_core::adapter::document::mapping::DocumentMapping;
 use kulyrax_core::adapter::document::runtime::DocumentRuntimeBuilder;
@@ -82,14 +85,14 @@ columns:
         )?,
     );
 
-    let adapter = SqliteAdapter::new(
+    let adapter = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(mappings),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
 
     adapter.handle(&upsert_event(1, "s1"));
     let r2 = adapter.handle(&delete_event(2));

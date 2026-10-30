@@ -1,0 +1,11 @@
+[package]
+name = "benchmark-benchtool"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Not a Kulyrax component — the benchmark's projection-lag probe. `unwrap`/
+# `expect` are fine here; the Zero Panic Rule (CLAUDE.md) applies to the
+# `kulyrax-core` library, not example tools.
+[dependencies]
+serde_json = "1"

@@ -9,17 +9,20 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
 use super::{EventSource, SourceError, SourcePosition, SourcedEvent};
-use crate::adapter::StorageAdapter;
 use crate::adapter::document::mapping::DocumentMapping;
 use crate::adapter::graph::mapping::GraphMapping;
 use crate::adapter::keyvalue::mapping::KvMapping;
 use crate::adapter::sql::mapping::SqlMapping;
+use crate::adapter::{StorageAdapter, prepare_adapters};
+use crate::batch::{BatchResult, dispatch_batch};
 use crate::dispatch::dispatch;
+use crate::event::Event;
+use crate::execution::stages::{self, Stage, StageTimings, timed};
 use crate::execution::{AdapterOutcome, ExecutionReport, ExecutionStatus};
 use crate::routing::AdapterId;
 use crate::runtime::build_adapters_from_config;
@@ -28,6 +31,13 @@ use crate::runtime::dependency_graph::adapter_metadata_map;
 use crate::upcast::UpcasterRegistry;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+/// Default events per batch for continuous ingest (`run`, `ingest`). Catch-up
+/// (`run --once`, `replay`) uses [`crate::replay::DEFAULT_REPLAY_BATCH`].
+pub const DEFAULT_LIVE_BATCH: usize = 5000;
+
+/// Default [`SourceRunOptions::max_batch_delay`].
+pub const DEFAULT_BATCH_DELAY: Duration = Duration::from_millis(100);
 
 /// Whether to drain every source once and exit, or keep polling.
 #[derive(Debug, Clone, Copy)]
@@ -41,8 +51,17 @@ pub enum RunMode {
 #[derive(Debug, Clone)]
 pub struct SourceRunOptions {
     pub mode: RunMode,
-    /// Max events per source per poll.
+    /// Max events per source per poll: one batch, committed in one
+    /// transaction per adapter (see [`crate::batch`]).
     pub max_batch: usize,
+    /// Continuous mode: how long a batch may wait to fill. A batch closes
+    /// when `max_batch` events are waiting, or when this much time has passed
+    /// since the previous poll came back short, whichever comes first: after
+    /// a short poll the loop waits out the rest of the delay before polling
+    /// again, so the next batch collects what arrived meanwhile. A full poll
+    /// (a backlog) never waits, and neither does `RunMode::Once`. Zero
+    /// disables it.
+    pub max_batch_delay: Duration,
     /// Across-batch retries before a batch is DLQ'd (if `dlq_dir` set) or the loop halts.
     pub retry_budget: u32,
     /// Where poison events are parked. `None` → a persistently-failing batch halts the loop.
@@ -53,7 +72,8 @@ impl Default for SourceRunOptions {
     fn default() -> Self {
         Self {
             mode: RunMode::Once,
-            max_batch: 256,
+            max_batch: DEFAULT_LIVE_BATCH,
+            max_batch_delay: DEFAULT_BATCH_DELAY,
             retry_budget: 3,
             dlq_dir: None,
         }
@@ -86,6 +106,10 @@ pub struct BatchSummary {
     pub failed: u64,
     pub dlq: u64,
     pub retries: u32,
+    /// The batch transaction rolled back (a failing event, or an adapter that
+    /// could not begin or commit its batch) and the batch was dispatched one
+    /// event at a time.
+    pub fell_back: bool,
     pub committed: bool,
 }
 
@@ -102,6 +126,8 @@ pub struct SourceRunReport {
     /// batch that could not be committed, for operator intervention.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub halt_position: Option<String>,
+    /// Wall-clock time per stage of the loop, summed over the whole run.
+    pub timings: StageTimings,
 }
 
 /// One pass of dispatching a sorted batch.
@@ -113,11 +139,18 @@ struct BatchOutcome {
     failed: u64,
     /// Indices into the sorted batch whose dispatch status was `Failed`.
     hard_failures: Vec<usize>,
+    /// The batch transaction was rolled back and the batch dispatched one
+    /// event at a time instead.
+    fell_back: bool,
 }
 
+/// Dispatch a sorted batch: in one transaction per adapter when `batched`
+/// (see [`crate::batch`]), falling back to one event at a time if that rolls
+/// back; one event at a time otherwise.
 #[allow(clippy::too_many_arguments)]
-fn dispatch_batch(
+fn dispatch_sorted(
     sorted: &[SourcedEvent],
+    batched: bool,
     adapters: &mut [Box<dyn StorageAdapter>],
     failure_policy: crate::runtime::config::FailurePolicy,
     routing_rules: &HashMap<String, Vec<AdapterId>>,
@@ -132,16 +165,34 @@ fn dispatch_batch(
         skipped: 0,
         failed: 0,
         hard_failures: Vec::new(),
+        fell_back: false,
     };
     reports.clear();
-    for (idx, se) in sorted.iter().enumerate() {
-        let mut report = dispatch(
-            &se.event,
+    if batched {
+        let events: Vec<&Event> = sorted.iter().map(|se| &se.event).collect();
+        match dispatch_batch(
+            &events,
             adapters,
             failure_policy,
             routing_rules,
             adapter_meta,
-        );
+        ) {
+            BatchResult::Committed(committed) => *reports = committed,
+            BatchResult::RolledBack(_) => o.fell_back = true,
+        }
+    }
+    if !batched || o.fell_back {
+        for se in sorted {
+            reports.push(dispatch(
+                &se.event,
+                adapters,
+                failure_policy,
+                routing_rules,
+                adapter_meta,
+            ));
+        }
+    }
+    for (idx, (report, se)) in reports.iter_mut().zip(sorted).enumerate() {
         report.source_id = Some(source_id.to_string());
         report.source_position = Some(se.position.0.clone());
         for ar in &report.adapter_reports {
@@ -156,7 +207,6 @@ fn dispatch_batch(
         if report.status == ExecutionStatus::Failed {
             o.hard_failures.push(idx);
         }
-        reports.push(report);
     }
     o
 }
@@ -240,7 +290,8 @@ pub struct Reloaded {
 /// Asked between batches whether to switch to a new configuration.
 ///
 /// Return `Some` only for a configuration that is already validated and
-/// whose adapters are built: the loop swaps it in without further checks.
+/// whose adapters are built and prepared (`StorageAdapter::prepare`): the
+/// loop swaps it in without further checks.
 /// A rejected reload returns `None` and the loop carries on unchanged.
 pub trait Reloader {
     fn poll(&mut self) -> Option<Reloaded>;
@@ -252,6 +303,36 @@ pub trait Reloader {
 /// halted, so no batch ever runs on a mix of old and new adapters. Sources are
 /// not replaced: their positions carry over.
 pub fn run_sources_with_reload(
+    config: &KulyraxConfig,
+    routing_rules: HashMap<String, Vec<AdapterId>>,
+    adapters: Vec<Box<dyn StorageAdapter>>,
+    sources: Vec<Box<dyn EventSource>>,
+    opts: &SourceRunOptions,
+    stop: &AtomicBool,
+    reloader: Option<&mut dyn Reloader>,
+) -> Result<SourceRunReport, SourceError> {
+    // Drop anything an earlier run on this thread left behind.
+    stages::take();
+    // Before the first poll, so a store that can't be set up fails the run
+    // without ingesting anything. A reloaded adapter set arrives prepared.
+    let failures = prepare_adapters(&adapters);
+    if !failures.is_empty() {
+        return Err(SourceError::Prepare(failures));
+    }
+    let mut report = run_loop(
+        config,
+        routing_rules,
+        adapters,
+        sources,
+        opts,
+        stop,
+        reloader,
+    )?;
+    report.timings = stages::take();
+    Ok(report)
+}
+
+fn run_loop(
     config: &KulyraxConfig,
     mut routing_rules: HashMap<String, Vec<AdapterId>>,
     mut adapters: Vec<Box<dyn StorageAdapter>>,
@@ -272,6 +353,7 @@ pub fn run_sources_with_reload(
         batches_committed: 0,
         stopped_reason: StoppedReason::CaughtUp,
         halt_position: None,
+        timings: StageTimings::default(),
     };
     let mut reports_buf: Vec<ExecutionReport> = Vec::new();
 
@@ -289,13 +371,18 @@ pub fn run_sources_with_reload(
         }
 
         let mut progressed = false;
+        // For `max_batch_delay`: when this iteration's polls started, and
+        // whether any came back full (a backlog: don't wait).
+        let polled_at = Instant::now();
+        let mut any_full = false;
 
         for source in sources.iter_mut() {
-            let batch = source.poll(opts.max_batch)?;
+            let batch = timed(Stage::SourceRead, || source.poll(opts.max_batch))?;
             if batch.is_empty() {
                 continue;
             }
             progressed = true;
+            any_full |= batch.len() >= opts.max_batch;
 
             // Phase 15.5 (as in replay): a stable sort by `sequence` delivers
             // every entity's events in the order `decide()` needs.
@@ -310,16 +397,23 @@ pub fn run_sources_with_reload(
             let source_id = source.id().to_string();
 
             let mut retries = 0u32;
+            let mut fell_back = false;
             let (o, committed, dlq_count) = loop {
-                let o = dispatch_batch(
-                    &sorted,
-                    &mut adapters,
-                    failure_policy,
-                    &routing_rules,
-                    &adapter_meta,
-                    &source_id,
-                    &mut reports_buf,
-                );
+                // A batch that failed once is retried one event at a time:
+                // the batch transaction would only roll back again.
+                let o = timed(Stage::Dispatch, || {
+                    dispatch_sorted(
+                        &sorted,
+                        retries == 0,
+                        &mut adapters,
+                        failure_policy,
+                        &routing_rules,
+                        &adapter_meta,
+                        &source_id,
+                        &mut reports_buf,
+                    )
+                });
+                fell_back |= o.fell_back;
                 if o.hard_failures.is_empty() {
                     break (o, true, 0);
                 }
@@ -355,11 +449,14 @@ pub fn run_sources_with_reload(
                 failed: o.failed,
                 dlq: dlq_count,
                 retries,
+                fell_back,
                 committed,
             });
 
             if committed {
-                source.commit_with_dlq_count(position_to.clone(), dlq_count as u32)?;
+                timed(Stage::Checkpoint, || {
+                    source.commit_with_dlq_count(position_to.clone(), dlq_count as u32)
+                })?;
                 report.batches_committed += 1;
             } else {
                 report.stopped_reason = StoppedReason::RetryExhausted;
@@ -382,6 +479,13 @@ pub fn run_sources_with_reload(
                         return Ok(report);
                     }
                     sleep_interruptible(poll_interval, stop);
+                } else if !any_full {
+                    // Every poll came back short: let the next batch collect
+                    // what arrives during the rest of the delay.
+                    let waited = polled_at.elapsed();
+                    if waited < opts.max_batch_delay {
+                        sleep_interruptible(opts.max_batch_delay - waited, stop);
+                    }
                 }
             }
         }

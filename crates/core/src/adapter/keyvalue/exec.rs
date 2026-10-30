@@ -14,6 +14,7 @@ use serde_json::Value;
 use super::adapter::KvError;
 use crate::adapter::{GuardState, OnExisting, Operation, SkipReason, WriteDecision, decide};
 use crate::event::Event;
+use crate::execution::stages::{Stage, timed};
 
 // ---------------------------------------------------------------------------
 // The guard — reused as-is as the wire format for every backend (Phase 22.1)
@@ -157,7 +158,9 @@ pub fn project<B: KvBackend>(
 ) -> Result<KvOutcome, KvError> {
     let is_named_facet = !plan.facet.is_empty();
 
-    let mut stored_guard = backend.read_guard(&plan.namespace, &plan.entity_key)?;
+    let mut stored_guard = timed(Stage::Read, || {
+        backend.read_guard(&plan.namespace, &plan.entity_key)
+    })?;
 
     // Phase 15.3: a named facet can only touch an entity the default facet
     // created and has not tombstoned.
@@ -200,7 +203,9 @@ pub fn project<B: KvBackend>(
             g.last_sequence = event.sequence;
             g.last_event_id = event.event_id.clone();
             g.deleted = true;
-            backend.write(&plan.namespace, &plan.entity_key, None, &g)?;
+            timed(Stage::Write, || {
+                backend.write(&plan.namespace, &plan.entity_key, None, &g)
+            })?;
             return Ok(KvOutcome::Skipped(SkipReason::AlreadyDeleted));
         }
         WriteDecision::Insert | WriteDecision::Update | WriteDecision::Delete => {}
@@ -219,7 +224,9 @@ pub fn project<B: KvBackend>(
             fg.last_sequence = event.sequence;
             fg.last_event_id = event.event_id.clone();
         }
-        backend.delete(&plan.namespace, &plan.entity_key, &g)?;
+        timed(Stage::Write, || {
+            backend.delete(&plan.namespace, &plan.entity_key, &g)
+        })?;
         return Ok(KvOutcome::Deleted);
     }
 
@@ -230,9 +237,10 @@ pub fn project<B: KvBackend>(
         let facet_obj = plan.value.as_object().ok_or_else(|| {
             KvError::BuildFailed("facet mapping must resolve to a JSON object".into())
         })?;
-        let mut existing = backend
-            .read_value(&plan.namespace, &plan.entity_key)?
-            .unwrap_or_else(|| Value::Object(Default::default()));
+        let mut existing = timed(Stage::Read, || {
+            backend.read_value(&plan.namespace, &plan.entity_key)
+        })?
+        .unwrap_or_else(|| Value::Object(Default::default()));
         let existing_obj = existing
             .as_object_mut()
             .ok_or_else(|| KvError::BuildFailed("existing value is not a JSON object".into()))?;
@@ -264,7 +272,9 @@ pub fn project<B: KvBackend>(
             }
         }
     }
-    backend.write(&plan.namespace, &plan.entity_key, Some(&value_to_write), &g)?;
+    timed(Stage::Write, || {
+        backend.write(&plan.namespace, &plan.entity_key, Some(&value_to_write), &g)
+    })?;
 
     Ok(match decision {
         WriteDecision::Insert => KvOutcome::Created,

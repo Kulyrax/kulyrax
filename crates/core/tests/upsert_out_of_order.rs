@@ -2,6 +2,9 @@
 //! state carried by the highest sequence — for both SQL and document
 //! adapters — because `decide()` gates on `sequence`, not arrival order.
 
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::StorageAdapter;
 use kulyrax_core::adapter::document::file::FileDocumentAdapter;
 use kulyrax_core::adapter::document::mapping::DocumentMapping;
@@ -55,14 +58,14 @@ columns:
         )?,
     );
 
-    let adapter = SqliteAdapter::new(
+    let adapter = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(sql_mappings),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
 
     // Delivery order 3, 1, 2 — not sorted.
     for (sequence, state) in [(3, "s3"), (1, "s1"), (2, "s2")] {

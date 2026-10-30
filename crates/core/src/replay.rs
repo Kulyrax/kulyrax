@@ -12,6 +12,7 @@ use crate::adapter::document::mapping::DocumentMapping;
 use crate::adapter::graph::mapping::GraphMapping;
 use crate::adapter::keyvalue::mapping::KvMapping;
 use crate::adapter::sql::mapping::SqlMapping;
+use crate::batch::{BatchResult, dispatch_batch};
 use crate::dispatch::dispatch;
 use crate::event::Event;
 use crate::execution::{
@@ -253,7 +254,14 @@ pub struct ReplayRunOptions {
     pub progress_interval: Option<usize>,
     /// If true, events with no routing targets fail without calling adapters.
     pub validate_routing: bool,
+    /// Events per batch transaction (see [`crate::batch`]). `None` =
+    /// [`DEFAULT_REPLAY_BATCH`]; `Some(1)` dispatches one event at a time.
+    pub max_batch: Option<usize>,
 }
+
+/// Default events per batch for replay and rebuild: catching up favours
+/// larger transactions than live ingest does.
+pub const DEFAULT_REPLAY_BATCH: usize = 5000;
 
 fn unrouted_event_report(event: &Event) -> ExecutionReport {
     let now = SystemTime::now();
@@ -378,9 +386,11 @@ impl ReplayContext {
         events: impl Iterator<Item = Result<Event, ReplayLoadError>>,
         opts: &ReplayRunOptions,
     ) -> Result<ReplayReport, ReplayLoadError> {
+        // Before any event: an adapter that fails to prepare then fails each
+        // event routed to it, with the prepare error in the report.
+        let _ = crate::adapter::prepare_adapters(&self.adapters);
         let started_at = SystemTime::now();
         let mut report = ReplayReport::new(started_at);
-        let cap = opts.max_per_event_summaries;
 
         // PHASE 15.5: replay is sequence-ordered, not file-name / line ordered.
         // `Event.sequence` has been captured since Phase 11 and used only for
@@ -399,61 +409,112 @@ impl ReplayContext {
         }
         buffered.sort_by_key(|e| e.sequence);
 
-        for event in buffered {
-            let exec = if opts.validate_routing
-                && route_with_rules(&event, &self.routing_rules).is_empty()
-            {
-                unrouted_event_report(&event)
-            } else {
-                dispatch(
-                    &event,
+        let batch_size = opts.max_batch.unwrap_or(DEFAULT_REPLAY_BATCH).max(1);
+        for chunk in buffered.chunks(batch_size) {
+            // One transaction per adapter for the chunk. A chunk with an
+            // unrouted event under `validate_routing` (reported without
+            // dispatch), or one that rolls back, goes one event at a time.
+            let unrouted = opts.validate_routing
+                && chunk
+                    .iter()
+                    .any(|e| route_with_rules(e, &self.routing_rules).is_empty());
+            if batch_size > 1 && !unrouted {
+                let events: Vec<&Event> = chunk.iter().collect();
+                if let BatchResult::Committed(reports) = dispatch_batch(
+                    &events,
                     &mut self.adapters,
                     self.failure_policy,
                     &self.routing_rules,
                     &self.adapter_meta,
-                )
-            };
-            let succeeded = exec.status == ExecutionStatus::Succeeded;
-
-            report.events_processed += 1;
-            if succeeded {
-                report.events_succeeded += 1;
-            } else {
-                report.events_failed += 1;
-                if report.first_failure_event_id.is_none() {
-                    report.first_failure_event_id = Some(event.event_id.clone());
+                ) {
+                    for (event, exec) in chunk.iter().zip(reports) {
+                        record_replayed(&mut report, event, &exec, opts);
+                    }
+                    continue;
                 }
             }
-
-            let record_summary = !succeeded || cap.is_none_or(|c| report.per_event.len() < c);
-            if record_summary {
-                report.per_event.push(PerEventReplaySummary {
-                    event_id: event.event_id,
-                    event_type: event.event_type,
-                    status: exec.status,
-                });
-            } else if succeeded {
-                report.per_event_summaries_omitted += 1;
-            }
-
-            if let Some(k) = opts.progress_interval
-                && k > 0
-                && report.events_processed.is_multiple_of(k as u64)
-            {
-                eprintln!(
-                    "kulyrax replay: {} events processed",
-                    report.events_processed
-                );
-            }
-
-            if !succeeded && self.failure_policy == FailurePolicy::FailFast {
-                report.stopped_early = true;
+            if !self.replay_one_by_one(chunk, opts, &mut report) {
                 break;
             }
         }
 
         Ok(report.finish(SystemTime::now()))
     }
+
+    /// Dispatch `events` one at a time, recording each. `false` when a
+    /// failure stopped the replay (`FailurePolicy::FailFast`).
+    fn replay_one_by_one(
+        &mut self,
+        events: &[Event],
+        opts: &ReplayRunOptions,
+        report: &mut ReplayReport,
+    ) -> bool {
+        for event in events {
+            let exec = if opts.validate_routing
+                && route_with_rules(event, &self.routing_rules).is_empty()
+            {
+                unrouted_event_report(event)
+            } else {
+                dispatch(
+                    event,
+                    &mut self.adapters,
+                    self.failure_policy,
+                    &self.routing_rules,
+                    &self.adapter_meta,
+                )
+            };
+            let succeeded = record_replayed(report, event, &exec, opts);
+            if !succeeded && self.failure_policy == FailurePolicy::FailFast {
+                report.stopped_early = true;
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// Count one replayed event in `report` and record its summary; returns
+/// whether it succeeded.
+fn record_replayed(
+    report: &mut ReplayReport,
+    event: &Event,
+    exec: &ExecutionReport,
+    opts: &ReplayRunOptions,
+) -> bool {
+    let succeeded = exec.status == ExecutionStatus::Succeeded;
+
+    report.events_processed += 1;
+    if succeeded {
+        report.events_succeeded += 1;
+    } else {
+        report.events_failed += 1;
+        if report.first_failure_event_id.is_none() {
+            report.first_failure_event_id = Some(event.event_id.clone());
+        }
+    }
+
+    let cap = opts.max_per_event_summaries;
+    let record_summary = !succeeded || cap.is_none_or(|c| report.per_event.len() < c);
+    if record_summary {
+        report.per_event.push(PerEventReplaySummary {
+            event_id: event.event_id.clone(),
+            event_type: event.event_type.clone(),
+            status: exec.status,
+        });
+    } else if succeeded {
+        report.per_event_summaries_omitted += 1;
+    }
+
+    if let Some(k) = opts.progress_interval
+        && k > 0
+        && report.events_processed.is_multiple_of(k as u64)
+    {
+        eprintln!(
+            "kulyrax replay: {} events processed",
+            report.events_processed
+        );
+    }
+    succeeded
 }
 
 /// Build context and run stream. Fails on first event load error.

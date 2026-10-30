@@ -42,7 +42,17 @@ that's separated from a possible future hosted/managed product.
 - **TTL for the key-value adapters** — deferred because time-based eviction isn't
   reproducible from a replayed event log; would need an explicit non-deterministic-by-
   design opt-in if ever added.
-- **Benchmarks** — no published throughput/latency numbers yet.
+- **I/O throughput, after v0.10.0.** v0.10.0 batches SQLite and Postgres (one
+  transaction per batch; Postgres writes each batch in bulk). Still open, in order:
+  - crash-safe file stores with per-batch writes and fsyncs (Phase 3);
+  - Elasticsearch `_bulk`, then batching for MySQL, Redis, MongoDB and Neo4j
+    (Phase 4);
+  - a dedicated rebuild path: `COPY` into a shadow table, then an atomic swap,
+    instead of rebuilding through the per-event guards;
+  - benchmarks on a clean Linux VM with NVMe. Numbers so far are internal
+    baselines from a Windows laptop, where Postgres spends ~80 ms per 1,000-row
+    flush outside the server (most likely Docker Desktop's networking; to be
+    measured there).
 
 ## Contributing to any of this
 

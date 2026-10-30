@@ -82,6 +82,7 @@ pub fn run_once(
         mode: kulyrax_core::RunMode::Once,
         max_batch: 256,
         retry_budget: 2,
+        max_batch_delay: std::time::Duration::ZERO,
         dlq_dir: None,
     });
     let stop = std::sync::atomic::AtomicBool::new(false);
@@ -111,4 +112,10 @@ pub fn read_user(db_path: &Path, id: &str) -> Option<(String, i64)> {
         |r| Ok((r.get(0)?, r.get(1)?)),
     )
     .ok()
+}
+
+/// Prepare an adapter the way every write path does before projecting.
+pub fn prepared<A: kulyrax_core::adapter::StorageAdapter>(adapter: A) -> A {
+    adapter.prepare().expect("prepare adapter");
+    adapter
 }

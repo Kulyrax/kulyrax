@@ -1,6 +1,9 @@
 //! Phase 13.6: `[create s1, update s2, delete s3]` (SQL and document) →
 //! entity absent; the guard is a tombstone recorded at sequence 3.
 
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::document::file::FileDocumentAdapter;
 use kulyrax_core::adapter::document::mapping::DocumentMapping;
 use kulyrax_core::adapter::document::runtime::DocumentRuntimeBuilder;
@@ -119,14 +122,14 @@ fn sql_full_lifecycle_ends_absent_with_tombstone() -> Result<(), Box<dyn std::er
         conn.execute("CREATE TABLE users (id TEXT PRIMARY KEY, state TEXT)", [])?;
     }
 
-    let adapter = SqliteAdapter::new(
+    let adapter = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(sql_mappings()),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
 
     let r1 = adapter.handle(&upsert_event(1, "s1"));
     assert!(

@@ -1,0 +1,16 @@
+version: 1
+routing:
+  file: routing.yaml
+adapters:
+  - type: neo4j
+    id: store
+    priority: 10
+    config:
+      uri: bolt://localhost:17687
+      user: neo4j
+      password: kulyrax-bench
+sources:
+  - type: directory
+    id: bench
+    path: ./work/events
+    state_dir: ./work/state

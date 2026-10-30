@@ -3,6 +3,9 @@
 //! (higher-sequence) `contact` update at seq 7 is `Skipped(EntityAbsent)` —
 //! a facet update never resurrects an entity.
 
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use kulyrax_core::adapter::sql::sqlite::SqliteAdapter;
@@ -111,14 +114,14 @@ fn default_facet_delete_cascades_to_facet_lanes() -> Result<(), Box<dyn std::err
             [],
         )?;
     }
-    let adapter = SqliteAdapter::new(
+    let adapter = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(mappings()),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
 
     adapter.handle(&created(1));
     adapter.handle(&email_changed(2, "ada@x.com"));

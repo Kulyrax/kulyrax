@@ -2,6 +2,9 @@
 //! independently into SQL and a document store — both end absent, and both
 //! tombstones agree on the sequence at which the entity was removed.
 
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::StorageAdapter;
 use kulyrax_core::adapter::document::file::FileDocumentAdapter;
 use kulyrax_core::adapter::document::mapping::DocumentMapping;
@@ -87,14 +90,14 @@ columns:
 "#,
         )?,
     );
-    let sql_adapter = SqliteAdapter::new(
+    let sql_adapter = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(sql_mappings),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
 
     // --- Document ---
     let root = dir.path().join("docs");

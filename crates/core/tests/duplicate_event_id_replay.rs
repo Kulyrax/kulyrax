@@ -3,6 +3,9 @@
 //! entity-aware guard (`conduit_projection_state`, `.conduit/entities/...`)
 //! that replaced the Phase 4 event_id-only guard.
 
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::StorageAdapter;
 use kulyrax_core::adapter::document::file::FileDocumentAdapter;
 use kulyrax_core::adapter::document::mapping::DocumentMapping;
@@ -56,14 +59,14 @@ columns:
         )?,
     );
 
-    let adapter = SqliteAdapter::new(
+    let adapter = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(sql_mappings),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
 
     let event = test_event();
 

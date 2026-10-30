@@ -4,6 +4,7 @@
 //! Use these types to interpret or serialize execution outcomes.
 
 pub mod report;
+pub mod stages;
 pub mod time;
 pub mod time_option;
 pub use report::*;

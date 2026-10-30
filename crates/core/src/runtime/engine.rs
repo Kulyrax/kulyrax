@@ -169,6 +169,21 @@ impl KulyraxRuntime {
         Ok(())
     }
 
+    /// Build the adapters if needed, then prepare every one (see
+    /// [`StorageAdapter::prepare`]): the first point any adapter touches its
+    /// store. Every write path calls this before writing; `dry_run_once` never
+    /// does. Safe to call again.
+    pub fn prepare_adapters(&mut self) -> Result<(), PipelineError> {
+        self.ensure_adapters_built();
+        let failures =
+            crate::adapter::prepare_adapters(self.adapters.as_deref().unwrap_or_default());
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(PipelineError::AdapterPrepare(failures))
+        }
+    }
+
     // Returns `()` rather than a borrow so callers can then use
     // `self.adapters` alongside other fields without a borrow conflict.
     // Build failures are already represented by failing placeholder adapters.
@@ -177,7 +192,9 @@ impl KulyraxRuntime {
     }
 
     pub fn run_once(&mut self, event: Event) -> ExecutionReport {
-        self.ensure_adapters_built();
+        // An adapter that fails to prepare fails this event, with the prepare
+        // error in the report. Call `prepare_adapters` first to stop instead.
+        let _ = self.prepare_adapters();
         let adapters = self.adapters.get_or_insert_with(Vec::new);
         dispatch(
             &event,
@@ -247,6 +264,7 @@ impl KulyraxRuntime {
     /// switch to this runtime's configuration.
     pub(crate) fn into_reloaded(mut self) -> Result<Reloaded, PipelineError> {
         self.build_adapters()?;
+        self.prepare_adapters()?;
         Ok(Reloaded {
             adapters: self.adapters.take().unwrap_or_default(),
             routing_rules: self.routing_rules,

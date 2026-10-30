@@ -12,6 +12,7 @@ use serde_json::Value;
 use super::adapter::GraphError;
 use crate::adapter::{GuardState, OnExisting, Operation, SkipReason, WriteDecision, decide};
 use crate::event::Event;
+use crate::execution::stages::{Stage, timed};
 
 // ---------------------------------------------------------------------------
 // The guard — reused as-is as the wire format for every backend (Phase 24.1)
@@ -216,7 +217,9 @@ pub fn project_node<B: GraphBackend>(
     event: &Event,
 ) -> Result<GraphOutcome, GraphError> {
     let is_named_facet = !plan.facet.is_empty();
-    let mut stored_guard = backend.read_node_guard(&plan.label, &plan.node_id)?;
+    let mut stored_guard = timed(Stage::Read, || {
+        backend.read_node_guard(&plan.label, &plan.node_id)
+    })?;
 
     if is_named_facet {
         let present = stored_guard
@@ -250,7 +253,9 @@ pub fn project_node<B: GraphBackend>(
             g.last_sequence = event.sequence;
             g.last_event_id = event.event_id.clone();
             g.deleted = true;
-            backend.write_node(&plan.label, &plan.node_id, None, "", &g)?;
+            timed(Stage::Write, || {
+                backend.write_node(&plan.label, &plan.node_id, None, "", &g)
+            })?;
             return Ok(GraphOutcome::Skipped(SkipReason::AlreadyDeleted));
         }
         WriteDecision::Insert | WriteDecision::Update | WriteDecision::Delete => {}
@@ -268,7 +273,9 @@ pub fn project_node<B: GraphBackend>(
             fg.last_sequence = event.sequence;
             fg.last_event_id = event.event_id.clone();
         }
-        backend.delete_node_cascade(&plan.label, &plan.node_id, &g)?;
+        timed(Stage::Write, || {
+            backend.delete_node_cascade(&plan.label, &plan.node_id, &g)
+        })?;
         return Ok(GraphOutcome::Deleted);
     }
 
@@ -291,13 +298,15 @@ pub fn project_node<B: GraphBackend>(
             }
         }
     }
-    backend.write_node(
-        &plan.label,
-        &plan.node_id,
-        Some(&plan.properties),
-        &plan.facet,
-        &g,
-    )?;
+    timed(Stage::Write, || {
+        backend.write_node(
+            &plan.label,
+            &plan.node_id,
+            Some(&plan.properties),
+            &plan.facet,
+            &g,
+        )
+    })?;
 
     Ok(match decision {
         WriteDecision::Insert => GraphOutcome::Created,
@@ -313,7 +322,9 @@ pub fn project_edge<B: GraphBackend>(
     plan: &EdgePlan,
     event: &Event,
 ) -> Result<GraphOutcome, GraphError> {
-    let mut stored_guard = backend.read_edge_guard(&plan.edge_type, &plan.key)?;
+    let mut stored_guard = timed(Stage::Read, || {
+        backend.read_edge_guard(&plan.edge_type, &plan.key)
+    })?;
     let stored = stored_guard.as_ref().and_then(|g| g.lane_state(""));
     let decision = decide(plan.operation, plan.on_existing, stored, event.sequence);
 
@@ -328,7 +339,9 @@ pub fn project_edge<B: GraphBackend>(
             g.last_sequence = event.sequence;
             g.last_event_id = event.event_id.clone();
             g.deleted = true;
-            backend.write_edge(&plan.edge_type, &plan.from, &plan.to, &plan.key, None, &g)?;
+            timed(Stage::Write, || {
+                backend.write_edge(&plan.edge_type, &plan.from, &plan.to, &plan.key, None, &g)
+            })?;
             return Ok(GraphOutcome::Skipped(SkipReason::AlreadyDeleted));
         }
         WriteDecision::Insert | WriteDecision::Update | WriteDecision::Delete => {}
@@ -338,7 +351,7 @@ pub fn project_edge<B: GraphBackend>(
     // An endpoint that was *never* projected is fine (16.3, permissive).
     if decision != WriteDecision::Delete {
         for endpoint in dedup_pair(&plan.from, &plan.to) {
-            if backend.node_is_tombstoned(endpoint)? {
+            if timed(Stage::Read, || backend.node_is_tombstoned(endpoint))? {
                 return Ok(GraphOutcome::Skipped(SkipReason::EntityAbsent));
             }
         }
@@ -351,18 +364,22 @@ pub fn project_edge<B: GraphBackend>(
     g.permanent = decision == WriteDecision::Delete && plan.permanent;
 
     if decision == WriteDecision::Delete {
-        backend.delete_edge(&plan.edge_type, &plan.from, &plan.to, &plan.key, &g)?;
+        timed(Stage::Write, || {
+            backend.delete_edge(&plan.edge_type, &plan.from, &plan.to, &plan.key, &g)
+        })?;
         return Ok(GraphOutcome::Deleted);
     }
 
-    backend.write_edge(
-        &plan.edge_type,
-        &plan.from,
-        &plan.to,
-        &plan.key,
-        Some(&plan.properties),
-        &g,
-    )?;
+    timed(Stage::Write, || {
+        backend.write_edge(
+            &plan.edge_type,
+            &plan.from,
+            &plan.to,
+            &plan.key,
+            Some(&plan.properties),
+            &g,
+        )
+    })?;
 
     Ok(match decision {
         WriteDecision::Insert => GraphOutcome::Created,

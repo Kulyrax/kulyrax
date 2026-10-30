@@ -4,6 +4,9 @@
 //! a pure function of the *set* of delivered events (highest sequence per
 //! entity), independent of delivery order.
 
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::StorageAdapter;
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
@@ -66,14 +69,14 @@ fn apply_order(order: &[u64]) -> (String, i64) {
 
     let mut mappings = HashMap::new();
     mappings.insert("UserUpdated".to_string(), sql_mapping_replace());
-    let adapter = SqliteAdapter::new(
+    let adapter = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(mappings),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
 
     for &sequence in order {
         let result = adapter.handle(&events[&sequence]);

@@ -2,6 +2,9 @@
 //! by a `delete` mapping resolving the same composite key; a different pair
 //! is untouched.
 
+mod common;
+
+use common::prepared;
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use kulyrax_core::adapter::sql::sqlite::SqliteAdapter;
@@ -84,14 +87,14 @@ columns:
         )?,
     );
 
-    let adapter = SqliteAdapter::new(
+    let adapter = prepared(SqliteAdapter::new(
         "sqlite".to_string(),
         db_path.to_string_lossy().to_string(),
         10,
         SqlRuntimeBuilder::new(mappings),
         Arc::new(UpcasterRegistry::new()),
         MigrationPolicy::default(),
-    );
+    ));
 
     adapter.handle(&tag_assigned(1, "post-1", "tag-a"));
     adapter.handle(&tag_assigned(1, "post-1", "tag-b"));

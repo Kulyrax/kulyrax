@@ -1,0 +1,84 @@
+# One container per networked backend, on host ports that don't collide with a
+# locally installed database. `run.sh` recreates the one it benchmarks and its
+# named volume, so every run starts from an empty store.
+name: kulyrax-bench
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: kulyrax
+      POSTGRES_DB: bench
+    ports: ["15432:5432"]
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "bench"]
+      interval: 2s
+      retries: 30
+
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_DATABASE: bench
+    ports: ["13306:3306"]
+    volumes: ["mysql-data:/var/lib/mysql"]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 2s
+      retries: 60
+
+  redis:
+    image: redis:7
+    ports: ["16379:6379"]
+    volumes: ["redis-data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 30
+
+  # Kulyrax's MongoDB adapter uses transactions, which need a replica set.
+  # `run.sh` runs `rs.initiate()` once the server answers.
+  mongodb:
+    image: mongo:7
+    command: ["--replSet", "rs0"]
+    ports: ["27018:27017"]
+    volumes: ["mongodb-data:/data/db"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({ping:1})"]
+      interval: 2s
+      retries: 30
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms1g -Xmx1g
+    ports: ["19200:9200"]
+    volumes: ["elasticsearch-data:/usr/share/elasticsearch/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health?wait_for_status=yellow"]
+      interval: 3s
+      retries: 60
+
+  neo4j:
+    image: neo4j:5
+    environment:
+      NEO4J_AUTH: neo4j/kulyrax-bench
+    ports: ["17687:7687"]
+    volumes: ["neo4j-data:/data"]
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "kulyrax-bench", "RETURN 1"]
+      interval: 3s
+      retries: 60
+
+# Named volumes, one per store: data lives on the Docker VM's ext4 disk, not
+# in the container's overlay filesystem. `fresh_store` deletes the volume.
+volumes:
+  mongodb-data:
+  postgres-data:
+  redis-data:
+  neo4j-data:
+  mysql-data:
+  elasticsearch-data:

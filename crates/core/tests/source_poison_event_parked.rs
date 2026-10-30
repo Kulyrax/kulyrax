@@ -44,6 +44,7 @@ fn poison_event_is_dlqd_and_batch_commits() {
         mode: RunMode::Once,
         max_batch: 256,
         retry_budget: 1,
+        max_batch_delay: std::time::Duration::ZERO,
         dlq_dir: Some(dlq.clone()),
     };
     let report = run_once(&db, vec![src], Some(opts)).unwrap();
