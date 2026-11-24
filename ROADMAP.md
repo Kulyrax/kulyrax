@@ -42,9 +42,10 @@ that's separated from a possible future hosted/managed product.
 - **TTL for the key-value adapters** — deferred because time-based eviction isn't
   reproducible from a replayed event log; would need an explicit non-deterministic-by-
   design opt-in if ever added.
-- **I/O throughput, after v0.10.0.** v0.10.0 batches SQLite and Postgres (one
-  transaction per batch; Postgres writes each batch in bulk). Still open, in order:
-  - crash-safe file stores with per-batch writes and fsyncs (Phase 3);
+- **I/O throughput, after v0.11.0.** v0.10.0 batches SQLite and Postgres (one
+  transaction per batch; Postgres writes each batch in bulk). v0.11.0 makes the
+  file stores crash-safe and batched (`docs/file-store-durability.md`). Still open,
+  in order:
   - Elasticsearch `_bulk`, then batching for MySQL, Redis, MongoDB and Neo4j
     (Phase 4);
   - a dedicated rebuild path: `COPY` into a shadow table, then an atomic swap,

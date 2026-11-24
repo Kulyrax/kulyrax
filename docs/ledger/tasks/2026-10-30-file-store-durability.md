@@ -1,5 +1,5 @@
 ---
-status: blocked
+status: completed
 ---
 
 # Phase 3: crash-safe, batched file stores
@@ -46,7 +46,8 @@ binaries.
 - [ ] Benchmarks: 100k per file store, Defender excluded, batch 5,000, target
   ≥ 2,000 events/s on this laptop, per-stage numbers. Lag reruns at 1,000/s.
   **Run, target not met:** 849–944 events/s; lag at 1,000/s grows without bound
-  (Verification). The 5,000/s Linux VM check is the owner's, later.
+  (Verification). **Waived by the owner on 2026-11-24** ("Waive it, ship"): Phase 3
+  ships with the measured numbers. The Linux VM check stays on the roadmap.
 - [x] Docs: file-store durability model (`docs/file-store-durability.md`).
 - [x] Release notes for v0.11.0 (`RELEASES/v0.11.0.md`, with the measured numbers).
 - [x] Gates green before every push.
@@ -116,8 +117,8 @@ These set the sync delay (2 s) and explain the crash suite's run times.
   2.0–2.4× v0.10), and lag at 1,000/s fails. The durability path costs ~3% of a
   batch; the rest is creating two files per event. Reaching the target here would
   need a different on-disk layout (fewer files per event), which is a product
-  change outside this phase (decision record, option 3). **Owner's call:** accept
-  the measured numbers for v0.11, or hold the release for the Linux VM check.
+  change outside this phase (decision record, option 3). The owner accepted the
+  measured numbers for v0.11 (2026-11-24).
 - With Defender scanning the store directory, throughput drops to 230–280
   events/s (Defender serializes `.json` creation). The release notes say so.
 - The v0.10 Defender-on result files `results/file-{document,keyvalue,graph}.txt`
@@ -136,7 +137,8 @@ These set the sync delay (2 s) and explain the crash suite's run times.
 
 ## Outcome
 
-Blocked on the owner: every criterion is met except the throughput target
-(≥ 2,000 events/s, and lag at 1,000/s), which this laptop's file-creation cost
-rules out for the current on-disk layout. Crash safety is complete and tested. The
-owner decides whether v0.11 ships with the measured numbers.
+Completed. The file stores are crash-safe, batched and single-writer, and every
+crash test passes. The throughput target (≥ 2,000 events/s, and lag at 1,000/s) is
+not met on this laptop: file creation bounds the current on-disk layout at about
+900 events/s. The owner waived it on 2026-11-24, and v0.11 ships with the measured
+numbers.
