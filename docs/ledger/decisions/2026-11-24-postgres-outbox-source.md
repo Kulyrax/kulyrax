@@ -133,8 +133,8 @@ without taking the lock or connecting.
 
 **Ownership.** Read only. Kulyrax runs `SELECT` statements only: it never inserts,
 updates or deletes outbox rows, creates nothing in the producer's database, and
-works with a role that has `SELECT` on the table (and on its sequence's catalog
-rows, which `pg_sequences` shows to any role that can use the table). Cleaning the
+works with a role that has `SELECT` on the table (the sequence check reads the
+`pg_sequence` system catalog, which every role can read). Cleaning the
 outbox is the producer's job; rows at or below the committed `after`, and not on
 the watch list, are safe to delete.
 
@@ -146,7 +146,7 @@ object named:
   type); `sequence_column` is set;
 - the **sequence behind `sequence_column`** (`pg_get_serial_sequence`, which covers
   `serial` and identity columns) has `increment_by = 1` and `cache_size = 1`
-  (`pg_sequences`). A step other than 1 would make every value a gap; a cache
+  (the `pg_sequence` catalog). A step other than 1 would make every value a gap; a cache
   above 1 hands each session its own block of values, so values stop following
   insert order across sessions, and unused blocks become permanent gaps;
 - if the column has **no sequence** (ids the application assigns), start-up refuses
