@@ -884,22 +884,12 @@ fn print_dry_run_report(report: &DryRunReport) {
         println!();
         println!("{}. {} ({kind})", i + 1, adapter.adapter_id);
         match &adapter.outcome {
-            DryRunOutcome::Planned(w) => {
-                let facet = if w.facet.is_empty() {
-                    String::new()
-                } else {
-                    format!(", facet {}", w.facet)
-                };
-                println!(
-                    "   would {:?} {} key {}{facet} (on_existing: {:?}, v{} -> v{})",
-                    w.operation,
-                    w.target,
-                    w.entity_key,
-                    w.on_existing,
-                    w.source_version,
-                    w.projected_version
-                );
-                println!("   values: {}", w.values);
+            DryRunOutcome::Planned(w) => render_planned_write(w),
+            DryRunOutcome::PlannedSubgraph { writes } => {
+                println!("   {} writes, in one transaction:", writes.len());
+                for w in writes {
+                    render_planned_write(w);
+                }
             }
             DryRunOutcome::Failed { error } => println!("   would fail: {error}"),
             DryRunOutcome::NotPreviewable { reason } => println!("   not previewable: {reason}"),
@@ -910,6 +900,19 @@ fn print_dry_run_report(report: &DryRunReport) {
         "Guard state was not read, so a live run may still skip these writes as \
          already projected or stale."
     );
+}
+
+fn render_planned_write(w: &kulyrax_core::runtime::PlannedWrite) {
+    let facet = if w.facet.is_empty() {
+        String::new()
+    } else {
+        format!(", facet {}", w.facet)
+    };
+    println!(
+        "   would {:?} {} key {}{facet} (on_existing: {:?}, v{} -> v{})",
+        w.operation, w.target, w.entity_key, w.on_existing, w.source_version, w.projected_version
+    );
+    println!("   values: {}", w.values);
 }
 
 // --------------------------------------------------

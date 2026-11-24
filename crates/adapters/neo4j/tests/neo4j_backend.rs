@@ -13,11 +13,11 @@
 //! every scenario shares the same skip guard and fresh-label helper.
 
 use kulyrax_adapter_neo4j::Neo4jAdapter;
-use kulyrax_core::adapter::AdapterOutcome;
 use kulyrax_core::adapter::StorageAdapter;
 use kulyrax_core::adapter::graph::mapping::GraphMapping;
 use kulyrax_core::adapter::graph::runtime::GraphRuntimeBuilder;
 use kulyrax_core::adapter::graph::store::GraphStore;
+use kulyrax_core::adapter::{AdapterOutcome, SkipReason};
 use kulyrax_core::event::Event;
 use kulyrax_core::execution::stages;
 use kulyrax_core::runtime::config::MigrationPolicy;
@@ -781,6 +781,129 @@ fn neo4j_batch_rollback_leaves_nothing() -> R {
         matches!(r.outcome, AdapterOutcome::Created),
         "{:?}",
         r.outcome
+    );
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// kind: subgraph
+// ---------------------------------------------------------------------------
+
+fn subgraph_mapping(order: &str, customer: &str, placed: &str) -> HashMap<String, GraphMapping> {
+    HashMap::from([(
+        "OrderPlaced".to_string(),
+        graph_mapping(&format!(
+            "kind: subgraph\nevent: OrderPlaced\nversion: 1\nrecords:\n  - kind: node\n    label: {order}\n    key: payload.order_id\n    on_existing: replace\n    properties:\n      total: payload.total\n  - kind: node\n    label: {customer}\n    key: payload.customer_id\n    properties:\n      name: payload.customer\n  - kind: edge\n    edge_type: {placed}\n    from: payload.customer_id\n    to: payload.order_id\n    properties:\n      at: payload.at\n"
+        )),
+    )])
+}
+
+fn order_placed(seq: u64, order: &str, customer: serde_json::Value, cid: &str) -> Event {
+    Event {
+        event_id: format!("evt-order-{order}-{seq}"),
+        ..ev(
+            "OrderPlaced",
+            seq,
+            serde_json::json!({
+                "order_id": order, "customer_id": cid, "customer": customer,
+                "total": seq * 10, "at": format!("t{seq}"),
+            }),
+        )
+    }
+}
+
+fn count_of(
+    rt: &tokio::runtime::Runtime,
+    graph: &neo4rs::Graph,
+    cypher: String,
+) -> Result<i64, Box<dyn std::error::Error>> {
+    let row = query_one_row(rt, graph, neo4rs::Query::new(cypher)).ok_or("no row")?;
+    Ok(row.get::<i64>("c")?)
+}
+
+#[test]
+fn neo4j_subgraph_projects_every_record_in_one_transaction() -> R {
+    require_neo4j!(uri);
+    let (order, customer, placed) = (fresh_label(), fresh_label(), fresh_label());
+    let a = neo4j_adapter(&uri, subgraph_mapping(&order, &customer, &placed));
+    let (o1, c1) = (format!("{order}o1"), format!("{order}c1"));
+    let rt = verify_rt();
+    let graph = connect(&rt, &uri)?;
+
+    let r = a.handle(&order_placed(1, &o1, "Ada".into(), &c1));
+    assert!(
+        matches!(r.outcome, AdapterOutcome::Created),
+        "{:?}",
+        r.outcome
+    );
+    assert_eq!(
+        count_of(
+            &rt,
+            &graph,
+            format!("MATCH (n:`{order}`) RETURN count(n) AS c")
+        )?,
+        1
+    );
+    assert_eq!(
+        count_of(
+            &rt,
+            &graph,
+            format!("MATCH (n:`{customer}`) RETURN count(n) AS c")
+        )?,
+        1
+    );
+    assert_eq!(
+        count_of(
+            &rt,
+            &graph,
+            format!("MATCH ()-[r:`{placed}`]->() RETURN count(r) AS c")
+        )?,
+        1
+    );
+    let again = a.handle(&order_placed(1, &o1, "Ada".into(), &c1));
+    assert!(
+        matches!(
+            again.outcome,
+            AdapterOutcome::Skipped(SkipReason::StaleSequence)
+        ),
+        "{:?}",
+        again.outcome
+    );
+
+    // The customer's name is a map, which Neo4j refuses as a property: the
+    // second record fails after the first wrote, and the transaction rolls
+    // the whole event back.
+    let (o2, c2) = (format!("{order}o2"), format!("{order}c2"));
+    let failed = a.handle(&order_placed(
+        2,
+        &o2,
+        serde_json::json!({ "first": "x" }),
+        &c2,
+    ));
+    assert!(
+        matches!(failed.outcome, AdapterOutcome::Failed(_)),
+        "{:?}",
+        failed.outcome
+    );
+    assert_eq!(
+        count_of(
+            &rt,
+            &graph,
+            format!("MATCH (n:`{order}` {{id: '{o2}'}}) RETURN count(n) AS c")
+        )?,
+        0,
+        "the first record was rolled back"
+    );
+    assert_eq!(
+        count_of(
+            &rt,
+            &graph,
+            format!(
+                "MATCH (g:__ConduitGuard) WHERE g.entity_key IN ['{o2}', '{c2}'] RETURN count(g) AS c"
+            )
+        )?,
+        0,
+        "no guard was left"
     );
     Ok(())
 }

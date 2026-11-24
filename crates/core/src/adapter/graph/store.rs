@@ -7,8 +7,8 @@ use serde_json::Value;
 use crate::{
     adapter::file_store::{FileStore, FileTxn},
     adapter::graph::adapter::GraphError,
-    adapter::graph::exec::{self, EdgePlan, GraphBackend, GraphGuard, GraphOutcome, NodePlan},
-    adapter::graph::mapping::{ResolvedRecord, canonical_edge_key, encode_edge_key},
+    adapter::graph::exec::{self, GraphBackend, GraphGuard, GraphOutcome},
+    adapter::graph::mapping::encode_edge_key,
     adapter::graph::runtime::GraphRuntimeBuilder,
     adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter},
     event::Event,
@@ -140,7 +140,7 @@ impl StorageAdapter for GraphStore {
     }
 
     fn handle(&self, event: &Event) -> AdapterResult {
-        let projection = match self.builder.build(event, &self.upcasters) {
+        let projections = match self.builder.build_all(event, &self.upcasters) {
             Ok(p) => p,
             Err(GraphError::UnsupportedVersion {
                 from_version,
@@ -168,49 +168,15 @@ impl StorageAdapter for GraphStore {
             Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
         };
 
-        let source_version = projection.source_version;
-        let projected_version = projection.projected_version;
-        let result = self.store.with_txn(|txn| {
-            let mut backend = FileGraphBackend { txn };
-            match &projection.record {
-                ResolvedRecord::Node {
-                    label,
-                    node_id,
-                    properties,
-                } => {
-                    let plan = NodePlan {
-                        label: label.clone(),
-                        node_id: node_id.clone(),
-                        properties: properties.clone(),
-                        on_existing: projection.on_existing,
-                        operation: projection.operation,
-                        permanent: projection.permanent,
-                        facet: projection.facet.clone(),
-                    };
-                    exec::project_node(&mut backend, &plan, event)
-                }
-                ResolvedRecord::Edge {
-                    edge_type,
-                    from,
-                    to,
-                    discriminator,
-                    properties,
-                } => {
-                    let key = canonical_edge_key(edge_type, from, to, discriminator.as_deref());
-                    let plan = EdgePlan {
-                        edge_type: edge_type.clone(),
-                        from: from.clone(),
-                        to: to.clone(),
-                        key,
-                        properties: properties.clone(),
-                        on_existing: projection.on_existing,
-                        operation: projection.operation,
-                        permanent: projection.permanent,
-                    };
-                    exec::project_edge(&mut backend, &plan, event)
-                }
-            }
-        });
+        let (source_version, projected_version) = match projections.first() {
+            Some(p) => (p.source_version, p.projected_version),
+            None => (event.version(), event.version()),
+        };
+        // Every record in one per-event overlay: a failing record discards
+        // the event's earlier records too.
+        let result = self
+            .store
+            .with_txn(|txn| exec::project_all(&mut FileGraphBackend { txn }, &projections, event));
 
         match result {
             Ok(Ok(o)) => self.outcome(o, source_version, projected_version),

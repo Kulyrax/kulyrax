@@ -31,9 +31,6 @@ that's separated from a possible future hosted/managed product.
   independent crate (a DynamoDB or Elasticsearch backend, say) exercising the registry
   from outside this repo is still open. See `docs/writing-a-backend.md` if you want to
   be the one to build it.
-- **Subgraph-per-event** — a single mapping emitting several graph records (a node plus
-  its edges) atomically from one event. Currently a graph mapping produces exactly one
-  node or one edge; a multi-record event is decomposed into separate events upstream.
 - **TTL for the key-value adapters** — deferred because time-based eviction isn't
   reproducible from a replayed event log; would need an explicit non-deterministic-by-
   design opt-in if ever added.

@@ -39,9 +39,8 @@ use tokio::runtime::Runtime;
 
 use kulyrax_core::adapter::graph::adapter::GraphError;
 use kulyrax_core::adapter::graph::exec::{
-    self, EdgePlan, GraphBackend, GraphFacetGuard, GraphGuard, GraphOutcome, NodePlan,
+    self, GraphBackend, GraphFacetGuard, GraphGuard, GraphOutcome,
 };
-use kulyrax_core::adapter::graph::mapping::{ResolvedRecord, canonical_edge_key};
 use kulyrax_core::adapter::graph::runtime::{GraphProjection, GraphRuntimeBuilder};
 use kulyrax_core::adapter::{AdapterError, AdapterResult, Prepared, SkipReason, StorageAdapter};
 use kulyrax_core::event::Event;
@@ -211,52 +210,6 @@ fn poisoned() -> AdapterError {
     AdapterError::WriteFailed("Neo4j batch lock poisoned by an earlier panic".to_string())
 }
 
-/// Project one event's record through `backend`.
-fn project(
-    backend: &mut Neo4jBackend<'_>,
-    projection: &GraphProjection,
-    event: &Event,
-) -> Result<GraphOutcome, GraphError> {
-    match &projection.record {
-        ResolvedRecord::Node {
-            label,
-            node_id,
-            properties,
-        } => {
-            let plan = NodePlan {
-                label: label.clone(),
-                node_id: node_id.clone(),
-                properties: properties.clone(),
-                on_existing: projection.on_existing,
-                operation: projection.operation,
-                permanent: projection.permanent,
-                facet: projection.facet.clone(),
-            };
-            exec::project_node(backend, &plan, event)
-        }
-        ResolvedRecord::Edge {
-            edge_type,
-            from,
-            to,
-            discriminator,
-            properties,
-        } => {
-            let key = canonical_edge_key(edge_type, from, to, discriminator.as_deref());
-            let plan = EdgePlan {
-                edge_type: edge_type.clone(),
-                from: from.clone(),
-                to: to.clone(),
-                key,
-                properties: properties.clone(),
-                on_existing: projection.on_existing,
-                operation: projection.operation,
-                permanent: projection.permanent,
-            };
-            exec::project_edge(backend, &plan, event)
-        }
-    }
-}
-
 impl Neo4jAdapter {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -375,7 +328,7 @@ impl StorageAdapter for Neo4jAdapter {
         if let Err(e) = self.prepared.require() {
             return self.failure(AdapterError::WriteFailed(e));
         }
-        let projection = match self.builder.build(event, &self.upcasters) {
+        let projections = match self.builder.build_all(event, &self.upcasters) {
             Ok(p) => p,
             Err(GraphError::UnsupportedVersion {
                 from_version,
@@ -408,8 +361,10 @@ impl StorageAdapter for Neo4jAdapter {
             Err(e) => return self.failure(AdapterError::WriteFailed(e.clone())),
         };
 
-        let source_version = projection.source_version;
-        let projected_version = projection.projected_version;
+        let (source_version, projected_version) = match projections.first() {
+            Some(p) => (p.source_version, p.projected_version),
+            None => (event.version(), event.version()),
+        };
 
         let mut batch = match self.batch.lock() {
             Ok(b) => b,
@@ -417,8 +372,8 @@ impl StorageAdapter for Neo4jAdapter {
         };
         let result = match batch.as_mut() {
             // Inside a batch: its transaction, no retry (see the module docs).
-            Some(txn) => project(&mut Neo4jBackend { rt, txn }, &projection, event),
-            None => self.project_alone(rt, graph, &projection, event),
+            Some(txn) => exec::project_all(&mut Neo4jBackend { rt, txn }, &projections, event),
+            None => self.project_alone(rt, graph, &projections, event),
         };
         drop(batch);
 
@@ -457,12 +412,13 @@ impl StorageAdapter for Neo4jAdapter {
 }
 
 impl Neo4jAdapter {
-    /// One event in a transaction of its own, retried on a conflict.
+    /// One event (every record of it) in a transaction of its own, retried
+    /// on a conflict.
     fn project_alone(
         &self,
         rt: &Runtime,
         graph: &Graph,
-        projection: &GraphProjection,
+        projections: &[GraphProjection],
         event: &Event,
     ) -> Result<GraphOutcome, GraphError> {
         let mut attempts = 0;
@@ -470,7 +426,8 @@ impl Neo4jAdapter {
             attempts += 1;
             let attempt: Result<GraphOutcome, GraphError> = (|| {
                 let mut txn = rt.block_on(graph.start_txn()).map_err(neo_err)?;
-                let outcome = project(&mut Neo4jBackend { rt, txn: &mut txn }, projection, event);
+                let outcome =
+                    exec::project_all(&mut Neo4jBackend { rt, txn: &mut txn }, projections, event);
                 match outcome {
                     Ok(o) => {
                         timed(Stage::Commit, || rt.block_on(txn.commit())).map_err(neo_err)?;

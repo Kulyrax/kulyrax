@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::adapter::GraphError;
+use super::mapping::{ResolvedRecord, canonical_edge_key};
+use super::runtime::GraphProjection;
 use crate::adapter::{GuardState, OnExisting, Operation, SkipReason, WriteDecision, decide};
 use crate::event::Event;
 use crate::execution::stages::{Stage, timed};
@@ -208,6 +210,81 @@ pub struct EdgePlan {
 
 fn dedup_pair<'a>(a: &'a str, b: &'a str) -> Vec<&'a str> {
     if a == b { vec![a] } else { vec![a, b] }
+}
+
+/// Project one resolved record through [`project_node`] or [`project_edge`].
+pub fn project_record<B: GraphBackend>(
+    backend: &mut B,
+    projection: &GraphProjection,
+    event: &Event,
+) -> Result<GraphOutcome, GraphError> {
+    match &projection.record {
+        ResolvedRecord::Node {
+            label,
+            node_id,
+            properties,
+        } => {
+            let plan = NodePlan {
+                label: label.clone(),
+                node_id: node_id.clone(),
+                properties: properties.clone(),
+                on_existing: projection.on_existing,
+                operation: projection.operation,
+                permanent: projection.permanent,
+                facet: projection.facet.clone(),
+            };
+            project_node(backend, &plan, event)
+        }
+        ResolvedRecord::Edge {
+            edge_type,
+            from,
+            to,
+            discriminator,
+            properties,
+        } => {
+            let plan = EdgePlan {
+                edge_type: edge_type.clone(),
+                from: from.clone(),
+                to: to.clone(),
+                key: canonical_edge_key(edge_type, from, to, discriminator.as_deref()),
+                properties: properties.clone(),
+                on_existing: projection.on_existing,
+                operation: projection.operation,
+                permanent: projection.permanent,
+            };
+            project_edge(backend, &plan, event)
+        }
+    }
+}
+
+/// Project every record of one event in order, stopping at the first error:
+/// the caller runs them in one transaction and discards it on error, so the
+/// event lands whole or not at all. The outcome is [`combined_outcome`].
+pub fn project_all<B: GraphBackend>(
+    backend: &mut B,
+    projections: &[GraphProjection],
+    event: &Event,
+) -> Result<GraphOutcome, GraphError> {
+    let outcomes = projections
+        .iter()
+        .map(|p| project_record(backend, p, event))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(combined_outcome(&outcomes))
+}
+
+/// One event's outcome from its records' (a subgraph has several): the
+/// first record that wrote, by precedence Created, Updated, Deleted; else
+/// the first record's skip.
+pub fn combined_outcome(outcomes: &[GraphOutcome]) -> GraphOutcome {
+    [
+        GraphOutcome::Created,
+        GraphOutcome::Updated,
+        GraphOutcome::Deleted,
+    ]
+    .into_iter()
+    .find(|wrote| outcomes.contains(wrote))
+    .or_else(|| outcomes.first().copied())
+    .unwrap_or(GraphOutcome::Skipped(SkipReason::StaleSequence))
 }
 
 /// The Phase 11–16 node write path, once, over any [`GraphBackend`].
