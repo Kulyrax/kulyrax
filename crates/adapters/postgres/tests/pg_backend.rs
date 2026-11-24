@@ -1062,3 +1062,37 @@ fn pg_rebuild_refuses_an_identity_column() -> R {
     assert!(err.contains("column n owning sequence"), "{err}");
     Ok(())
 }
+
+/// Table and column names are written into SQL unquoted: anything but a
+/// plain identifier is refused before any statement runs.
+#[test]
+fn pg_names_that_are_not_plain_identifiers_are_refused() -> R {
+    require_pg!(url);
+    for (table, column) in [("users; DROP TABLE x", "name"), ("users", "a b")] {
+        let mut m = HashMap::new();
+        m.insert(
+            "U".to_string(),
+            upsert_mapping(
+                "U",
+                table,
+                &format!("  id: payload.id\n  '{column}': payload.v\n"),
+            ),
+        );
+        let a = PostgresAdapter::new(
+            "pg".into(),
+            &url,
+            2,
+            10,
+            SqlRuntimeBuilder::new(m),
+            Arc::new(UpcasterRegistry::new()),
+            MigrationPolicy::default(),
+        );
+        let err = a.prepare().err().map(|e| e.to_string());
+        assert!(
+            err.as_deref()
+                .is_some_and(|e| e.contains("not plain identifiers")),
+            "{table:?} {column:?}: {err:?}"
+        );
+    }
+    Ok(())
+}

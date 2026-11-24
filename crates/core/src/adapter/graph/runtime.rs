@@ -34,6 +34,11 @@ impl GraphRuntimeBuilder {
         Self { mappings }
     }
 
+    /// The mappings this builder projects, by event type.
+    pub fn mappings(&self) -> &HashMap<String, GraphMapping> {
+        &self.mappings
+    }
+
     /// Build the graph projection for `event` from a node or edge mapping,
     /// upcasting its payload to the mapping's target version first when the
     /// versions differ. A subgraph mapping has several; see [`Self::build_all`].

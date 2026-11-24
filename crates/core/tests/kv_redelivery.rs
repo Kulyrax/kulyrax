@@ -66,6 +66,7 @@ value:
     let guard_path = dir
         .path()
         .join(".conduit")
+        .join("kv")
         .join("user-view")
         .join("u1.guard.json");
     let value_before = std::fs::read_to_string(&value_path)?;

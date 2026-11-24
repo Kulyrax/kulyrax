@@ -226,6 +226,15 @@ impl ElasticsearchAdapter {
             }
             Err(e) => return Err(self.failure(AdapterError::WriteFailed(e.to_string()))),
         };
+        // `.` and `..` are dot segments: a URL parser resolves `/_doc/..` (even
+        // percent-encoded) to another endpoint, so these ids cannot be addressed.
+        // Refused here, on the batch and the per-event path alike.
+        if matches!(projection.entity_id.as_str(), "." | "..") {
+            return Err(self.failure(AdapterError::WriteFailed(format!(
+                "elasticsearch cannot address a document with id {:?}: it is a URL dot segment",
+                projection.entity_id
+            ))));
+        }
         Ok(Planned {
             source_version: projection.source_version,
             projected_version: projection.projected_version,

@@ -43,6 +43,11 @@ impl DocumentRuntimeBuilder {
         Self { mappings }
     }
 
+    /// The mappings this builder projects, by event type.
+    pub fn mappings(&self) -> &HashMap<String, DocumentMapping> {
+        &self.mappings
+    }
+
     /// Build the document projection for `event`, upcasting its payload to the
     /// mapping's target version first when the versions differ.
     pub fn build(

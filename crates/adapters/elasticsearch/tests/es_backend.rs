@@ -574,3 +574,37 @@ fn es_batch_conflict_fails_the_commit() -> R {
     );
     Ok(())
 }
+
+/// `.` and `..` are URL dot segments: `/_doc/..` reaches another endpoint,
+/// so those ids fail the event and nothing is written; other ids are sent
+/// percent-encoded and land as themselves.
+#[test]
+fn es_dot_segment_ids_are_refused() -> R {
+    require_es!(url);
+    let idx = fresh_index();
+    let mut m = HashMap::new();
+    m.insert(
+        "U".into(),
+        doc_mapping(&format!(
+            "event: U\ncollection: {idx}\nversion: 1\nid: payload.id\non_existing: replace\ndocument:\n  id: payload.id\n"
+        )),
+    );
+    let a = es_adapter(&url, m);
+    for (seq, id) in [(1u64, "."), (2, "..")] {
+        let r = a.handle(&ev("U", seq, serde_json::json!({ "id": id })));
+        assert!(
+            matches!(&r.outcome, AdapterOutcome::Failed(e) if format!("{e:?}").contains("dot segment")),
+            "{id:?}: {:?}",
+            r.outcome
+        );
+    }
+    let r = a.handle(&ev("U", 3, serde_json::json!({ "id": "../a/b?c#d" })));
+    assert!(
+        matches!(r.outcome, AdapterOutcome::Created),
+        "{:?}",
+        r.outcome
+    );
+    let doc = fetch(&url, &idx, "..%2Fa%2Fb%3Fc%23d")?.expect("the encoded id lands as itself");
+    assert_eq!(doc["id"], "../a/b?c#d");
+    Ok(())
+}

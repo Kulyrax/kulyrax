@@ -41,6 +41,7 @@ use kulyrax_core::adapter::graph::adapter::GraphError;
 use kulyrax_core::adapter::graph::exec::{
     self, GraphBackend, GraphFacetGuard, GraphGuard, GraphOutcome,
 };
+use kulyrax_core::adapter::graph::mapping::GraphMapping;
 use kulyrax_core::adapter::graph::runtime::{GraphProjection, GraphRuntimeBuilder};
 use kulyrax_core::adapter::{AdapterError, AdapterResult, Prepared, SkipReason, StorageAdapter};
 use kulyrax_core::event::Event;
@@ -279,7 +280,36 @@ impl StorageAdapter for Neo4jAdapter {
         self.priority
     }
 
+    /// Labels and edge types are written into Cypher inside backticks: refuse
+    /// a name that would end the quoting (a backtick) or is empty. Then
+    /// create the guard constraint.
     fn prepare(&self) -> Result<(), AdapterError> {
+        let mut bad: Vec<String> = Vec::new();
+        for record in self
+            .builder
+            .mappings()
+            .values()
+            .flat_map(GraphMapping::records)
+        {
+            let name = match record {
+                GraphMapping::Node(n) => &n.label,
+                GraphMapping::Edge(e) => &e.edge_type,
+                GraphMapping::Subgraph(_) => continue,
+            };
+            if name.is_empty() || name.contains('`') {
+                bad.push(format!("{name:?}"));
+            }
+        }
+        if !bad.is_empty() {
+            bad.sort();
+            bad.dedup();
+            return Err(AdapterError::WriteFailed(format!(
+                "neo4j adapter {:?}: labels and edge types must be non-empty and contain no \
+                 backtick: {}",
+                self.id,
+                bad.join(", ")
+            )));
+        }
         let (rt, graph) = self
             .conn
             .as_ref()

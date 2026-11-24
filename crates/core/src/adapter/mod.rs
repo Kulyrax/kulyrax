@@ -1,4 +1,5 @@
 pub mod document;
+pub(crate) mod file_names;
 pub mod file_store;
 pub mod graph;
 pub mod keyvalue;

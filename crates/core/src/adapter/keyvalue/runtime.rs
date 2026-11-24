@@ -41,6 +41,11 @@ impl KvRuntimeBuilder {
         Self { mappings }
     }
 
+    /// The mappings this builder projects, by event type.
+    pub fn mappings(&self) -> &HashMap<String, KvMapping> {
+        &self.mappings
+    }
+
     /// Build the key-value projection for `event`, upcasting its payload to
     /// the mapping's target version first when the versions differ.
     pub fn build(

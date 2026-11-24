@@ -174,6 +174,7 @@ impl StorageAdapter for MySqlAdapter {
         let pool = self.pool()?;
         self.prepared
             .prepare(|| {
+                exec::check_identifiers(&self.builder)?;
                 let mut conn = pool.get_conn().map_err(my_err)?;
                 let (log_bin, format): (i64, String) = conn
                     .query_first("SELECT @@log_bin, @@SESSION.binlog_format")

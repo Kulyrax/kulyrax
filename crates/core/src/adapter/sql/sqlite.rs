@@ -128,6 +128,7 @@ impl StorageAdapter for SqliteAdapter {
         let mut guard = self.conn.lock().map_err(|_| poisoned())?;
         self.prepared
             .prepare(|| {
+                exec::check_identifiers(&self.builder)?;
                 if guard.is_none() {
                     *guard = Some(open_connection(&self.path).map_err(sql_err)?);
                 }

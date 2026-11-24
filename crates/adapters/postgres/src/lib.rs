@@ -248,6 +248,7 @@ impl StorageAdapter for PostgresAdapter {
             .map_err(|e| AdapterError::WriteFailed(e.clone()))?;
         self.prepared
             .prepare(|| {
+                exec::check_identifiers(&self.builder)?;
                 let mut client = pool
                     .get()
                     .map_err(|e| SqlError::ExecutionFailed(e.to_string()))?;

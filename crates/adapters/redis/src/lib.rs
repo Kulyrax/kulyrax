@@ -399,6 +399,31 @@ impl StorageAdapter for RedisAdapter {
         self.priority
     }
 
+    /// Refuse namespaces that could make two keys meet: values live at
+    /// `<namespace>:<key>`, so a namespace containing `:` can share keys with
+    /// another (`a:b` + `c` and `a` + `b:c`), and one starting with
+    /// `__kulyrax` can reach the guards (`__kulyrax:guard:…`).
+    fn prepare(&self) -> Result<(), AdapterError> {
+        let mut bad: Vec<String> = self
+            .builder
+            .mappings()
+            .values()
+            .map(|m| m.namespace.clone())
+            .filter(|ns| ns.is_empty() || ns.contains(':') || ns.starts_with("__kulyrax"))
+            .collect();
+        if bad.is_empty() {
+            return Ok(());
+        }
+        bad.sort();
+        bad.dedup();
+        Err(AdapterError::WriteFailed(format!(
+            "redis adapter {:?}: namespaces must be non-empty, contain no `:` and not start \
+             with `__kulyrax`: {}",
+            self.id,
+            bad.join(", ")
+        )))
+    }
+
     /// Check out one connection for the batch, `WATCH` the guard of every
     /// entity its events touch, and load their guards and values.
     fn begin_batch(&self, events: &[&Event]) -> Result<(), AdapterError> {

@@ -229,7 +229,11 @@ fn dlq_write(
             }
         })
         .collect();
-    let path = dlq_dir.join(format!("{safe}.{}.json", se.position.0));
+    // The position can come from a producer (gRPC `EventEnvelope.position`):
+    // encode it like any event value bound for a file name, so it cannot
+    // leave `dlq_dir` and two positions never share a file.
+    let position = crate::adapter::file_names::stem(&se.position.0);
+    let path = dlq_dir.join(format!("{safe}.{position}.json"));
     let body = serde_json::json!({ "event": se.event, "report": report });
     let json =
         serde_json::to_string_pretty(&body).map_err(|e| SourceError::Parse(e.to_string()))?;
