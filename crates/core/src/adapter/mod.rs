@@ -435,6 +435,12 @@ pub trait StorageAdapter {
 
     /// Execute side effect
     fn handle(&self, event: &Event) -> AdapterResult;
+
+    /// This adapter's support for rebuilding its tables in shadow and
+    /// swapping them in (see [`crate::rebuild`]). The default has none.
+    fn shadow_rebuild(&self) -> Option<&dyn crate::rebuild::ShadowRebuild> {
+        None
+    }
 }
 
 /// Whether an adapter's [`StorageAdapter::prepare`] has succeeded, for

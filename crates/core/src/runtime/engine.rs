@@ -184,6 +184,11 @@ impl KulyraxRuntime {
         }
     }
 
+    /// The adapters built so far; empty before [`Self::build_adapters`].
+    pub(crate) fn built_adapters(&self) -> &[Box<dyn StorageAdapter>] {
+        self.adapters.as_deref().unwrap_or_default()
+    }
+
     // Returns `()` rather than a borrow so callers can then use
     // `self.adapters` alongside other fields without a borrow conflict.
     // Build failures are already represented by failing placeholder adapters.

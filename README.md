@@ -101,6 +101,18 @@ adapters, and switches over. If anything is invalid it keeps running on the prev
 configuration and `reload` prints why (exit 1). Changing `sources:` needs a restart.
 Pass the same config file the process was started with.
 
+A changed SQL mapping only applies to new events. To re-project the whole history
+with it, rebuild the adapter's tables:
+
+```sh
+kulyrax rebuild --config config.yaml --mappings mappings --events history/ --adapter sql
+```
+
+The history is projected into shadow tables (`<table>__kulyrax_rebuild`) while
+readers keep the current ones, then each table and its guard lanes are swapped in
+with one transaction. Stop every other writer to those tables first: if one wrote
+during the rebuild, the swap is refused and nothing changes. SQLite and Postgres.
+
 ## Why Kulyrax exists
 
 A single event often needs to reach a SQL table (transactions), a document store (read

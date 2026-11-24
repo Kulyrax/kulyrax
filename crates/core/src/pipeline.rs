@@ -56,6 +56,9 @@ pub enum PipelineError {
     AdapterBuild(Vec<AdapterBuildFailure>),
     /// One or more built adapters failed `StorageAdapter::prepare`.
     AdapterPrepare(Vec<crate::adapter::PrepareFailure>),
+    /// A rebuild could not start, or was not swapped in (see
+    /// [`crate::rebuild`]).
+    Rebuild(String),
 }
 
 impl fmt::Display for PipelineError {
@@ -84,6 +87,7 @@ impl fmt::Display for PipelineError {
                 }
                 Ok(())
             }
+            PipelineError::Rebuild(msg) => write!(f, "rebuild: {msg}"),
         }
     }
 }
@@ -413,6 +417,27 @@ pub fn request_reload(
         config_path,
         timeout,
     )?)
+}
+
+/// Rebuild the SQL tables `adapter_id` projects from the events at
+/// `events_path`, in shadow tables swapped in at the end; see
+/// [`crate::rebuild`]. Every other writer to those tables must be stopped.
+pub fn rebuild(
+    config_path: &Path,
+    mappings_dir: &Path,
+    events_path: &Path,
+    adapter_id: &str,
+    opts: &ReplayRunOptions,
+    register_backends: impl FnOnce(&mut KulyraxRuntime),
+) -> Result<crate::rebuild::RebuildReport, PipelineError> {
+    crate::rebuild::rebuild(
+        config_path,
+        mappings_dir,
+        events_path,
+        adapter_id,
+        opts,
+        register_backends,
+    )
 }
 
 /// Replay a directory/file of events through the full pipeline.

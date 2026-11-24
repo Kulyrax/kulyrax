@@ -193,6 +193,38 @@ enum Commands {
         #[arg(long)]
         max_batch: Option<usize>,
     },
+
+    /// Rebuild a SQL adapter's tables from the full event history: project it
+    /// into shadow tables, then swap them in with one transaction. Readers
+    /// keep the old tables until the swap. Stop every other writer to these
+    /// tables first; the swap is refused if one wrote meanwhile. SQLite and
+    /// Postgres.
+    Rebuild {
+        #[arg(long)]
+        config: PathBuf,
+
+        #[arg(long)]
+        mappings: PathBuf,
+
+        /// The full history: an event file or a directory of event JSON files
+        #[arg(long)]
+        events: PathBuf,
+
+        /// The id of the SQL adapter whose tables are rebuilt
+        #[arg(long)]
+        adapter: String,
+
+        #[arg(long, value_enum, default_value_t)]
+        output: OutputFormat,
+
+        /// Print progress to stderr every N events
+        #[arg(long)]
+        progress_every: Option<usize>,
+
+        /// Events per batch. Default 5,000.
+        #[arg(long)]
+        max_batch: Option<usize>,
+    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -277,6 +309,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             max_per_event,
             progress_every,
             validate_routing,
+            max_batch,
+        )?,
+
+        Commands::Rebuild {
+            config,
+            mappings,
+            events,
+            adapter,
+            output,
+            progress_every,
+            max_batch,
+        } => rebuild_cmd(
+            config,
+            mappings,
+            events,
+            adapter,
+            output,
+            progress_every,
             max_batch,
         )?,
     };
@@ -565,6 +615,52 @@ fn replay_cmd(
 
     let exit = if report.events_failed > 0 { 1 } else { 0 };
     Ok(exit)
+}
+
+// --------------------------------------------------
+// Rebuild
+// --------------------------------------------------
+
+fn rebuild_cmd(
+    config: PathBuf,
+    mappings: PathBuf,
+    events: PathBuf,
+    adapter: String,
+    output: OutputFormat,
+    progress_every: Option<usize>,
+    max_batch: Option<usize>,
+) -> Result<i32, Box<dyn std::error::Error>> {
+    let opts = ReplayRunOptions {
+        // A rebuild replays the whole history: list failures only.
+        max_per_event_summaries: Some(0),
+        progress_interval: progress_every,
+        validate_routing: false,
+        max_batch,
+    };
+    let report = pipeline::rebuild(
+        &config,
+        &mappings,
+        &events,
+        &adapter,
+        &opts,
+        kulyrax_backends::register_default_backends,
+    )?;
+    match output {
+        OutputFormat::Text => println!(
+            "Rebuilt {} from {} events in {} ms and swapped them in.",
+            report.tables.join(", "),
+            report.replay.events_processed,
+            report.replay.duration_ms.unwrap_or(0)
+        ),
+        OutputFormat::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "tables": report.tables,
+                "replay": report.replay,
+            }))?
+        ),
+    }
+    Ok(0)
 }
 
 fn render_replay_report(

@@ -1,11 +1,15 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use rusqlite::{Connection, params, params_from_iter};
+use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 
+use crate::rebuild::SHADOW_SUFFIX;
 use crate::{
     adapter::sql::adapter::SqlError,
-    adapter::sql::exec::{self, GuardCache, GuardRow, KnownGuards, Placeholders, SqlTxn, SqlWrite},
+    adapter::sql::exec::{
+        self, GuardCache, GuardFingerprint, GuardRow, KnownGuards, Placeholders, ShadowTable,
+        SqlTxn, SqlWrite,
+    },
     adapter::sql::runtime::SqlRuntimeBuilder,
     adapter::{AdapterError, AdapterResult, GuardState, Prepared, StorageAdapter},
     event::Event,
@@ -201,6 +205,10 @@ impl StorageAdapter for SqliteAdapter {
         {
             let _ = conn.execute_batch("ROLLBACK");
         }
+    }
+
+    fn shadow_rebuild(&self) -> Option<&dyn crate::rebuild::ShadowRebuild> {
+        Some(self)
     }
 
     fn handle(&self, event: &Event) -> AdapterResult {
@@ -494,5 +502,156 @@ impl SqlTxn for SqliteTxn<'_> {
         self.conn.execute_batch("COMMIT").map_err(sql_err)?;
         self.owns = false;
         Ok(())
+    }
+
+    /// SQLite has no `CREATE TABLE … LIKE`: the shadow is created from the
+    /// table's own `CREATE TABLE` statement in `sqlite_master`, and each of
+    /// its indexes from theirs.
+    fn create_shadow_table(&mut self, t: &ShadowTable) -> Result<(), SqlError> {
+        let table_sql: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                params![t.table],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(sql_err)?;
+        let Some(table_sql) = table_sql else {
+            return Err(SqlError::ExecutionFailed(format!(
+                "table {} does not exist, so there is nothing to rebuild",
+                t.table
+            )));
+        };
+        let columns = table_sql
+            .find('(')
+            .map(|i| &table_sql[i..])
+            .ok_or_else(|| {
+                SqlError::ExecutionFailed(format!(
+                    "cannot copy the definition of table {}: {table_sql}",
+                    t.table
+                ))
+            })?;
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT name, sql FROM sqlite_master
+                 WHERE type = 'index' AND tbl_name = ?1 AND sql IS NOT NULL",
+            )
+            .map_err(sql_err)?;
+        let indexes: Vec<(String, String)> = stmt
+            .query_map(params![t.table], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(sql_err)?
+            .collect::<Result<_, _>>()
+            .map_err(sql_err)?;
+        drop(stmt);
+
+        self.conn
+            .execute_batch(&format!(
+                "DROP TABLE IF EXISTS {shadow}; CREATE TABLE {shadow} {columns}",
+                shadow = t.shadow
+            ))
+            .map_err(sql_err)?;
+        for (name, sql) in indexes {
+            self.conn
+                .execute_batch(&shadow_index_sql(&name, &sql, &t.shadow)?)
+                .map_err(sql_err)?;
+        }
+        self.execute(
+            "DELETE FROM conduit_projection_state WHERE target_table = ?1",
+            params![t.shadow],
+        )
+    }
+
+    fn guard_fingerprint(
+        &mut self,
+        tables: &[String],
+        _lock: bool, // SQLite writers already serialize.
+    ) -> Result<GuardFingerprint, SqlError> {
+        let list = (1..=tables.len())
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.conn
+            .query_row(
+                &format!(
+                    "SELECT count(*), coalesce(sum(last_sequence), 0)
+                     FROM conduit_projection_state WHERE target_table IN ({list})"
+                ),
+                params_from_iter(tables.iter()),
+                |row| {
+                    Ok(GuardFingerprint {
+                        lanes: row.get(0)?,
+                        sequence_sum: i128::from(row.get::<_, i64>(1)?),
+                    })
+                },
+            )
+            .map_err(sql_err)
+    }
+
+    fn swap_in_shadow(&mut self, t: &ShadowTable) -> Result<(), SqlError> {
+        self.execute(
+            "DELETE FROM conduit_projection_state WHERE target_table = ?1",
+            params![t.table],
+        )?;
+        self.execute(
+            "UPDATE conduit_projection_state SET target_table = ?1 WHERE target_table = ?2",
+            params![t.table, t.shadow],
+        )?;
+        self.conn
+            .execute_batch(&format!(
+                "DROP TABLE {table}; ALTER TABLE {shadow} RENAME TO {table}",
+                table = t.table,
+                shadow = t.shadow
+            ))
+            .map_err(sql_err)
+    }
+}
+
+/// `CREATE [UNIQUE] INDEX` for the shadow table, from an index's own
+/// statement. The index keeps its name with [`SHADOW_SUFFIX`] added, or
+/// removed if it already has it, so names alternate between rebuilds
+/// instead of growing: the swap renames the table, not its indexes.
+fn shadow_index_sql(name: &str, sql: &str, shadow: &str) -> Result<String, SqlError> {
+    let unparsed = || SqlError::ExecutionFailed(format!("cannot copy index {name}: {sql}"));
+    let upper = sql.to_ascii_uppercase();
+    let on = upper.find(" ON ").ok_or_else(unparsed)?;
+    let columns = sql[on..]
+        .find('(')
+        .map(|i| &sql[on + i..])
+        .ok_or_else(unparsed)?;
+    let unique = if upper[..on].contains("UNIQUE") {
+        "UNIQUE "
+    } else {
+        ""
+    };
+    let shadow_name = match name.strip_suffix(SHADOW_SUFFIX) {
+        Some(base) => base.to_string(),
+        None => format!("{name}{SHADOW_SUFFIX}"),
+    };
+    Ok(format!(
+        "CREATE {unique}INDEX {shadow_name} ON {shadow} {columns}"
+    ))
+}
+
+impl crate::rebuild::ShadowRebuild for SqliteAdapter {
+    fn start_rebuild(&self, tables: &[ShadowTable]) -> Result<GuardFingerprint, AdapterError> {
+        let (conn, _batch) = self.lock()?;
+        let txn = SqliteTxn::begin(connection(&conn)?)
+            .map_err(|e| AdapterError::WriteFailed(e.to_string()))?;
+        exec::start_shadow_rebuild(txn, tables)
+            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+    }
+
+    fn finish_rebuild(
+        &self,
+        tables: &[ShadowTable],
+        before: GuardFingerprint,
+    ) -> Result<(), AdapterError> {
+        let (conn, _batch) = self.lock()?;
+        let txn = SqliteTxn::begin(connection(&conn)?)
+            .map_err(|e| AdapterError::WriteFailed(e.to_string()))?;
+        exec::swap_shadow_rebuild(txn, tables, before)
+            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
     }
 }

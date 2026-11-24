@@ -41,10 +41,11 @@ that's separated from a possible future hosted/managed product.
   transaction per batch; Postgres writes each batch in bulk). v0.11.0 makes the
   file stores crash-safe and batched (`docs/file-store-durability.md`), and
   batches every other backend: MySQL, MongoDB and Neo4j commit one transaction
-  per batch, Redis one `MULTI`/`EXEC`, Elasticsearch one `_bulk`. Still open, in
-  order:
-  - a dedicated rebuild path: `COPY` into a shadow table, then an atomic swap,
-    instead of rebuilding through the per-event guards;
+  per batch, Redis one `MULTI`/`EXEC`, Elasticsearch one `_bulk`. `kulyrax
+  rebuild` re-projects a SQL adapter's history into shadow tables and swaps them
+  in (SQLite, Postgres). Still open, in order:
+  - `COPY` for the rebuild's shadow tables on Postgres, if benchmarks show the
+    batch path limits rebuild time;
   - benchmarks on a clean Linux VM with NVMe. Numbers so far are internal
     baselines from a Windows laptop, where Postgres spends ~80 ms per 1,000-row
     flush outside the server (most likely Docker Desktop's networking; to be
