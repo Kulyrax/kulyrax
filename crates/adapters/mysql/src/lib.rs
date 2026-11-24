@@ -16,23 +16,29 @@
 //! Requires row-based binary logging (`binlog_format=ROW`, the MySQL 8
 //! default, or `MIXED`) when the binary log is on; `prepare` refuses
 //! `STATEMENT` (see `check_binlog_format`).
+//!
+//! A batch (`begin_batch` … `commit_batch`) holds one pooled connection with
+//! one transaction open on it, and loads every guard lane it will read up
+//! front, locked, in one query per table. The guard table's key columns are
+//! binary-collated (see `ensure_binary_keys`), so a lane matches its entity
+//! key exactly, as on SQLite and Postgres.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use mysql::prelude::Queryable;
-use mysql::{IsolationLevel, Opts, OptsBuilder, Pool, PoolConstraints, PoolOpts, TxOpts};
+use mysql::{Opts, OptsBuilder, Pool, PoolConstraints, PoolOpts, PooledConn};
 use serde::Deserialize;
 use serde_json::Value;
 
 use kulyrax_core::adapter::sql::adapter::SqlError;
 use kulyrax_core::adapter::sql::exec::{
-    self, GuardRow, Placeholders, SqlOutcome, SqlPlan, SqlTxn, SqlWrite,
+    self, GuardCache, GuardRow, KnownGuards, Placeholders, SqlTxn, SqlWrite,
 };
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
-use kulyrax_core::adapter::{
-    AdapterError, AdapterResult, GuardState, Prepared, SkipReason, StorageAdapter,
-};
+use kulyrax_core::adapter::{AdapterError, AdapterResult, GuardState, Prepared, StorageAdapter};
 use kulyrax_core::event::Event;
+use kulyrax_core::execution::stages::{Stage, timed};
 use kulyrax_core::routing::StorageKind;
 use kulyrax_core::runtime::AdapterBuildContext;
 use kulyrax_core::runtime::config::{
@@ -88,8 +94,23 @@ pub struct MySqlAdapter {
     builder: SqlRuntimeBuilder,
     upcasters: Arc<UpcasterRegistry>,
     migration_policy: MigrationPolicy,
+    /// The open batch, from `begin_batch` to `commit_batch` / `rollback_batch`.
+    batch: Mutex<Option<MyBatch>>,
+    /// Entities that can have guard lanes (see [`KnownGuards`]). Locked
+    /// after `batch`.
+    known: Mutex<KnownGuards>,
     /// Set by `prepare` once the guard table exists.
     prepared: Prepared,
+}
+
+/// One batch's held connection, with its transaction open.
+struct MyBatch {
+    conn: PooledConn,
+    cache: GuardCache,
+}
+
+fn poisoned() -> AdapterError {
+    AdapterError::WriteFailed("MySQL batch lock poisoned by an earlier panic".to_string())
 }
 
 impl MySqlAdapter {
@@ -118,12 +139,20 @@ impl MySqlAdapter {
             builder,
             upcasters,
             migration_policy,
+            batch: Mutex::new(None),
+            known: Mutex::default(),
             prepared: Prepared::default(),
         }
     }
 
     fn failure(&self, error: AdapterError) -> AdapterResult {
         AdapterResult::failure(self.id.clone(), StorageKind::Sql, error)
+    }
+
+    fn pool(&self) -> Result<&Pool, AdapterError> {
+        self.pool
+            .as_ref()
+            .map_err(|e| AdapterError::WriteFailed(e.clone()))
     }
 }
 
@@ -142,10 +171,7 @@ impl StorageAdapter for MySqlAdapter {
     /// event's: MySQL DDL commits the open transaction implicitly (see
     /// `exec::ensure_schema`).
     fn prepare(&self) -> Result<(), AdapterError> {
-        let pool = self
-            .pool
-            .as_ref()
-            .map_err(|e| AdapterError::WriteFailed(e.clone()))?;
+        let pool = self.pool()?;
         self.prepared
             .prepare(|| {
                 let mut conn = pool.get_conn().map_err(my_err)?;
@@ -154,109 +180,203 @@ impl StorageAdapter for MySqlAdapter {
                     .map_err(my_err)?
                     .unwrap_or((0, String::new()));
                 check_binlog_format(log_bin != 0, &format)?;
-                drop(conn);
-                let tx = pool.start_transaction(TxOpts::default()).map_err(my_err)?;
-                exec::ensure_schema(MySqlTxn { tx })
+                exec::ensure_schema(MySqlTxn::begin(&mut conn)?)?;
+                ensure_binary_keys(&mut conn)
             })
             .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+    }
+
+    /// Check out one connection for the whole batch, start its transaction,
+    /// and lock and load every guard lane the batch will read.
+    fn begin_batch(&self, events: &[&Event]) -> Result<(), AdapterError> {
+        self.prepared.require().map_err(AdapterError::WriteFailed)?;
+        let mut batch = self.batch.lock().map_err(|_| poisoned())?;
+        if batch.is_some() {
+            return Err(AdapterError::WriteFailed(
+                "a batch is already open on this adapter".to_string(),
+            ));
+        }
+        let mut conn = self
+            .pool()?
+            .get_conn()
+            .map_err(|e| AdapterError::WriteFailed(e.to_string()))?;
+        // Events that fail to plan are left to `handle`, which reports them.
+        let plans: Vec<_> = events
+            .iter()
+            .filter_map(|e| {
+                exec::plan_event(
+                    &self.id,
+                    &self.builder,
+                    &self.upcasters,
+                    self.migration_policy,
+                    e,
+                )
+                .ok()
+            })
+            .collect();
+        let mut cache = GuardCache::default();
+        {
+            let mut txn =
+                MySqlTxn::begin(&mut conn).map_err(|e| AdapterError::WriteFailed(e.to_string()))?;
+            let mut known = self.known.lock().map_err(|_| poisoned())?;
+            exec::prefetch_guards(
+                &mut txn,
+                plans.iter().map(|p| &p.plan),
+                &mut cache,
+                &mut known,
+            )
+            .map_err(|e| AdapterError::WriteFailed(e.to_string()))?;
+            // From here the batch owns the transaction; `txn` must not roll it back.
+            txn.release();
+        }
+        *batch = Some(MyBatch { conn, cache });
+        Ok(())
+    }
+
+    fn commit_batch(&self) -> Result<(), AdapterError> {
+        let mut batch = self.batch.lock().map_err(|_| poisoned())?;
+        let Some(mut b) = batch.take() else {
+            return Ok(());
+        };
+        timed(Stage::Commit, || b.conn.query_drop("COMMIT")).map_err(|e| {
+            // A failed COMMIT can leave the transaction open; end it.
+            let _ = b.conn.query_drop("ROLLBACK");
+            AdapterError::WriteFailed(e.to_string())
+        })
+    }
+
+    fn rollback_batch(&self) {
+        let Ok(mut batch) = self.batch.lock() else {
+            return;
+        };
+        if let Some(mut b) = batch.take() {
+            let _ = b.conn.query_drop("ROLLBACK");
+        }
     }
 
     fn handle(&self, event: &Event) -> AdapterResult {
         if let Err(e) = self.prepared.require() {
             return self.failure(AdapterError::WriteFailed(e));
         }
-        let projection = match self.builder.build(event, &self.upcasters) {
+        let planned = match exec::plan_event(
+            &self.id,
+            &self.builder,
+            &self.upcasters,
+            self.migration_policy,
+            event,
+        ) {
             Ok(p) => p,
-            Err(SqlError::UnsupportedVersion {
-                from_version,
-                to_version,
-                reason,
-                ..
-            }) => {
-                return match self.migration_policy {
-                    MigrationPolicy::Strict => AdapterResult::unsupported_version(
-                        self.id.clone(),
-                        StorageKind::Sql,
-                        reason,
-                        from_version,
-                        to_version,
-                    ),
-                    MigrationPolicy::IgnoreUnmatched => AdapterResult::skipped_versioned(
-                        self.id.clone(),
-                        StorageKind::Sql,
-                        SkipReason::UnsupportedVersion,
-                        from_version,
-                        to_version,
-                    ),
-                };
-            }
-            Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
+            Err(result) => return result,
         };
-
-        let source_version = projection.source_version;
-        let projected_version = projection.projected_version;
-        let plan = SqlPlan {
-            table: projection.table,
-            entity_key: projection.entity_key,
-            key_values: projection.key_values,
-            primary_key_columns: projection.primary_key_columns,
-            on_existing: projection.on_existing,
-            operation: projection.operation,
-            permanent: projection.permanent,
-            facet: projection.facet,
-            write: projection.write,
-        };
-
-        let pool = match &self.pool {
-            Ok(p) => p,
-            Err(e) => return self.failure(AdapterError::WriteFailed(e.clone())),
-        };
-
-        // READ COMMITTED, not REPEATABLE READ: see the module docs.
-        let tx_opts = TxOpts::default().set_isolation_level(Some(IsolationLevel::ReadCommitted));
-        let tx = match pool.start_transaction(tx_opts) {
-            Ok(tx) => tx,
-            Err(e) => return self.failure(AdapterError::WriteFailed(e.to_string())),
-        };
-
-        match exec::project(MySqlTxn { tx }, &plan, event) {
-            Ok(SqlOutcome::Created) => AdapterResult::created_versioned(
-                self.id.clone(),
-                StorageKind::Sql,
-                source_version,
-                projected_version,
-            ),
-            Ok(SqlOutcome::Updated) => AdapterResult::updated_versioned(
-                self.id.clone(),
-                StorageKind::Sql,
-                source_version,
-                projected_version,
-            ),
-            Ok(SqlOutcome::Deleted) => AdapterResult::deleted_versioned(
-                self.id.clone(),
-                StorageKind::Sql,
-                source_version,
-                projected_version,
-            ),
-            Ok(SqlOutcome::Skipped(reason)) => AdapterResult::skipped_versioned(
-                self.id.clone(),
-                StorageKind::Sql,
-                reason,
-                source_version,
-                projected_version,
-            ),
-            Err(e) => self.failure(AdapterError::WriteFailed(e.to_string())),
+        // Before any write: this entity may have guard lanes from now on.
+        match self.known.lock() {
+            Ok(mut known) => known.note(&planned.plan.table, &planned.plan.entity_key),
+            Err(_) => return self.failure(poisoned()),
         }
+
+        let mut batch = match self.batch.lock() {
+            Ok(b) => b,
+            Err(_) => return self.failure(poisoned()),
+        };
+        let outcome = match batch.as_mut() {
+            Some(b) => exec::project_in(
+                &mut MySqlTxn::joined(&mut b.conn),
+                &planned.plan,
+                event,
+                &mut b.cache,
+            ),
+            None => {
+                let mut conn = match self.pool().and_then(|p| {
+                    p.get_conn()
+                        .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+                }) {
+                    Ok(c) => c,
+                    Err(e) => return self.failure(e),
+                };
+                MySqlTxn::begin(&mut conn).and_then(|txn| exec::project(txn, &planned.plan, event))
+            }
+        };
+        exec::outcome_result(&self.id, &planned, outcome)
     }
 }
 
+/// A transaction on one connection: its own (`begin`, committed by
+/// `commit`, rolled back if dropped uncommitted), or a share of an open batch
+/// transaction (`joined`: `commit` and drop leave it alone).
 pub struct MySqlTxn<'a> {
-    tx: mysql::Transaction<'a>,
+    conn: &'a mut PooledConn,
+    /// `true` while this value must still end the transaction itself.
+    owns: bool,
+}
+
+impl<'a> MySqlTxn<'a> {
+    /// `READ COMMITTED`, not `REPEATABLE READ`: see the module docs.
+    fn begin(conn: &'a mut PooledConn) -> Result<Self, SqlError> {
+        conn.query_drop("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            .map_err(my_err)?;
+        conn.query_drop("START TRANSACTION").map_err(my_err)?;
+        Ok(Self { conn, owns: true })
+    }
+
+    fn joined(conn: &'a mut PooledConn) -> Self {
+        Self { conn, owns: false }
+    }
+
+    /// Hand the open transaction over to the caller.
+    fn release(&mut self) {
+        self.owns = false;
+    }
+}
+
+impl Drop for MySqlTxn<'_> {
+    fn drop(&mut self) {
+        if self.owns {
+            let _ = self.conn.query_drop("ROLLBACK");
+        }
+    }
 }
 
 fn my_err(e: mysql::Error) -> SqlError {
     SqlError::ExecutionFailed(e.to_string())
 }
+
+/// Columns of the guard table's primary key.
+const GUARD_KEY_COLUMNS: [&str; 3] = ["target_table", "entity_key", "facet"];
+
+/// Make the guard table's key columns binary-collated, if an older version
+/// created them with the server's default (case- and accent-insensitive)
+/// collation. There, `A` and `a` share one guard lane, while a batch's guard
+/// cache keys lanes by exact string, so a batch could decide differently from
+/// one event at a time. Binary keys match SQLite and Postgres. The change
+/// cannot fail on existing rows: keys unique without case stay unique with it.
+fn ensure_binary_keys(conn: &mut PooledConn) -> Result<(), SqlError> {
+    let collations: Vec<(String, Option<String>)> = conn
+        .query(
+            "SELECT COLUMN_NAME, COLLATION_NAME FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conduit_projection_state'",
+        )
+        .map_err(my_err)?;
+    let binary = GUARD_KEY_COLUMNS.iter().all(|col| {
+        collations.iter().any(|(name, collation)| {
+            name.eq_ignore_ascii_case(col)
+                && collation.as_deref().is_some_and(|c| c.ends_with("_bin"))
+        })
+    });
+    if binary {
+        return Ok(());
+    }
+    conn.query_drop(
+        "ALTER TABLE conduit_projection_state
+            MODIFY target_table VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+            MODIFY entity_key   VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+            MODIFY facet        VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT ''",
+    )
+    .map_err(my_err)
+}
+
+/// Lanes per `IN (…)` list (two parameters each), well under MySQL's 65,535
+/// bound parameters.
+const GUARD_READ_CHUNK: usize = 500;
 
 /// Writes run in `READ COMMITTED` transactions (see the module docs), which
 /// InnoDB can only log row by row: with the binary log on and
@@ -296,12 +416,12 @@ fn json_to_value(v: &Value) -> mysql::Value {
 
 impl SqlTxn for MySqlTxn<'_> {
     fn ensure_guard_table(&mut self) -> Result<(), SqlError> {
-        self.tx
+        self.conn
             .query_drop(
                 "CREATE TABLE IF NOT EXISTS conduit_projection_state (
-                    target_table  VARCHAR(191) NOT NULL,
-                    entity_key    VARCHAR(191) NOT NULL,
-                    facet         VARCHAR(191) NOT NULL DEFAULT '',
+                    target_table  VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+                    entity_key    VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+                    facet         VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
                     last_sequence BIGINT       NOT NULL,
                     last_event_id VARCHAR(191) NOT NULL,
                     deleted       BOOLEAN      NOT NULL DEFAULT FALSE,
@@ -329,7 +449,7 @@ impl SqlTxn for MySqlTxn<'_> {
              WHERE target_table = ? AND entity_key = ? AND facet = ?"
         };
         let row: Option<(i64, bool, bool)> = self
-            .tx
+            .conn
             .exec_first(
                 sql,
                 (table.to_string(), entity_key.to_string(), facet.to_string()),
@@ -342,10 +462,72 @@ impl SqlTxn for MySqlTxn<'_> {
         }))
     }
 
+    fn has_guard_rows(&mut self, table: &str) -> Result<bool, SqlError> {
+        let exists: Option<i64> = self
+            .conn
+            .exec_first(
+                "SELECT EXISTS (SELECT 1 FROM conduit_projection_state WHERE target_table = ?)",
+                (table.to_string(),),
+            )
+            .map_err(my_err)?;
+        Ok(exists.is_some_and(|n| n != 0))
+    }
+
+    /// The requested lanes, `GUARD_READ_CHUNK` per query. Each is matched on
+    /// the whole primary key, `(entity_key, facet) IN (…)`, so InnoDB probes
+    /// it as a unique key, as `read_guard_lane` does. Matching `entity_key`
+    /// alone would scan each entity's range and lock-read the record after
+    /// it, which can be another projection's lane: concurrent batches on
+    /// different tables deadlocked that way (ERROR 1213). Exact matches,
+    /// since the key columns are binary.
+    fn read_guard_lanes(
+        &mut self,
+        table: &str,
+        lanes: &[(String, String)],
+        lock: bool,
+    ) -> Result<Vec<Option<GuardState>>, SqlError> {
+        let mut sorted: Vec<(&str, &str)> = lanes
+            .iter()
+            .map(|(k, f)| (k.as_str(), f.as_str()))
+            .collect();
+        sorted.sort_unstable();
+        sorted.dedup();
+        let mut found: HashMap<(String, String), GuardState> = HashMap::new();
+        for chunk in sorted.chunks(GUARD_READ_CHUNK) {
+            let list = vec!["(?, ?)"; chunk.len()].join(", ");
+            let sql = format!(
+                "SELECT entity_key, facet, last_sequence, deleted, permanent
+                 FROM conduit_projection_state
+                 WHERE target_table = ? AND (entity_key, facet) IN ({list}){}",
+                if lock { " FOR UPDATE" } else { "" }
+            );
+            let params: Vec<mysql::Value> = std::iter::once(table)
+                .chain(chunk.iter().flat_map(|&(k, f)| [k, f]))
+                .map(mysql::Value::from)
+                .collect();
+            let rows: Vec<(String, String, i64, bool, bool)> = self
+                .conn
+                .exec(sql.as_str(), mysql::Params::Positional(params))
+                .map_err(my_err)?;
+            for (key, facet, seq, deleted, permanent) in rows {
+                let state = GuardState {
+                    last_sequence: seq as u64,
+                    deleted,
+                    permanent,
+                };
+                found.insert((key, facet), state);
+            }
+        }
+        Ok(lanes
+            .iter()
+            .map(|(k, f)| found.get(&(k.clone(), f.clone())).copied())
+            .collect())
+    }
+
     fn execute_write(&mut self, w: &SqlWrite) -> Result<(), SqlError> {
         let sql = w.render(Placeholders::MySql);
         let params: Vec<mysql::Value> = w.values.iter().map(json_to_value).collect();
-        self.tx
+        self.conn
             .exec_drop(sql.as_str(), mysql::Params::Positional(params))
             .map_err(my_err)
     }
@@ -358,13 +540,13 @@ impl SqlTxn for MySqlTxn<'_> {
             .join(" AND ");
         let sql = format!("DELETE FROM {table} WHERE {where_clause}");
         let params: Vec<mysql::Value> = vals.iter().map(json_to_value).collect();
-        self.tx
+        self.conn
             .exec_drop(sql.as_str(), mysql::Params::Positional(params))
             .map_err(my_err)
     }
 
     fn upsert_guard_row(&mut self, row: &GuardRow) -> Result<(), SqlError> {
-        self.tx
+        self.conn
             .exec_drop(
                 "INSERT INTO conduit_projection_state
                     (target_table, entity_key, facet, last_sequence, last_event_id, deleted, permanent, processed_at)
@@ -396,7 +578,7 @@ impl SqlTxn for MySqlTxn<'_> {
         seq: u64,
         event_id: &str,
     ) -> Result<(), SqlError> {
-        self.tx
+        self.conn
             .exec_drop(
                 "UPDATE conduit_projection_state
                     SET last_sequence = ?, last_event_id = ?, processed_at = NOW()
@@ -422,7 +604,7 @@ impl SqlTxn for MySqlTxn<'_> {
         event_id: &str,
     ) -> Result<(), SqlError> {
         if deleted {
-            self.tx.exec_drop(
+            self.conn.exec_drop(
                 "UPDATE conduit_projection_state
                     SET deleted = TRUE, permanent = ?, last_sequence = ?,
                         last_event_id = ?, processed_at = NOW()
@@ -436,7 +618,7 @@ impl SqlTxn for MySqlTxn<'_> {
                 ),
             )
         } else {
-            self.tx.exec_drop(
+            self.conn.exec_drop(
                 "UPDATE conduit_projection_state
                     SET deleted = FALSE, permanent = FALSE
                  WHERE target_table = ? AND entity_key = ? AND facet <> ''",
@@ -446,8 +628,14 @@ impl SqlTxn for MySqlTxn<'_> {
         .map_err(my_err)
     }
 
-    fn commit(self) -> Result<(), SqlError> {
-        self.tx.commit().map_err(my_err)
+    /// Commits a transaction this value began; inside a batch, the batch
+    /// commits instead (`StorageAdapter::commit_batch`).
+    fn commit(mut self) -> Result<(), SqlError> {
+        if !self.owns {
+            return Ok(());
+        }
+        self.owns = false;
+        self.conn.query_drop("COMMIT").map_err(my_err)
     }
 }
 
