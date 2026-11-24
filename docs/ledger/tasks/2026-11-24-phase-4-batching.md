@@ -21,7 +21,10 @@ graph events → Postgres-outbox source. No benchmarking for now.
 - [x] Redis: guards `WATCH`ed and loaded with `MGET` at `begin_batch`, one
   `MULTI`/`EXEC` per batch, same equivalence; a concurrent writer aborts the
   whole batch, nothing of it lands.
-- [ ] MongoDB: one transaction / bulk write per batch, same equivalence.
+- [x] MongoDB: one transaction per batch, guards read inside it (one `$in`
+  query per collection), each entity's writes collapsed to one document
+  operation and one guard write; same equivalence; a concurrent writer fails
+  the commit, nothing of the batch lands.
 - [ ] Neo4j: one transaction per batch, same equivalence.
 - [ ] Each backend's test suite passes against a real server (Docker), and CI's
   service jobs cover the new tests.
@@ -56,6 +59,8 @@ graph events → Postgres-outbox source. No benchmarking for now.
 | CI | `.github/workflows/ci.yml` | new job `test (elasticsearch)`; there was none, so this suite never ran in CI |
 | Redis suite on Redis 7 (Docker), same server each run | `KULYRAX_REDIS_URL=redis://localhost:6379 cargo test -p kulyrax-adapter-redis`, ×3 | 11 passed (3 unit, 8 integration), 3 of 3 runs: batch = one at a time (31 events, one `MULTI`/`EXEC`, nothing visible before commit), rollback leaves nothing, a concurrent write aborts the batch and the fallback applies on top |
 | First reruns | same, against the same server | 4–6 of 8 failed, existing tests included: namespaces `t0`, `t1`, … repeat per process, so a rerun met the last run's guards. Namespaces now carry the process id, as the Elasticsearch tests' indexes do |
+| MongoDB suite on mongo:7, single-node replica set (Docker) | `KULYRAX_MONGO_URL='mongodb://localhost:27017/?directConnection=true' KULYRAX_MONGO_DB=kulyrax_ci cargo test -p kulyrax-adapter-mongodb`, ×3 | 15 passed (4 unit, 11 integration), 3 of 3 runs: batch = one at a time over 34 events (facet onto a stored document keeps its fields; one commit; nothing visible before it), rollback leaves nothing, a concurrent write fails the commit and the fallback applies on top. Collections now carry the process id, as for Redis |
+| First run | same | the equivalence held; my own expectation was wrong: a facet after a delete is skipped by `decide()`, it does not re-create the entity. Fixed the assertion |
 
 ## Risks and open questions
 
