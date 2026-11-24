@@ -39,10 +39,10 @@ that's separated from a possible future hosted/managed product.
   design opt-in if ever added.
 - **I/O throughput, after v0.11.0.** v0.10.0 batches SQLite and Postgres (one
   transaction per batch; Postgres writes each batch in bulk). v0.11.0 makes the
-  file stores crash-safe and batched (`docs/file-store-durability.md`). Still open,
-  in order:
-  - Elasticsearch `_bulk`, then batching for MySQL, Redis, MongoDB and Neo4j
-    (Phase 4);
+  file stores crash-safe and batched (`docs/file-store-durability.md`), and
+  batches every other backend: MySQL, MongoDB and Neo4j commit one transaction
+  per batch, Redis one `MULTI`/`EXEC`, Elasticsearch one `_bulk`. Still open, in
+  order:
   - a dedicated rebuild path: `COPY` into a shadow table, then an atomic swap,
     instead of rebuilding through the per-event guards;
   - benchmarks on a clean Linux VM with NVMe. Numbers so far are internal
