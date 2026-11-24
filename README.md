@@ -110,8 +110,12 @@ kulyrax rebuild --config config.yaml --mappings mappings --events history/ --ada
 
 The history is projected into shadow tables (`<table>__kulyrax_rebuild`) while
 readers keep the current ones, then each table and its guard lanes are swapped in
-with one transaction. Stop every other writer to those tables first: if one wrote
-during the rebuild, the swap is refused and nothing changes. SQLite and Postgres.
+with one transaction. SQLite and Postgres. Hard limits:
+
+- **Every other writer to those tables must be paused** for the whole rebuild. If one
+  wrote meanwhile, the swap is refused and nothing changes.
+- **Postgres:** a target table with dependent views, a foreign key into or out of it,
+  or a `serial` / identity column makes the swap fail.
 
 ## Why Kulyrax exists
 

@@ -253,6 +253,11 @@ records:
 The adapter needs the capabilities of every record (here `upsert`, for the
 `on_existing: replace` order). `dry-run` lists each record's write.
 
+Two records that resolve to the same lane (the same node twice, say, because two
+`key` paths hold the same id) are decided in order at the one event sequence: the
+first is written, and the second is skipped as stale. Validation can't detect this,
+since keys are resolved from the payload.
+
 ## Next
 
 - [`docs/concepts.md`](concepts.md) for `decide()`, the guard, and facets.
