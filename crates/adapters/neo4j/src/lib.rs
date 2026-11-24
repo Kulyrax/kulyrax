@@ -22,8 +22,15 @@
 //! inside) because Neo4j's CAS needs `last_sequence` to be a plain queryable
 //! property per lane — a nested map isn't a valid property value at all, and
 //! even a JSON-string blob couldn't be compared in a Cypher `WHERE`.
+//!
+//! **Batches.** `begin_batch` opens one transaction that every event of the
+//! batch runs in, unchanged, compare-and-set included; `commit_batch` commits
+//! it once. A transaction reads its own writes, so later events see earlier
+//! ones, and guard locks are held until the commit. A conflict fails the
+//! event, which rolls the batch back; the per-event path that follows has
+//! the usual retry.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use neo4rs::{BoltList, BoltMap, BoltType, ConfigBuilder, Graph, Neo4jErrorKind, Query, Row, Txn};
 use serde::Deserialize;
@@ -35,7 +42,7 @@ use kulyrax_core::adapter::graph::exec::{
     self, EdgePlan, GraphBackend, GraphFacetGuard, GraphGuard, GraphOutcome, NodePlan,
 };
 use kulyrax_core::adapter::graph::mapping::{ResolvedRecord, canonical_edge_key};
-use kulyrax_core::adapter::graph::runtime::GraphRuntimeBuilder;
+use kulyrax_core::adapter::graph::runtime::{GraphProjection, GraphRuntimeBuilder};
 use kulyrax_core::adapter::{AdapterError, AdapterResult, Prepared, SkipReason, StorageAdapter};
 use kulyrax_core::event::Event;
 use kulyrax_core::execution::stages::{Stage, timed};
@@ -195,6 +202,59 @@ pub struct Neo4jAdapter {
     migration_policy: MigrationPolicy,
     /// Set by `prepare` once the guard uniqueness constraint exists.
     prepared: Prepared,
+    /// The open batch's transaction, from `begin_batch` to `commit_batch` /
+    /// `rollback_batch`.
+    batch: Mutex<Option<Txn>>,
+}
+
+fn poisoned() -> AdapterError {
+    AdapterError::WriteFailed("Neo4j batch lock poisoned by an earlier panic".to_string())
+}
+
+/// Project one event's record through `backend`.
+fn project(
+    backend: &mut Neo4jBackend<'_>,
+    projection: &GraphProjection,
+    event: &Event,
+) -> Result<GraphOutcome, GraphError> {
+    match &projection.record {
+        ResolvedRecord::Node {
+            label,
+            node_id,
+            properties,
+        } => {
+            let plan = NodePlan {
+                label: label.clone(),
+                node_id: node_id.clone(),
+                properties: properties.clone(),
+                on_existing: projection.on_existing,
+                operation: projection.operation,
+                permanent: projection.permanent,
+                facet: projection.facet.clone(),
+            };
+            exec::project_node(backend, &plan, event)
+        }
+        ResolvedRecord::Edge {
+            edge_type,
+            from,
+            to,
+            discriminator,
+            properties,
+        } => {
+            let key = canonical_edge_key(edge_type, from, to, discriminator.as_deref());
+            let plan = EdgePlan {
+                edge_type: edge_type.clone(),
+                from: from.clone(),
+                to: to.clone(),
+                key,
+                properties: properties.clone(),
+                on_existing: projection.on_existing,
+                operation: projection.operation,
+                permanent: projection.permanent,
+            };
+            exec::project_edge(backend, &plan, event)
+        }
+    }
 }
 
 impl Neo4jAdapter {
@@ -233,7 +293,15 @@ impl Neo4jAdapter {
             upcasters,
             migration_policy,
             prepared: Prepared::default(),
+            batch: Mutex::new(None),
         }
+    }
+
+    fn connection(&self) -> Result<(&Runtime, &Graph), AdapterError> {
+        self.conn
+            .as_ref()
+            .map(|(rt, graph)| (rt, graph))
+            .map_err(|e| AdapterError::WriteFailed(e.clone()))
     }
 
     fn failure(&self, error: AdapterError) -> AdapterResult {
@@ -266,6 +334,41 @@ impl StorageAdapter for Neo4jAdapter {
         self.prepared
             .prepare(|| timed(Stage::Schema, || self.ensure_constraint(rt, graph)))
             .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+    }
+
+    fn begin_batch(&self, _events: &[&Event]) -> Result<(), AdapterError> {
+        self.prepared.require().map_err(AdapterError::WriteFailed)?;
+        let mut batch = self.batch.lock().map_err(|_| poisoned())?;
+        if batch.is_some() {
+            return Err(AdapterError::WriteFailed(
+                "a batch is already open on this adapter".to_string(),
+            ));
+        }
+        let (rt, graph) = self.connection()?;
+        let txn = rt
+            .block_on(graph.start_txn())
+            .map_err(|e| AdapterError::WriteFailed(e.to_string()))?;
+        *batch = Some(txn);
+        Ok(())
+    }
+
+    fn commit_batch(&self) -> Result<(), AdapterError> {
+        let mut batch = self.batch.lock().map_err(|_| poisoned())?;
+        let Some(txn) = batch.take() else {
+            return Ok(());
+        };
+        let (rt, _) = self.connection()?;
+        timed(Stage::Commit, || rt.block_on(txn.commit()))
+            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+    }
+
+    fn rollback_batch(&self) {
+        let Ok(mut batch) = self.batch.lock() else {
+            return;
+        };
+        if let (Some(txn), Ok((rt, _))) = (batch.take(), self.connection()) {
+            let _ = rt.block_on(txn.rollback());
+        }
     }
 
     fn handle(&self, event: &Event) -> AdapterResult {
@@ -308,70 +411,16 @@ impl StorageAdapter for Neo4jAdapter {
         let source_version = projection.source_version;
         let projected_version = projection.projected_version;
 
-        let mut attempts = 0;
-        let result = loop {
-            attempts += 1;
-            let attempt: Result<GraphOutcome, GraphError> = (|| {
-                let mut txn = rt.block_on(graph.start_txn()).map_err(neo_err)?;
-                let outcome = {
-                    let mut backend = Neo4jBackend { rt, txn: &mut txn };
-                    match &projection.record {
-                        ResolvedRecord::Node {
-                            label,
-                            node_id,
-                            properties,
-                        } => {
-                            let plan = NodePlan {
-                                label: label.clone(),
-                                node_id: node_id.clone(),
-                                properties: properties.clone(),
-                                on_existing: projection.on_existing,
-                                operation: projection.operation,
-                                permanent: projection.permanent,
-                                facet: projection.facet.clone(),
-                            };
-                            exec::project_node(&mut backend, &plan, event)
-                        }
-                        ResolvedRecord::Edge {
-                            edge_type,
-                            from,
-                            to,
-                            discriminator,
-                            properties,
-                        } => {
-                            let key =
-                                canonical_edge_key(edge_type, from, to, discriminator.as_deref());
-                            let plan = EdgePlan {
-                                edge_type: edge_type.clone(),
-                                from: from.clone(),
-                                to: to.clone(),
-                                key,
-                                properties: properties.clone(),
-                                on_existing: projection.on_existing,
-                                operation: projection.operation,
-                                permanent: projection.permanent,
-                            };
-                            exec::project_edge(&mut backend, &plan, event)
-                        }
-                    }
-                };
-                match outcome {
-                    Ok(o) => {
-                        timed(Stage::Commit, || rt.block_on(txn.commit())).map_err(neo_err)?;
-                        Ok(o)
-                    }
-                    Err(e) => {
-                        let _ = rt.block_on(txn.rollback());
-                        Err(e)
-                    }
-                }
-            })();
-
-            match attempt {
-                Err(GraphError::WriteConflict) if attempts < MAX_ATTEMPTS => continue,
-                other => break other,
-            }
+        let mut batch = match self.batch.lock() {
+            Ok(b) => b,
+            Err(_) => return self.failure(poisoned()),
         };
+        let result = match batch.as_mut() {
+            // Inside a batch: its transaction, no retry (see the module docs).
+            Some(txn) => project(&mut Neo4jBackend { rt, txn }, &projection, event),
+            None => self.project_alone(rt, graph, &projection, event),
+        };
+        drop(batch);
 
         match result {
             Ok(GraphOutcome::Created) => AdapterResult::created_versioned(
@@ -403,6 +452,41 @@ impl StorageAdapter for Neo4jAdapter {
                 "neo4j write conflict: exceeded {MAX_ATTEMPTS} attempts against a contended entity"
             ))),
             Err(e) => self.failure(AdapterError::WriteFailed(e.to_string())),
+        }
+    }
+}
+
+impl Neo4jAdapter {
+    /// One event in a transaction of its own, retried on a conflict.
+    fn project_alone(
+        &self,
+        rt: &Runtime,
+        graph: &Graph,
+        projection: &GraphProjection,
+        event: &Event,
+    ) -> Result<GraphOutcome, GraphError> {
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            let attempt: Result<GraphOutcome, GraphError> = (|| {
+                let mut txn = rt.block_on(graph.start_txn()).map_err(neo_err)?;
+                let outcome = project(&mut Neo4jBackend { rt, txn: &mut txn }, projection, event);
+                match outcome {
+                    Ok(o) => {
+                        timed(Stage::Commit, || rt.block_on(txn.commit())).map_err(neo_err)?;
+                        Ok(o)
+                    }
+                    Err(e) => {
+                        let _ = rt.block_on(txn.rollback());
+                        Err(e)
+                    }
+                }
+            })();
+
+            match attempt {
+                Err(GraphError::WriteConflict) if attempts < MAX_ATTEMPTS => continue,
+                other => return other,
+            }
         }
     }
 }

@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # Phase 4: batch the remaining networked backends
@@ -25,10 +25,12 @@ graph events → Postgres-outbox source. No benchmarking for now.
   query per collection), each entity's writes collapsed to one document
   operation and one guard write; same equivalence; a concurrent writer fails
   the commit, nothing of the batch lands.
-- [ ] Neo4j: one transaction per batch, same equivalence.
-- [ ] Each backend's test suite passes against a real server (Docker), and CI's
-  service jobs cover the new tests.
-- [ ] Gates green before every push.
+- [x] Neo4j: one transaction per batch (every event's unchanged Cypher,
+  compare-and-set included, runs in it), same equivalence.
+- [x] Each backend's test suite passes against a real server (Docker), and CI's
+  service jobs cover the new tests (MySQL runs every test file; Redis, MongoDB,
+  Neo4j run the files the new tests are in; Elasticsearch has a new job).
+- [x] Gates green before every push.
 
 ## Constraints and assumptions
 
@@ -61,8 +63,19 @@ graph events → Postgres-outbox source. No benchmarking for now.
 | First reruns | same, against the same server | 4–6 of 8 failed, existing tests included: namespaces `t0`, `t1`, … repeat per process, so a rerun met the last run's guards. Namespaces now carry the process id, as the Elasticsearch tests' indexes do |
 | MongoDB suite on mongo:7, single-node replica set (Docker) | `KULYRAX_MONGO_URL='mongodb://localhost:27017/?directConnection=true' KULYRAX_MONGO_DB=kulyrax_ci cargo test -p kulyrax-adapter-mongodb`, ×3 | 15 passed (4 unit, 11 integration), 3 of 3 runs: batch = one at a time over 34 events (facet onto a stored document keeps its fields; one commit; nothing visible before it), rollback leaves nothing, a concurrent write fails the commit and the fallback applies on top. Collections now carry the process id, as for Redis |
 | First run | same | the equivalence held; my own expectation was wrong: a facet after a delete is skipped by `decide()`, it does not re-create the entity. Fixed the assertion |
+| Neo4j suite on neo4j:5 (Docker), same server each run | `KULYRAX_NEO4J_URI=bolt://localhost:7687 cargo test -p kulyrax-adapter-neo4j`, ×3 | 15 passed (4 unit, 11 integration), 3 of 3 runs: batch = one at a time over 30 events (node updates, an edge, a delete cascading to it, an edge to the tombstoned node, a hot node), one commit, nothing visible before it; rollback leaves no node, edge or guard |
+| First reruns | same | the batch test and `neo4j_detach_delete` failed on the second run: labels `T0`, `T1`, … repeat per process, and node ids repeat across runs. Edges match endpoints by id and tombstones by id across labels, so an earlier run's nodes and `center` tombstone leaked in. Labels now carry the process id, node ids the label |
 
 ## Risks and open questions
+
+- Neo4j, pre-existing: an edge's endpoints are `MERGE (a {id: …})` and
+  `node_is_tombstoned` checks guards by node id, both across every label. Two
+  node labels sharing an id interfere (an edge can attach to the other label's
+  node, or be skipped by its tombstone). Not changed here; worth its own fix.
+- Batches hold their transaction, and with it row / guard locks, for the whole
+  batch (SQL, MongoDB, Neo4j). A second writer on the same entities waits
+  longer than with per-event commits. Same trade-off as SQLite and Postgres
+  since v0.10.
 
 - Elasticsearch, pre-existing: a GET on an index whose shards are still
   starting (just auto-created by another writer) returns 503, which the
@@ -76,4 +89,8 @@ graph events → Postgres-outbox source. No benchmarking for now.
 
 ## Outcome
 
-In progress.
+Completed. Every networked backend now commits once per batch: MySQL (one
+transaction), Elasticsearch (one `_mget`, one `_bulk`), Redis (one
+`MULTI`/`EXEC`), MongoDB (one transaction), Neo4j (one transaction). Each was
+checked against one event at a time on a real server. Throughput was not
+measured (owner: no benchmarking for now).

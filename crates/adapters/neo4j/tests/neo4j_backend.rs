@@ -58,7 +58,13 @@ static LABEL_SEQ: AtomicU32 = AtomicU32::new(0);
 /// database stays isolated (the Neo4j analog of `pg_backend.rs`'s
 /// `fresh_table`).
 fn fresh_label() -> String {
-    format!("T{}", LABEL_SEQ.fetch_add(1, Ordering::Relaxed))
+    // The process id keeps a rerun against the same server off an earlier
+    // run's guards.
+    format!(
+        "T{}_{}",
+        std::process::id(),
+        LABEL_SEQ.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 /// A throwaway tokio runtime for direct verification queries — the same
@@ -268,15 +274,19 @@ fn neo4j_detach_delete() -> R {
     );
     let a = neo4j_adapter(&uri, m);
 
-    a.handle(&ev("N", 1, serde_json::json!({ "id": "center" })));
-    a.handle(&ev("N", 2, serde_json::json!({ "id": "leaf1" })));
-    a.handle(&ev("N", 3, serde_json::json!({ "id": "leaf2" })));
-    a.handle(&ev("N", 4, serde_json::json!({ "id": "leaf3" })));
+    // Ids unique to this run: edges match their endpoints by id, and a
+    // node's tombstone by id, across labels, so an earlier run's `center`
+    // tombstone would block these edges.
+    let id = |name: &str| format!("{label}{name}");
+    a.handle(&ev("N", 1, serde_json::json!({ "id": id("center") })));
+    a.handle(&ev("N", 2, serde_json::json!({ "id": id("leaf1") })));
+    a.handle(&ev("N", 3, serde_json::json!({ "id": id("leaf2") })));
+    a.handle(&ev("N", 4, serde_json::json!({ "id": id("leaf3") })));
     for (seq, leaf, d) in [(5u64, "leaf1", "1"), (6, "leaf2", "2"), (7, "leaf3", "3")] {
         let r = a.handle(&ev(
             "E",
             seq,
-            serde_json::json!({ "from": "center", "to": leaf, "d": d }),
+            serde_json::json!({ "from": id("center"), "to": id(leaf), "d": d }),
         ));
         assert!(
             !matches!(r.outcome, AdapterOutcome::Failed(_)),
@@ -299,7 +309,7 @@ fn neo4j_detach_delete() -> R {
         "3 edges, matched from both directions"
     );
 
-    let del = a.handle(&ev("ND", 8, serde_json::json!({ "id": "center" })));
+    let del = a.handle(&ev("ND", 8, serde_json::json!({ "id": id("center") })));
     assert!(
         matches!(del.outcome, AdapterOutcome::Deleted),
         "{:?}",
@@ -309,7 +319,10 @@ fn neo4j_detach_delete() -> R {
     let node = query_one_row(
         &rt,
         &graph,
-        neo4rs::Query::new(format!("MATCH (n:`{label}` {{id: 'center'}}) RETURN n")),
+        neo4rs::Query::new(format!(
+            "MATCH (n:`{label}` {{id: '{}'}}) RETURN n",
+            id("center")
+        )),
     );
     assert!(node.is_none(), "center node must be gone");
 
@@ -595,5 +608,179 @@ fn neo4j_prepare_twice_is_idempotent() -> R {
     )
     .expect("count query must return a row");
     assert_eq!(row.get::<i64>("c")?, 1);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// One transaction per batch
+// ---------------------------------------------------------------------------
+
+/// Node upsert, node delete and edge mappings on a fresh label and edge type.
+fn batch_mappings(label: &str, etype: &str) -> HashMap<String, GraphMapping> {
+    HashMap::from([
+        (
+            "N".to_string(),
+            graph_mapping(&format!(
+                "kind: node\nevent: N\nlabel: {label}\nversion: 1\nkey: payload.id\non_existing: replace\nproperties:\n  name: payload.name\n"
+            )),
+        ),
+        (
+            "ND".to_string(),
+            graph_mapping(&format!(
+                "kind: node\nevent: ND\nlabel: {label}\nversion: 1\nkey: payload.id\noperation: delete\n"
+            )),
+        ),
+        (
+            "E".to_string(),
+            graph_mapping(&format!(
+                "kind: edge\nevent: E\nedge_type: {etype}\nversion: 1\nfrom: payload.from\nto: payload.to\non_existing: replace\nproperties:\n  weight: payload.weight\n"
+            )),
+        ),
+    ])
+}
+
+/// Node writes, an edge, a delete that cascades to it, an edge to the
+/// tombstoned node, and one node written many times. Node ids start with
+/// `p`, the caller's fresh label: an edge's endpoints are matched by id
+/// across labels, so no two runs, past or present, may share ids.
+fn batch_stream(p: &str) -> Vec<Event> {
+    use serde_json::json;
+    let e = |kind: &str, seq: u64, payload: serde_json::Value| Event {
+        event_id: format!("evt-{kind}-{seq}-{}", payload),
+        ..ev(kind, seq, payload)
+    };
+    let (n1, n2, n3, hot) = (
+        format!("{p}n1"),
+        format!("{p}n2"),
+        format!("{p}n3"),
+        format!("{p}hot"),
+    );
+    let mut events = vec![
+        e("N", 1, json!({ "id": n1, "name": "a" })),
+        e("N", 2, json!({ "id": n1, "name": "b" })),
+        e("N", 3, json!({ "id": n2, "name": "two" })),
+        e("E", 4, json!({ "from": n1, "to": n2, "weight": "w4" })),
+        e("E", 2, json!({ "from": n1, "to": n2, "weight": "stale" })),
+        e("N", 1, json!({ "id": n3, "name": "three" })),
+        e("ND", 5, json!({ "id": n2 })),
+        e("E", 6, json!({ "from": n1, "to": n2, "weight": "w6" })),
+        e("E", 7, json!({ "from": n1, "to": n3, "weight": "w7" })),
+        e("N", 1, json!({ "id": n1, "name": "stale" })),
+    ];
+    for seq in 1..=20 {
+        events.push(e("N", seq, json!({ "id": hot, "name": format!("h{seq}") })));
+    }
+    events
+}
+
+/// Names of the label's nodes and weights of the edge type's edges, sorted.
+fn graph_state(
+    rt: &tokio::runtime::Runtime,
+    graph: &neo4rs::Graph,
+    label: &str,
+    etype: &str,
+) -> Result<(Vec<String>, Vec<String>), Box<dyn std::error::Error>> {
+    let collect = |q: String| -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        rt.block_on(async {
+            let mut stream = graph.execute(neo4rs::Query::new(q)).await?;
+            let mut out = Vec::new();
+            while let Some(row) = stream.next().await? {
+                out.push(row.get::<String>("v")?);
+            }
+            Ok(out)
+        })
+    };
+    Ok((
+        collect(format!("MATCH (n:`{label}`) RETURN n.name AS v ORDER BY v"))?,
+        collect(format!(
+            "MATCH ()-[r:`{etype}`]->() RETURN r.weight AS v ORDER BY v"
+        ))?,
+    ))
+}
+
+#[test]
+fn neo4j_batch_matches_one_event_at_a_time() -> R {
+    require_neo4j!(uri);
+    let (lb, eb, ls, es) = (fresh_label(), fresh_label(), fresh_label(), fresh_label());
+    let rt = verify_rt();
+    let graph = connect(&rt, &uri)?;
+
+    let batched = neo4j_adapter(&uri, batch_mappings(&lb, &eb));
+    let events = batch_stream(&lb);
+    let refs: Vec<&Event> = events.iter().collect();
+    batched.begin_batch(&refs).map_err(|e| e.to_string())?;
+    let batch_outcomes: Vec<String> = events
+        .iter()
+        .map(|e| format!("{:?}", batched.handle(e).outcome))
+        .collect();
+    assert_eq!(
+        graph_state(&rt, &graph, &lb, &eb)?,
+        (vec![], vec![]),
+        "nothing is visible before the commit"
+    );
+    stages::take();
+    batched.commit_batch().map_err(|e| e.to_string())?;
+    assert_eq!(stages::take().commit.calls, 1, "one commit for the batch");
+
+    let single = neo4j_adapter(&uri, batch_mappings(&ls, &es));
+    let single_outcomes: Vec<String> = batch_stream(&ls)
+        .iter()
+        .map(|e| format!("{:?}", single.handle(e).outcome))
+        .collect();
+
+    assert_eq!(batch_outcomes, single_outcomes);
+    assert!(
+        !batch_outcomes.iter().any(|o| o.starts_with("Failed")),
+        "{batch_outcomes:?}"
+    );
+    let state = graph_state(&rt, &graph, &lb, &eb)?;
+    assert_eq!(state, graph_state(&rt, &graph, &ls, &es)?);
+    assert_eq!(
+        state,
+        (
+            vec!["b".to_string(), "h20".to_string(), "three".to_string()],
+            vec!["w7".to_string()]
+        )
+    );
+    Ok(())
+}
+
+#[test]
+fn neo4j_batch_rollback_leaves_nothing() -> R {
+    require_neo4j!(uri);
+    let (label, etype) = (fresh_label(), fresh_label());
+    let rt = verify_rt();
+    let graph = connect(&rt, &uri)?;
+    let a = neo4j_adapter(&uri, batch_mappings(&label, &etype));
+    let events = batch_stream(&label);
+    let refs: Vec<&Event> = events.iter().collect();
+
+    a.begin_batch(&refs).map_err(|e| e.to_string())?;
+    for e in &events {
+        assert!(a.handle(e).is_success());
+    }
+    a.rollback_batch();
+    assert_eq!(
+        graph_state(&rt, &graph, &label, &etype)?,
+        (vec![], vec![]),
+        "nothing written"
+    );
+    let guards = query_one_row(
+        &rt,
+        &graph,
+        neo4rs::Query::new(format!(
+            "MATCH (g:__ConduitGuard) WHERE g.target IN ['{label}', '{etype}'] RETURN count(g) AS c"
+        )),
+    )
+    .expect("count query must return a row");
+    assert_eq!(guards.get::<i64>("c")?, 0, "no guards written");
+
+    // Outside a batch, each event commits on its own again.
+    let r = a.handle(&events[0]);
+    assert!(
+        matches!(r.outcome, AdapterOutcome::Created),
+        "{:?}",
+        r.outcome
+    );
     Ok(())
 }
