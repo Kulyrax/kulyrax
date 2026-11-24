@@ -18,7 +18,9 @@ graph events → Postgres-outbox source. No benchmarking for now.
 - [x] Elasticsearch: one `_mget` and one `_bulk` request per batch, same
   equivalence; a concurrent writer's change fails the commit (409) instead of
   being overwritten.
-- [ ] Redis: one round trip (pipeline / `MULTI`) per batch, same equivalence.
+- [x] Redis: guards `WATCH`ed and loaded with `MGET` at `begin_batch`, one
+  `MULTI`/`EXEC` per batch, same equivalence; a concurrent writer aborts the
+  whole batch, nothing of it lands.
 - [ ] MongoDB: one transaction / bulk write per batch, same equivalence.
 - [ ] Neo4j: one transaction per batch, same equivalence.
 - [ ] Each backend's test suite passes against a real server (Docker), and CI's
@@ -52,6 +54,8 @@ graph events → Postgres-outbox source. No benchmarking for now.
 | Elasticsearch suite on 8.15.0 (Docker, single node, 512 MB heap) | `KULYRAX_ELASTICSEARCH_URL=http://localhost:9200 cargo test -p kulyrax-adapter-elasticsearch`, ×5 | 8 passed, 5 of 5 runs: batch = one at a time (31 events, one `_mget`, one `_bulk`, nothing visible before commit), rollback sends nothing (and `_mget` reads a missing index as empty), a concurrent write fails the commit with `version_conflict` and the per-event fallback applies on top |
 | First runs | same | 4 of 8 failed, and on the **unchanged** code 3 of 5: `503` on GET and request timeouts while the tests' indexes were auto-created all at once. Fixed in the tests: each creates its index first, waiting for its shard. Also a wrong assertion of mine (`read` calls): `exec::project` times every guard read, so the `_bulk` is timed as `commit` |
 | CI | `.github/workflows/ci.yml` | new job `test (elasticsearch)`; there was none, so this suite never ran in CI |
+| Redis suite on Redis 7 (Docker), same server each run | `KULYRAX_REDIS_URL=redis://localhost:6379 cargo test -p kulyrax-adapter-redis`, ×3 | 11 passed (3 unit, 8 integration), 3 of 3 runs: batch = one at a time (31 events, one `MULTI`/`EXEC`, nothing visible before commit), rollback leaves nothing, a concurrent write aborts the batch and the fallback applies on top |
+| First reruns | same, against the same server | 4–6 of 8 failed, existing tests included: namespaces `t0`, `t1`, … repeat per process, so a rerun met the last run's guards. Namespaces now carry the process id, as the Elasticsearch tests' indexes do |
 
 ## Risks and open questions
 

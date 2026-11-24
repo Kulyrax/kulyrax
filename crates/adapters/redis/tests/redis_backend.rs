@@ -44,9 +44,15 @@ macro_rules! require_redis {
 static NS_SEQ: AtomicU32 = AtomicU32::new(0);
 
 /// A unique namespace per test invocation, so the shared keyspace stays
-/// isolated (the Redis analog of `pg_backend.rs`'s `fresh_table`).
+/// isolated (the Redis analog of `pg_backend.rs`'s `fresh_table`). The
+/// process id keeps a rerun against the same server off an earlier run's
+/// guards.
 fn fresh_namespace() -> String {
-    format!("t{}", NS_SEQ.fetch_add(1, Ordering::Relaxed))
+    format!(
+        "t{}-{}",
+        std::process::id(),
+        NS_SEQ.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 fn redis_conn(url: &str) -> Result<redis::Connection, redis::RedisError> {
@@ -331,5 +337,213 @@ fn kv_cross_backend() -> R {
         "both backends converge on the same guard sequence"
     );
     assert_eq!(file_guard["deleted"], redis_guard["deleted"]);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// One MULTI/EXEC per batch
+// ---------------------------------------------------------------------------
+
+/// Upsert, delete and facet mappings on `ns`, under event types `Up` / `Del`
+/// / `Mail`.
+fn batch_mappings(ns: &str) -> HashMap<String, KvMapping> {
+    HashMap::from([
+        (
+            "Up".to_string(),
+            kv_mapping(&format!(
+                "event: Up\nnamespace: {ns}\nversion: 1\nkey: payload.id\non_existing: replace\nvalue:\n  name: payload.name\n"
+            )),
+        ),
+        (
+            "Del".to_string(),
+            kv_mapping(&format!(
+                "event: Del\nnamespace: {ns}\nversion: 1\nkey: payload.id\noperation: delete\nvalue: {{}}\n"
+            )),
+        ),
+        (
+            "Mail".to_string(),
+            kv_mapping(&format!(
+                "event: Mail\nnamespace: {ns}\nversion: 1\nkey: payload.id\nfacet: contact\nvalue:\n  email: payload.email\n"
+            )),
+        ),
+    ])
+}
+
+/// One entity's lifecycle, a second deleted before it exists, and one written
+/// many times, all meant for one batch.
+fn batch_stream() -> Vec<Event> {
+    use serde_json::json;
+    let e = |kind: &str, seq: u64, payload: serde_json::Value| Event {
+        event_id: format!("evt-{kind}-{}-{seq}", payload["id"].as_str().unwrap_or("")),
+        ..ev(kind, seq, payload)
+    };
+    let mut events = vec![
+        e("Up", 1, json!({ "id": "u1", "name": "a" })),
+        e("Mail", 2, json!({ "id": "u1", "email": "a@x" })),
+        e("Up", 3, json!({ "id": "u1", "name": "b" })),
+        e("Del", 4, json!({ "id": "u1" })),
+        e("Mail", 5, json!({ "id": "u1", "email": "gone@x" })),
+        e("Up", 6, json!({ "id": "u1", "name": "c" })),
+        e("Mail", 7, json!({ "id": "u1", "email": "c@x" })),
+        e("Up", 3, json!({ "id": "u1", "name": "b" })),
+        e("Del", 1, json!({ "id": "u2" })),
+        e("Up", 1, json!({ "id": "u2", "name": "stale" })),
+        e("Up", 2, json!({ "id": "u2", "name": "g" })),
+    ];
+    for seq in 1..=20 {
+        events.push(e(
+            "Up",
+            seq,
+            json!({ "id": "hot", "name": format!("h{seq}") }),
+        ));
+    }
+    events
+}
+
+type KvState = Vec<(String, Option<serde_json::Value>, Option<serde_json::Value>)>;
+
+/// Value and guard of each entity the batch stream touches.
+fn ns_state(url: &str, ns: &str) -> KvState {
+    let json = |raw: Option<String>| raw.and_then(|s| serde_json::from_str(&s).ok());
+    ["hot", "u1", "u2"]
+        .iter()
+        .map(|key| {
+            (
+                key.to_string(),
+                json(redis_get_raw(url, &format!("{ns}:{key}"))),
+                json(redis_get_raw(url, &format!("__kulyrax:guard:{ns}:{key}"))),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn redis_batch_matches_one_event_at_a_time() -> R {
+    require_redis!(url);
+    let (nb, ns) = (fresh_namespace(), fresh_namespace());
+    let events = batch_stream();
+    let refs: Vec<&Event> = events.iter().collect();
+
+    let batched = redis_adapter(&url, batch_mappings(&nb));
+    batched.begin_batch(&refs).map_err(|e| e.to_string())?;
+    let batch_outcomes: Vec<String> = events
+        .iter()
+        .map(|e| format!("{:?}", batched.handle(e).outcome))
+        .collect();
+    let while_open = ns_state(&url, &nb);
+    kulyrax_core::execution::stages::take();
+    batched.commit_batch().map_err(|e| e.to_string())?;
+    let t = kulyrax_core::execution::stages::take();
+    assert_eq!(t.commit.calls, 1, "one MULTI/EXEC for the batch");
+    assert!(
+        while_open
+            .iter()
+            .all(|(_, v, g)| v.is_none() && g.is_none()),
+        "nothing is sent before the commit: {while_open:?}"
+    );
+
+    let single = redis_adapter(&url, batch_mappings(&ns));
+    let single_outcomes: Vec<String> = events
+        .iter()
+        .map(|e| format!("{:?}", single.handle(e).outcome))
+        .collect();
+
+    assert_eq!(batch_outcomes, single_outcomes);
+    assert!(
+        !batch_outcomes.iter().any(|o| o.starts_with("Failed")),
+        "{batch_outcomes:?}"
+    );
+    let state = ns_state(&url, &nb);
+    assert_eq!(state, ns_state(&url, &ns));
+    let names: Vec<Option<serde_json::Value>> = state
+        .iter()
+        .map(|(_, v, _)| v.as_ref().map(|v| v["name"].clone()))
+        .collect();
+    assert_eq!(
+        names,
+        vec![Some("h20".into()), Some("c".into()), Some("g".into())]
+    );
+    Ok(())
+}
+
+#[test]
+fn redis_batch_rollback_leaves_nothing() -> R {
+    require_redis!(url);
+    let ns = fresh_namespace();
+    let a = redis_adapter(&url, batch_mappings(&ns));
+    let events = batch_stream();
+    let refs: Vec<&Event> = events.iter().collect();
+
+    a.begin_batch(&refs).map_err(|e| e.to_string())?;
+    for e in &events {
+        assert!(a.handle(e).is_success());
+    }
+    a.rollback_batch();
+    assert!(
+        ns_state(&url, &ns)
+            .iter()
+            .all(|(_, v, g)| v.is_none() && g.is_none()),
+        "nothing written"
+    );
+
+    // Outside a batch, each event is written on its own again.
+    let r = a.handle(&events[0]);
+    assert!(
+        matches!(r.outcome, AdapterOutcome::Created),
+        "{:?}",
+        r.outcome
+    );
+    Ok(())
+}
+
+/// Another writer changes an entity after the batch read it: `EXEC` aborts,
+/// nothing of the batch lands, and the per-event fallback applies it on top.
+#[test]
+fn redis_batch_conflict_aborts_the_whole_batch() -> R {
+    require_redis!(url);
+    use serde_json::json;
+    let ns = fresh_namespace();
+    let a = redis_adapter(&url, batch_mappings(&ns));
+    let other = redis_adapter(&url, batch_mappings(&ns));
+    assert!(
+        other
+            .handle(&ev("Up", 1, json!({ "id": "u1", "name": "seed" })))
+            .is_success()
+    );
+
+    let events = vec![
+        ev("Up", 5, json!({ "id": "u1", "name": "batch" })),
+        ev("Up", 1, json!({ "id": "new", "name": "n" })),
+    ];
+    let refs: Vec<&Event> = events.iter().collect();
+    a.begin_batch(&refs).map_err(|e| e.to_string())?;
+    for e in &events {
+        assert!(a.handle(e).is_success());
+    }
+    assert!(
+        other
+            .handle(&ev("Up", 3, json!({ "id": "u1", "name": "other" })))
+            .is_success()
+    );
+    let err = a
+        .commit_batch()
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default();
+    assert!(err.contains("another writer changed a guard"), "{err}");
+    assert_eq!(
+        redis_get_raw(&url, &format!("{ns}:new")),
+        None,
+        "nothing of the batch lands"
+    );
+
+    let outcomes: Vec<String> = events
+        .iter()
+        .map(|e| format!("{:?}", a.handle(e).outcome))
+        .collect();
+    assert_eq!(outcomes, vec!["Updated", "Created"]);
+    let u1: serde_json::Value =
+        serde_json::from_str(&redis_get_raw(&url, &format!("{ns}:u1")).unwrap_or_default())?;
+    assert_eq!(u1["name"], "batch");
     Ok(())
 }
