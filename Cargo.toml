@@ -12,6 +12,7 @@ members = [
     "crates/adapters/mongodb",
     "crates/adapters/neo4j",
     "crates/backends",
+    "crates/sources/postgres",
 ]
 # examples/ are standalone Cargo projects (each depends on the engine via a
 # path dependency, the way a real consumer would depend on a published
@@ -38,3 +39,4 @@ kulyrax-adapter-redis = { path = "crates/adapters/redis", version = "0.10.0" }
 kulyrax-adapter-mongodb = { path = "crates/adapters/mongodb", version = "0.10.0" }
 kulyrax-adapter-neo4j = { path = "crates/adapters/neo4j", version = "0.10.0" }
 kulyrax-backends = { path = "crates/backends", version = "0.10.0" }
+kulyrax-source-postgres = { path = "crates/sources/postgres", version = "0.10.0" }

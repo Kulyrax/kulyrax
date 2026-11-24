@@ -1753,6 +1753,7 @@ dependencies = [
  "kulyrax-adapter-postgres",
  "kulyrax-adapter-redis",
  "kulyrax-core",
+ "kulyrax-source-postgres",
  "serde_yaml",
 ]
 
@@ -1815,6 +1816,19 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tonic-build",
+]
+
+[[package]]
+name = "kulyrax-source-postgres"
+version = "0.10.0"
+dependencies = [
+ "kulyrax-core",
+ "postgres",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
 ]
 
 [[package]]

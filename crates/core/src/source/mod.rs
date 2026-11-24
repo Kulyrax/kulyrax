@@ -49,6 +49,9 @@ pub enum SourceError {
     /// One or more adapters failed `StorageAdapter::prepare`; nothing was
     /// ingested.
     Prepare(Vec<crate::adapter::PrepareFailure>),
+    /// The source cannot be read: it could not start (a refused start-up
+    /// check, a held lock, an unknown `type:`) or lost its connection.
+    Unavailable(String),
 }
 
 impl std::fmt::Display for SourceError {
@@ -57,6 +60,7 @@ impl std::fmt::Display for SourceError {
             SourceError::Io(e) => write!(f, "{}", e),
             SourceError::Parse(s) => write!(f, "source parse error: {}", s),
             SourceError::Checkpoint(s) => write!(f, "checkpoint error: {}", s),
+            SourceError::Unavailable(s) => write!(f, "source unavailable: {}", s),
             SourceError::Prepare(failures) => {
                 write!(f, "adapters failed to prepare:")?;
                 for failure in failures {
@@ -129,5 +133,41 @@ pub trait EventSource {
         _dlq_events: u32,
     ) -> Result<(), SourceError> {
         self.commit(position)
+    }
+
+    /// Told each event's outcome once its batch has resolved, before the
+    /// batch is committed. Default: nothing.
+    fn on_resolved(&mut self, _event: &SourcedEvent, _report: &crate::execution::ExecutionReport) {}
+
+    /// Extra `name: value` lines for `kulyrax sources`. Default: none.
+    fn details(&self) -> Vec<(String, String)> {
+        Vec::new()
+    }
+}
+
+/// Take the exclusive OS lock that makes a source the only reader of its
+/// checkpoint: `<state_dir>/<source_id>.lock`, held while the returned file
+/// is open, released when the process exits however it exits. A second
+/// process on the same source id and state directory gets
+/// [`SourceError::Unavailable`] naming the lock.
+pub fn lock_source(
+    state_dir: &std::path::Path,
+    source_id: &str,
+) -> Result<std::fs::File, SourceError> {
+    std::fs::create_dir_all(state_dir)?;
+    let path = state_dir.join(format!("{source_id}.lock"));
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => Err(SourceError::Unavailable(format!(
+            "source {source_id:?} is in use by another process (lock {} is held); only one \
+             Kulyrax process may read a source",
+            path.display()
+        ))),
+        Err(std::fs::TryLockError::Error(e)) => Err(SourceError::Io(e)),
     }
 }

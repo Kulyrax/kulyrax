@@ -19,9 +19,10 @@ that's separated from a possible future hosted/managed product.
 
 ## Open work
 
-- **Native broker / outbox sources** — Kafka, Kinesis, and Postgres-outbox
-  `EventSource` implementations. Stays open source under the engine/product split —
-  built when there's real demand, not on a fixed schedule.
+- **Native broker sources** — Kafka and Kinesis `EventSource` implementations. Stays
+  open source under the engine/product split — built when there's real demand, not on
+  a fixed schedule. (The Postgres outbox source shipped in v0.12:
+  `kulyrax-source-postgres`, `type: postgres_outbox`.)
 - **Multi-node coordination** — not designed yet; would stay open source if built.
 - **The hosted product** — a managed offering (control-plane UI, backups,
   provisioning) running the open-source engine as a service. A separate build, not

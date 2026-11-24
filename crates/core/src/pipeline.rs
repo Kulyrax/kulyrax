@@ -25,6 +25,7 @@ use crate::runtime::config::{ConfigError, KulyraxConfig, SourceConfig};
 use crate::runtime::dry_run::DryRunReport;
 use crate::runtime::engine::KulyraxRuntime;
 use crate::runtime::factory::AdapterBuildFailure;
+use crate::runtime::registry::{SourceBuildContext, SourceRegistry};
 use crate::runtime::reload::{FileReloader, ReloadOutcome};
 use crate::runtime::{
     ValidationReport, adapter_metadata_map, dependency_depth_exceeds_recommended,
@@ -328,11 +329,20 @@ pub fn explain(
 
 /// Build the configured [`EventSource`]s, resolving `path` / `state_dir`
 /// relative to the config file's directory (same rule as the routing file).
+/// A `type:` core does not build in is resolved through `registry`; with
+/// `inspect` set (for `kulyrax sources`), such a source only reads its
+/// checkpoint (see [`SourceBuildContext::inspect`]).
 pub fn build_sources(
     config: &KulyraxConfig,
     config_path: &Path,
+    registry: &SourceRegistry,
+    inspect: bool,
 ) -> Result<Vec<Box<dyn EventSource>>, PipelineError> {
     let base = config_path.parent().unwrap_or_else(|| Path::new("."));
+    let ctx = SourceBuildContext {
+        base_dir: base.to_path_buf(),
+        inspect,
+    };
     let mut out: Vec<Box<dyn EventSource>> = Vec::new();
     for sc in &config.sources {
         let source: Box<dyn EventSource> = match sc {
@@ -346,24 +356,51 @@ pub fn build_sources(
                 base.join(&s.state_dir),
                 std::io::BufReader::new(std::io::stdin()),
             )?),
+            SourceConfig::Custom(c) => registry.build(c, &ctx)?,
         };
         out.push(source);
     }
     Ok(out)
 }
 
+/// One configured source, for `kulyrax sources`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceStatus {
+    pub id: String,
+    pub committed: Option<String>,
+    /// The source's own `name: value` lines ([`EventSource::details`]).
+    pub details: Vec<(String, String)>,
+}
+
 /// Phase 17.4: configured sources and their committed positions, for
-/// `kulyrax sources`.
-pub fn list_sources(config_path: &Path) -> Result<Vec<(String, Option<String>)>, PipelineError> {
+/// `kulyrax sources`. `register_backends` registers the source types core
+/// does not build in, as for `run`.
+pub fn list_sources(
+    config_path: &Path,
+    register_backends: impl FnOnce(&mut KulyraxRuntime),
+) -> Result<Vec<SourceStatus>, PipelineError> {
     let config = load_config(config_path)?;
-    let sources = build_sources(&config, config_path)?;
+    let mut runtime = KulyraxRuntime::from_parts(
+        config,
+        HashMap::new(),
+        HashMap::new(),
+        HashMap::new(),
+        HashMap::new(),
+        HashMap::new(),
+    );
+    register_backends(&mut runtime);
+    let sources = build_sources(
+        runtime.config(),
+        config_path,
+        runtime.source_registry(),
+        true,
+    )?;
     Ok(sources
         .iter()
-        .map(|s| {
-            (
-                s.id().to_string(),
-                s.committed_position().map(|p| p.as_str().to_string()),
-            )
+        .map(|s| SourceStatus {
+            id: s.id().to_string(),
+            committed: s.committed_position().map(|p| p.as_str().to_string()),
+            details: s.details(),
         })
         .collect())
 }
@@ -386,7 +423,12 @@ pub fn run_source_loop(
         KulyraxRuntime::load_with_backends(config_path, mappings_dir, register_backends.clone())?;
     runtime.build_adapters()?;
     runtime.prepare_adapters()?;
-    let sources = build_sources(runtime.config(), config_path)?;
+    let sources = build_sources(
+        runtime.config(),
+        config_path,
+        runtime.source_registry(),
+        false,
+    )?;
     if sources.is_empty() {
         return Err(PipelineError::Mapping(
             "no sources configured — add `sources:` to the config, or use `run --event <file>`"

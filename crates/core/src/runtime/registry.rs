@@ -7,6 +7,7 @@
 //! process cannot see each other's registrations.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::adapter::StorageAdapter;
@@ -14,8 +15,82 @@ use crate::adapter::document::mapping::DocumentMapping;
 use crate::adapter::graph::mapping::GraphMapping;
 use crate::adapter::keyvalue::mapping::KvMapping;
 use crate::adapter::sql::mapping::SqlMapping;
-use crate::runtime::config::{ConfigError, CustomAdapterConfig, MigrationPolicy};
+use crate::runtime::config::{
+    ConfigError, CustomAdapterConfig, CustomSourceConfig, MigrationPolicy,
+};
+use crate::source::{EventSource, SourceError};
 use crate::upcast::UpcasterRegistry;
+
+/// What a source factory needs beyond its own config entry.
+pub struct SourceBuildContext {
+    /// The config file's directory: relative paths in the entry resolve
+    /// against it, as for the built-in sources.
+    pub base_dir: PathBuf,
+    /// Set for `kulyrax sources`, which only shows each source's committed
+    /// position: read the checkpoint, but take no lock and open no
+    /// connection, so a running reader is not disturbed.
+    pub inspect: bool,
+}
+
+pub type SourceFactory = Arc<
+    dyn Fn(&CustomSourceConfig, &SourceBuildContext) -> Result<Box<dyn EventSource>, SourceError>
+        + Send
+        + Sync,
+>;
+
+/// Source factories by `type:`, the source-side twin of [`AdapterRegistry`].
+#[derive(Default, Clone)]
+pub struct SourceRegistry {
+    factories: HashMap<String, SourceFactory>,
+}
+
+impl SourceRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Registering the same `type_name` twice replaces the earlier factory.
+    pub fn register(
+        &mut self,
+        type_name: &str,
+        factory: impl Fn(
+            &CustomSourceConfig,
+            &SourceBuildContext,
+        ) -> Result<Box<dyn EventSource>, SourceError>
+        + Send
+        + Sync
+        + 'static,
+    ) {
+        self.factories
+            .insert(type_name.to_string(), Arc::new(factory));
+    }
+
+    /// Build `entry`, or say that nothing is registered for its type.
+    pub fn build(
+        &self,
+        entry: &CustomSourceConfig,
+        ctx: &SourceBuildContext,
+    ) -> Result<Box<dyn EventSource>, SourceError> {
+        match self.factories.get(&entry.type_name) {
+            Some(factory) => factory(entry, ctx),
+            None => {
+                let mut known: Vec<&str> = self.factories.keys().map(String::as_str).collect();
+                known.sort_unstable();
+                Err(SourceError::Unavailable(format!(
+                    "source {:?}: no source type {:?} is registered (built in: directory, \
+                     stdin; registered: {})",
+                    entry.id,
+                    entry.type_name,
+                    if known.is_empty() {
+                        "none".to_string()
+                    } else {
+                        known.join(", ")
+                    }
+                )))
+            }
+        }
+    }
+}
 
 /// Every loaded projection mapping, one table per storage kind.
 #[derive(Debug, Clone, Default)]

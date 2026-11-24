@@ -87,6 +87,32 @@ transactional Postgres backend), `examples/embedded/` (call `kulyrax-core` as a 
 no CLI), `examples/grpc-producer/` (stream events into a long-lived `kulyrax ingest`
 service instead of reading a file).
 
+## Reading a Postgres outbox
+
+If your service writes its events to an outbox table in its own Postgres database
+(13 or newer), Kulyrax can read it directly:
+
+```yaml
+sources:
+  - type: postgres_outbox
+    id: orders-outbox
+    state_dir: ./.kulyrax/state      # Kulyrax's checkpoint and lock, not your database
+    config:
+      url: ${OUTBOX_DATABASE_URL}
+      table: public.outbox
+      sequence_column: id            # a serial / identity column: the order and each event's sequence
+      # columns: { event_id, event_type, payload, metadata, version } default to those names
+```
+
+Kulyrax only reads the table (a role with `SELECT` is enough) and never deletes or
+updates a row: cleaning the outbox stays your job. At start-up it checks the table,
+the columns, and that the sequence behind `sequence_column` has `INCREMENT 1` and
+`CACHE 1`. A missing value (an insert still in flight, or rolled back) holds delivery
+until no transaction that could still insert it is running, then is skipped; if it
+commits after all within `watch_retention_ms` (default one hour), it is delivered
+late, logged, and counted in `kulyrax sources`. One process reads a source at a time.
+Details: [decision record](docs/ledger/decisions/2026-11-24-postgres-outbox-source.md).
+
 ## Changing a running project
 
 Config, routing and mappings are read when a process starts. A long-running

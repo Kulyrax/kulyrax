@@ -454,6 +454,9 @@ fn run_loop(
             });
 
             if committed {
+                for (se, event_report) in sorted.iter().zip(reports_buf.iter()) {
+                    source.on_resolved(se, event_report);
+                }
                 timed(Stage::Checkpoint, || {
                     source.commit_with_dlq_count(position_to.clone(), dlq_count as u32)
                 })?;

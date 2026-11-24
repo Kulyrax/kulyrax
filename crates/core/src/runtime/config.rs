@@ -386,13 +386,82 @@ pub fn expand_env(s: &str) -> String {
 // ------------------------------------------------------------
 
 /// A configured event source — the input-side mirror of [`AdapterConfig`].
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SourceConfig {
     /// Watches a directory for event files (`*.json` / `*.ndjson` / `*.jsonl`).
     Directory(DirectorySourceConfig),
     /// NDJSON on standard input, one event per line.
     Stdin(StdinSourceConfig),
+    /// An unrecognized `type:`, resolved by a factory registered on the
+    /// runtime ([`crate::runtime::KulyraxRuntime::register_source_factory`])
+    /// when sources are built.
+    Custom(CustomSourceConfig),
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum KnownSourceConfig {
+    Directory(DirectorySourceConfig),
+    Stdin(StdinSourceConfig),
+}
+
+const KNOWN_SOURCE_TYPES: &[&str] = &["directory", "stdin"];
+
+/// A source `type:` this crate doesn't build in, carried opaquely until a
+/// registered factory resolves it; `raw` is the whole list entry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CustomSourceConfig {
+    pub type_name: String,
+    pub id: String,
+    /// Where the source keeps its checkpoint, relative to the config file's
+    /// directory, if it has one.
+    pub state_dir: Option<String>,
+    pub raw: serde_yaml::Value,
+}
+
+impl CustomSourceConfig {
+    /// Deserialize the entry's source-specific `config:` block.
+    pub fn source_config<C: serde::de::DeserializeOwned>(&self) -> Result<C, ConfigError> {
+        let (type_name, id) = (&self.type_name, &self.id);
+        let block = self.raw.get("config").cloned().ok_or_else(|| {
+            ConfigError::FactoryConfigInvalid(format!("{type_name} source {id:?} missing `config`"))
+        })?;
+        serde_yaml::from_value(block).map_err(|e| {
+            ConfigError::FactoryConfigInvalid(format!(
+                "{type_name} source {id:?}: invalid `config`: {e}"
+            ))
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for SourceConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+
+        let value = serde_yaml::Value::deserialize(deserializer)?;
+        let type_name = value
+            .get("type")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| D::Error::custom("source config missing `type` field"))?
+            .to_string();
+        if KNOWN_SOURCE_TYPES.contains(&type_name.as_str()) {
+            return match KnownSourceConfig::deserialize(value).map_err(D::Error::custom)? {
+                KnownSourceConfig::Directory(c) => Ok(SourceConfig::Directory(c)),
+                KnownSourceConfig::Stdin(c) => Ok(SourceConfig::Stdin(c)),
+            };
+        }
+        let field = |name: &str| value.get(name).and_then(|v| v.as_str()).map(str::to_string);
+        let id = field("id").ok_or_else(|| D::Error::custom("source config missing `id` field"))?;
+        Ok(SourceConfig::Custom(CustomSourceConfig {
+            type_name,
+            id,
+            state_dir: field("state_dir"),
+            raw: value,
+        }))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -415,6 +484,7 @@ impl SourceConfig {
         match self {
             SourceConfig::Directory(c) => &c.id,
             SourceConfig::Stdin(c) => &c.id,
+            SourceConfig::Custom(c) => &c.id,
         }
     }
 }

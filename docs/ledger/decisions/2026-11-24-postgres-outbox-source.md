@@ -1,10 +1,10 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Postgres outbox source: poll a user-named sequence column, hold gaps, read only
 
-Task: 2026-11-24-postgres-outbox-source (written once this is approved)
+Task: [2026-11-24-postgres-outbox-source](../tasks/2026-11-24-postgres-outbox-source.md)
 
 ## Context
 
@@ -19,27 +19,29 @@ user names, never a timestamp or the database clock; Kulyrax's own checkpoint, n
 the producer's table; Kulyrax never deletes or updates outbox rows. A new crate,
 `crates/sources/postgres` (`kulyrax-source-postgres`), keeps the driver and tokio
 out of `kulyrax-core`. `decide()`, dispatch and the dependency graph unchanged.
+Approved by the owner on 2026-11-24 with six changes, all folded in below.
 
 The hard part is the **gap**. A `bigserial` id is allocated when the row is
 inserted, but the row becomes visible only when its transaction commits. Reading
 `WHERE seq > last ORDER BY seq`, a reader can see id 12 while id 11 is still
 uncommitted, advance past 11, and never deliver it. A gap is either such an
-in-flight row (it will appear) or a rolled-back insert, a failed `ON CONFLICT`, or a
-sequence cache jump (it never will). The reader cannot tell which by looking.
+in-flight row (it will appear) or a rolled-back insert or failed `ON CONFLICT` (it
+never will).
 
 ## Options considered
 
-1. **Poll by the sequence column; hold a gap until it fills or a timeout passes,
-   then skip it and keep watching for it.** Exact while gaps fill within the
-   timeout; a row that commits later still arrives, late.
-2. **Poll by the writing transaction's id** (`xid8` column defaulting to
-   `pg_current_xact_id()`, read only below `pg_snapshot_xmin`). Exact with no
-   timeout, but the order then comes from the database's transaction counter
-   rather than a column the user controls, it needs a column the producer may not
-   have, and it is Postgres 13+ only. Ruled out by the ordering constraint.
-3. **Never skip a gap.** Exact, but one rolled-back insert stops the source
+1. **Poll by the sequence column; hold a gap until it fills or is provably final;
+   keep watching skipped values for a while.** Exact in the common case; a row
+   that arrives after its gap was skipped is still delivered, late.
+2. **Poll by the writing transaction's id** (an `xid8` column, read only below
+   `pg_snapshot_xmin`). Exact, but the order then comes from the database's
+   transaction counter rather than a column the user controls, and it needs a
+   column the producer may not have. Ruled out by the ordering constraint.
+3. **Skip gaps on a timeout alone.** Simple, but every rollback costs the full
+   timeout, and a slow producer transaction loses its row to the timeout.
+4. **Never skip a gap.** Exact, but one rolled-back insert stops the source
    forever.
-4. **Logical replication** (`pgoutput`, a replication slot). Push, in commit order,
+5. **Logical replication** (`pgoutput`, a replication slot). Push, commit order,
    no gaps, but needs `wal_level = logical`, a slot that pins WAL while Kulyrax is
    down, and replication privileges. Out of scope: see Revisit if.
 
@@ -57,63 +59,102 @@ sequence cache jump (it never will). The reader cannot tell which by looking.
   increase per entity; gaps are fine. A lower-sequence event delivered after a
   higher one for the same entity is skipped as stale, and under `on_existing:
   ignore` a late create is skipped.
+- Verified (Postgres docs, functions-info, "Snapshot Information Functions"): a
+  snapshot's `xmax` is one past the highest completed transaction id; every
+  transaction id at or above it was not yet completed when the snapshot was
+  taken. `xmin` is the lowest transaction id still active; every id below it is
+  committed or rolled back. Both are `xid8` (64-bit, no wraparound), Postgres 13+.
+- Inferred: a transaction inserting a row has a transaction id by the time the row
+  exists. If a gap's row was inserted by a transaction still running when the gap
+  was seen, that id is below the gap's recorded `xmax`; once the current `xmin`
+  reaches that `xmax`, that transaction has ended, and had it committed, the row
+  would be visible to the same read. So the gap is final.
 - Inferred: a global, strictly increasing column satisfies the per-entity rule, so
   it can serve as both delivery order and `Event.sequence`.
 
 ## Decision
 
-Option 1.
+Option 1. Postgres 13 or newer.
 
-**Reading.** Each `poll(max_batch)`: `SELECT … FROM <table> WHERE <sequence> >
-$after ORDER BY <sequence> LIMIT $max_batch`, plus `WHERE <sequence> = ANY($watched)`
-for skipped gaps (below). One `postgres` (sync) connection, opened at start-up,
-reopened after an error. No locks, no `FOR UPDATE`: plain reads.
+**Reading.** Each `poll(max_batch)`, in one statement (one snapshot): the rows after
+`after` in sequence order (`LIMIT max_batch`), the rows whose sequence is on the
+watch list, and `pg_snapshot_xmin(pg_current_snapshot())` /
+`pg_snapshot_xmax(pg_current_snapshot())`. One `postgres` (sync) connection,
+opened at start-up, reopened after an error. Plain reads: no locks, no `FOR UPDATE`.
 
 **Ordering.** The user names the sequence column (`sequence_column`, required): a
 `bigint` that strictly increases in insert order, typically the table's
 `bigserial` / identity key. It is both the delivery order and `Event.sequence`.
-Kulyrax never orders by a timestamp, `now()`, `xmin` or any other database clock.
+Kulyrax never orders by a timestamp, `now()`, or any other clock.
 
-**Gaps.** Rows are delivered in sequence order up to the first missing value:
-after `after`, if the next row read is `after + k` with `k > 1`, the values in
-between are a gap and nothing past it is delivered. The source notes, on its own
-monotonic clock (`Instant`, never the database's), when it first saw the gap.
-- If the missing rows appear, delivery resumes in order.
-- After `gap_timeout_ms` (default **10,000**, configurable), each still-missing value
-  is **skipped**: delivery moves past it, and the value is added to a **watch
-  list**. Every later poll also reads the watched values; one that appears (a
-  producer transaction that took longer than the timeout) is delivered then, late,
-  and leaves the list. The guards decide it by its sequence, like any other event:
-  for an entity that has since moved on, it is stale and skipped (see Trade-offs).
-- The watch list keeps the most recent **10,000** skipped values; the oldest drop
-  off first, logged.
-- One gap holds the whole source for at most `gap_timeout_ms` once; gaps are
-  timed independently.
+**Gaps.** Rows are delivered in sequence order up to the first missing value: after
+`after`, if the next row read is `after + k` with `k > 1`, the values between are a
+gap, and nothing past it is delivered yet.
+- **Primary rule.** When a gap is first seen, the source records the `xmax` of the
+  snapshot that saw it. On every later poll, the gap is **final** once that poll's
+  `pg_snapshot_xmin(pg_current_snapshot())` is at or above the recorded `xmax`:
+  every transaction that could have inserted the missing rows has ended, and the
+  same read shows they did not commit. A final gap is skipped at once.
+- **Backstop.** `gap_timeout_ms` (default **10,000**, on the source's own monotonic
+  clock, `Instant`) skips a gap that has not become final, for instance while a
+  long transaction on the database holds `xmin` back.
+- If the missing rows appear, they are delivered and delivery resumes in order.
+- A skipped value goes on the **watch list**. Every poll also reads the watched
+  values; one that appears is delivered then, late, and leaves the list.
+- The watch list drops a value after `watch_retention_ms` (default **3,600,000**,
+  one hour, measured from the skip on the Kulyrax host's wall clock, which survives
+  a restart) or when more than **10,000** values are watched (oldest first). Each
+  dropped value is logged.
+
+**Late rows.** Each late delivery is logged with its sequence value, and, once the
+run loop has resolved it, its decision: the event's status and, per adapter,
+applied or skipped and why. The checkpoint state counts **late rows** and
+**late rows skipped** (every adapter skipped it), and `kulyrax sources` shows both.
+For this the `EventSource` trait gains `on_resolved(event, report)`, which the run
+loop calls for every event before `commit` (default: nothing), and `details()`,
+which `kulyrax sources` prints (default: none).
 
 **Position.** Stored in **Kulyrax's own checkpoint** (`state_dir`, the checkpoint
 file every source uses, written temp → fsync → rename), never in the producer's
 database. The checkpoint holds the source's whole state as one JSON document:
-`after` (every value up to it delivered or skipped), the watch list, and a counter
-of late deliveries. One file, so state and position cannot diverge after a crash.
-The `SourcePosition` each event carries is `<after, 20 digits>.<late counter, 10
-digits>`, e.g. `00000000000000001234.0000000002`: text order equals delivery order
-(a late row reuses the current `after` with the next counter value), it has no
-characters a file name forbids, and the source keeps the state belonging to each
-position it handed out until `commit` writes it. `committed_position` returns it;
-`kulyrax sources` shows it.
+`after` (every value up to it delivered or skipped), the open gaps, the watch list,
+and the late-row counters. One file, so state and position cannot diverge after a
+crash. The `SourcePosition` each event carries is `<after, 20 digits>.<late
+deliveries, 10 digits>`, e.g. `00000000000000001234.0000000002`: text order equals
+delivery order (a late row reuses the current `after` with the next counter value),
+and it has no characters a file name forbids. The source keeps the state belonging
+to each position it handed out until `commit` writes it.
+
+**Single reader.** At start-up the source takes an exclusive OS lock
+(`File::try_lock`, as the file stores do) on `<state_dir>/<id>.lock`, held for the
+process's life. A second process with the same source id and state directory stops
+at start-up with an error naming the lock. `kulyrax sources` reads the checkpoint
+without taking the lock or connecting.
 
 **Ownership.** Read only. Kulyrax runs `SELECT` statements only: it never inserts,
 updates or deletes outbox rows, creates nothing in the producer's database, and
-works with a role that has `SELECT` on the table alone. Cleaning the outbox is the
-producer's job; rows at or below the committed `after`, and not in the watch list,
-are safe to delete.
+works with a role that has `SELECT` on the table (and on its sequence's catalog
+rows, which `pg_sequences` shows to any role that can use the table). Cleaning the
+outbox is the producer's job; rows at or below the committed `after`, and not on
+the watch list, are safe to delete.
 
-**Start-up checks.** The factory connects and reads `information_schema.columns`:
-the table must exist, and every configured column must exist with a usable type
-(`sequence_column`: an integer type; `event_id`, `event_type`: text; `payload`:
-`json`, `jsonb` or text; `metadata`: `json` / `jsonb`; `version`: an integer type).
-A missing or mistyped column, or a missing `sequence_column`, stops start-up with
-the column named.
+**Start-up checks.** The factory connects and checks, refusing to start with the
+object named:
+- the table exists, and every configured column exists with a usable type
+  (`sequence_column`: an integer type; `event_id`, `event_type`: text; `payload`:
+  `json`, `jsonb` or text; `metadata`: `json` / `jsonb`; `version`: an integer
+  type); `sequence_column` is set;
+- the **sequence behind `sequence_column`** (`pg_get_serial_sequence`, which covers
+  `serial` and identity columns) has `increment_by = 1` and `cache_size = 1`
+  (`pg_sequences`). A step other than 1 would make every value a gap; a cache
+  above 1 hands each session its own block of values, so values stop following
+  insert order across sessions, and unused blocks become permanent gaps;
+- if the column has **no sequence** (ids the application assigns), start-up refuses
+  unless `allow_unverified_sequence: true`. That setting gives up the guarantee
+  that values arrive in insert order: an id assigned below `after` after the
+  source passed it is delivered only if it was a gap still on the watch list, and
+  is otherwise never read. The gap rules still apply to the values the source
+  does see.
 
 **Config and mapping to the `Event` envelope.**
 
@@ -121,7 +162,7 @@ the column named.
 sources:
   - type: postgres_outbox
     id: orders-outbox
-    state_dir: ./.kulyrax/state      # Kulyrax's checkpoint, as for other sources
+    state_dir: ./.kulyrax/state      # Kulyrax's checkpoint and lock
     config:
       url: ${OUTBOX_DATABASE_URL}    # ${ENV} expanded
       table: public.outbox
@@ -132,7 +173,9 @@ sources:
         payload: payload
         metadata: metadata           # may be ~ (no column): empty metadata
         version: version             # may be ~ (no column): version 1
-      gap_timeout_ms: 10000
+      gap_timeout_ms: 10000          # backstop; final gaps skip at once
+      watch_retention_ms: 3600000
+      allow_unverified_sequence: false
 ```
 
 | `Event` field | From |
@@ -144,9 +187,8 @@ sources:
 | `metadata` | `columns.metadata`: a JSON object of strings; null, or no column, is empty; a non-string value becomes its JSON text |
 | `version` | `columns.version`; null, or no column, is 1 |
 
-A row that cannot become an `Event` (a null `event_id`, say) fails at `poll` with
-its sequence value named; the run loop's usual retry and dead-letter handling
-applies.
+A row that cannot become an `Event` (a null `event_id`, say) fails `poll` with its
+sequence value named.
 
 **Registration.** `kulyrax-core` gains a source registry beside the adapter
 registry: `SourceConfig` accepts an unknown `type:` as `Custom`, resolved at
@@ -156,24 +198,26 @@ start-up by a factory registered on the runtime (`register_source_factory`).
 
 ## Trade-offs accepted
 
-- **Latency at gaps.** A rolled-back insert stalls the source by up to
-  `gap_timeout_ms`. Producers that roll back often see that delay often.
-- **A row slower than the timeout arrives late**, and the guards judge it by its
-  sequence: if its entity has a newer event, it is skipped as stale; under
-  `on_existing: ignore`, a late create is skipped. Its data then never lands. The
-  timeout should exceed the producer's longest transaction.
-- **The watch list is bounded** (10,000). A row skipped longer ago than that many
-  later gaps is not watched for any more.
+- **A gap waits for every older transaction.** The primary rule waits until the
+  database's oldest running transaction is newer than the gap; an unrelated long
+  transaction holds gaps back until it ends or `gap_timeout_ms` passes.
+- **A rare row can still arrive late.** A transaction that took its sequence value
+  but had no transaction id yet when the gap was seen (one that called `nextval()`
+  before inserting) can commit after the gap is judged final; so can one slower
+  than the backstop. Such a row is delivered late from the watch list, and the
+  guards judge it by its sequence: if its entity has a newer event, it is skipped
+  as stale; under `on_existing: ignore`, a late create is skipped. Late rows and
+  late skips are logged and counted.
+- **The watch list is bounded** (one hour, 10,000 values). A value dropped from it
+  is not read again.
 - Polling costs a query per poll interval even when idle.
-- One global sequence column per table: a table whose ids are not insert-ordered
-  (UUIDs, an id assigned by the application from several sequences) cannot be
-  read correctly.
+- Postgres 13 or newer, for `pg_current_snapshot()`.
 
 ## Revisit if
 
-- Gap stalls hurt (frequent rollbacks): read by transaction id (option 2) as an
-  opt-in, or tell in-flight gaps from final ones with `pg_snapshot_xmin`.
-- Polling load or latency matters: logical replication (option 4), with commit
+- Polling load or latency matters: logical replication (option 5), with commit
   order and no gaps.
-- Producers need several sources feeding one entity, or ordered multi-table
+- Producers need several outboxes feeding one entity, or ordered multi-table
   outboxes.
+- Long-running transactions on the producer's database routinely hold gaps back:
+  read by transaction id (option 2) as an opt-in.

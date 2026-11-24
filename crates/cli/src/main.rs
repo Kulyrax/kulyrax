@@ -457,22 +457,40 @@ fn ingest_cmd(
 // --------------------------------------------------
 
 fn sources_cmd(config: PathBuf, output: OutputFormat) -> Result<i32, Box<dyn std::error::Error>> {
-    let sources = pipeline::list_sources(&config)?;
+    let sources = pipeline::list_sources(&config, kulyrax_backends::register_default_backends)?;
     match output {
         OutputFormat::Text => {
             println!("--- Sources ---");
             if sources.is_empty() {
                 println!("(none configured)");
             }
-            for (id, pos) in &sources {
-                println!("{}  committed: {}", id, pos.as_deref().unwrap_or("(never)"));
+            for s in &sources {
+                println!(
+                    "{}  committed: {}",
+                    s.id,
+                    s.committed.as_deref().unwrap_or("(never)")
+                );
+                for (name, value) in &s.details {
+                    println!("  {name}: {value}");
+                }
             }
             println!("---------------");
         }
         OutputFormat::Json => {
             let json: Vec<_> = sources
                 .iter()
-                .map(|(id, pos)| serde_json::json!({ "id": id, "committed_position": pos }))
+                .map(|s| {
+                    let details: serde_json::Map<String, serde_json::Value> = s
+                        .details
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone().into()))
+                        .collect();
+                    serde_json::json!({
+                        "id": s.id,
+                        "committed_position": s.committed,
+                        "details": details,
+                    })
+                })
                 .collect();
             println!("{}", serde_json::to_string_pretty(&json)?);
         }
