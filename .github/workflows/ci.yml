@@ -172,12 +172,39 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # Every MySQL test file: mysql_binlog.rs changes the server's global
-      # binlog_format, so it runs as its own process after mysql_backend.rs.
+      # Every MySQL test file, each its own process: mysql_binlog.rs changes
+      # the server's global binlog_format, and mysql_guard_collation.rs /
+      # mysql_guard_ddl.rs alter the shared guard table.
       - name: cargo test -p kulyrax-adapter-mysql
         run: cargo test -p kulyrax-adapter-mysql
         env:
           KULYRAX_MYSQL_URL: mysql://root@localhost:3306/kulyrax_ci
+
+  test-elasticsearch:
+    name: test (elasticsearch)
+    runs-on: ubuntu-latest
+    services:
+      elasticsearch:
+        image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: "false"
+          ES_JAVA_OPTS: -Xms512m -Xmx512m
+        ports:
+          - 9200:9200
+        options: >-
+          --health-cmd "curl -fs http://localhost:9200/_cluster/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test -p kulyrax-adapter-elasticsearch --test es_backend
+        run: cargo test -p kulyrax-adapter-elasticsearch --test es_backend
+        env:
+          KULYRAX_ELASTICSEARCH_URL: http://localhost:9200
 
   msrv:
     name: MSRV (1.89)

@@ -15,7 +15,9 @@ graph events → Postgres-outbox source. No benchmarking for now.
 
 - [x] MySQL: one transaction per batch, guard lanes loaded up front; batch
   outcomes and final state equal one event at a time; rollback leaves nothing.
-- [ ] Elasticsearch: one `_bulk` request per batch, same equivalence.
+- [x] Elasticsearch: one `_mget` and one `_bulk` request per batch, same
+  equivalence; a concurrent writer's change fails the commit (409) instead of
+  being overwritten.
 - [ ] Redis: one round trip (pipeline / `MULTI`) per batch, same equivalence.
 - [ ] MongoDB: one transaction / bulk write per batch, same equivalence.
 - [ ] Neo4j: one transaction per batch, same equivalence.
@@ -47,8 +49,16 @@ graph events → Postgres-outbox source. No benchmarking for now.
 | First runs | same | `mysql_batch_redelivery_is_skipped` failed with ERROR 1213, 5 of 5. Two causes. (1) The batch's guard read matched `entity_key IN (…)`, a prefix of the guard key; fixed to `(entity_key, facet) IN (…)`, a unique probe, like the per-event read. Still 1213. (2) The InnoDB status had no deadlock: it was a metadata-lock deadlock. The general log showed `mysql_failed_guard_write_leaves_neither_row` running `ALTER TABLE conduit_projection_state ADD/DROP CHECK` alongside the batch tests. Moved to its own process (`mysql_guard_ddl.rs`), as `mysql_binlog.rs` already is |
 | The equivalence test catches case-variant keys | Mutation: old case-insensitive guard keys | `mysql_batch_matches_one_event_at_a_time` fails: the batch `Created` `k`, one-at-a-time `Skipped(StaleSequence)`; reverted |
 | Read plan | `EXPLAIN … WHERE target_table = ? AND (entity_key, facet) IN ((…),(…)) FOR UPDATE` | `type: range`, `key: PRIMARY`, `rows: 3` for 3 lanes |
+| Elasticsearch suite on 8.15.0 (Docker, single node, 512 MB heap) | `KULYRAX_ELASTICSEARCH_URL=http://localhost:9200 cargo test -p kulyrax-adapter-elasticsearch`, ×5 | 8 passed, 5 of 5 runs: batch = one at a time (31 events, one `_mget`, one `_bulk`, nothing visible before commit), rollback sends nothing (and `_mget` reads a missing index as empty), a concurrent write fails the commit with `version_conflict` and the per-event fallback applies on top |
+| First runs | same | 4 of 8 failed, and on the **unchanged** code 3 of 5: `503` on GET and request timeouts while the tests' indexes were auto-created all at once. Fixed in the tests: each creates its index first, waiting for its shard. Also a wrong assertion of mine (`read` calls): `exec::project` times every guard read, so the `_bulk` is timed as `commit` |
+| CI | `.github/workflows/ci.yml` | new job `test (elasticsearch)`; there was none, so this suite never ran in CI |
 
 ## Risks and open questions
+
+- Elasticsearch, pre-existing: a GET on an index whose shards are still
+  starting (just auto-created by another writer) returns 503, which the
+  adapter reports as a failed event, not a retryable conflict. Retry and
+  dead-letter handle it; not changed here.
 
 - The MySQL suite assumes a fresh database: test table names come from a
   per-process counter, so a rerun against a reused database can collide with an
