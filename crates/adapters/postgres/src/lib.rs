@@ -868,6 +868,48 @@ impl SqlTxn for PostgresTxn<'_> {
         Ok(())
     }
 
+    /// Views over the table (its `DROP` would fail), foreign keys into or
+    /// out of it (`LIKE` copies none, and an incoming one blocks the `DROP`),
+    /// and columns owning a sequence, `serial` or identity (the table and its
+    /// shadow would share it, and the `DROP` takes it along).
+    fn rebuild_blockers(&mut self, table: &str) -> Result<Vec<String>, SqlError> {
+        let mut found = Vec::new();
+        for row in self.query(
+            "SELECT DISTINCT v.oid::regclass::text FROM pg_depend d
+             JOIN pg_rewrite r ON r.oid = d.objid
+             JOIN pg_class v ON v.oid = r.ev_class
+             WHERE d.classid = 'pg_rewrite'::regclass AND d.refobjid = $1::text::regclass
+               AND v.oid <> $1::text::regclass
+             ORDER BY 1",
+            &[&table],
+        )? {
+            found.push(format!("view {}", row.get::<_, String>(0)));
+        }
+        for row in self.query(
+            "SELECT conname::text, conrelid::regclass::text, confrelid::regclass::text
+             FROM pg_constraint
+             WHERE contype = 'f'
+               AND (conrelid = $1::text::regclass OR confrelid = $1::text::regclass)
+             ORDER BY 1",
+            &[&table],
+        )? {
+            let (name, from, to): (String, String, String) = (row.get(0), row.get(1), row.get(2));
+            found.push(format!("foreign key {name} ({from} -> {to})"));
+        }
+        for row in self.query(
+            "SELECT a.attname::text, pg_get_serial_sequence($1, a.attname)
+             FROM pg_attribute a
+             WHERE a.attrelid = $1::text::regclass AND a.attnum > 0 AND NOT a.attisdropped
+               AND pg_get_serial_sequence($1, a.attname) IS NOT NULL
+             ORDER BY a.attnum",
+            &[&table],
+        )? {
+            let (column, sequence): (String, String) = (row.get(0), row.get(1));
+            found.push(format!("column {column} owning sequence {sequence}"));
+        }
+        Ok(found)
+    }
+
     /// `LIKE … INCLUDING ALL` copies columns, defaults, constraints and
     /// indexes.
     fn create_shadow_table(&mut self, t: &ShadowTable) -> Result<(), SqlError> {

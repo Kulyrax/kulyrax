@@ -386,3 +386,93 @@ fn rebuild_needs_an_adapter_with_sql_tables() {
         err("nope")
     );
 }
+
+// ---------------------------------------------------------------------------
+// Preflight: refused before anything is created
+// ---------------------------------------------------------------------------
+
+/// Add `ddl` to a projected project, run a rebuild, and return its error,
+/// after checking that it created no shadow table and no guard lane.
+fn refused_with(ddl: &str) -> String {
+    let p = project();
+    pipeline::replay(&p.config(), &p.mappings("v1"), &p.events(), &opts(), |_| {}).unwrap();
+    rusqlite::Connection::open(&p.db)
+        .unwrap()
+        .execute_batch(ddl)
+        .unwrap();
+    let before = (rows(&p.db), guard_lanes(&p.db));
+
+    let err = pipeline::rebuild(
+        &p.config(),
+        &p.mappings("v2"),
+        &p.events(),
+        "sql",
+        &opts(),
+        |_| {},
+    )
+    .err()
+    .map(|e| e.to_string())
+    .unwrap_or_default();
+    assert!(
+        query_strings(
+            &p.db,
+            "SELECT name FROM sqlite_master WHERE name LIKE '%__kulyrax_rebuild%'"
+        )
+        .is_empty(),
+        "no shadow table or index"
+    );
+    assert_eq!(
+        query_strings(
+            &p.db,
+            "SELECT target_table FROM conduit_projection_state WHERE target_table <> 'users'"
+        ),
+        Vec::<String>::new(),
+        "no shadow guard lanes"
+    );
+    assert_eq!((rows(&p.db), guard_lanes(&p.db)), before, "nothing changed");
+    err
+}
+
+#[test]
+fn rebuild_refuses_a_table_a_view_reads() {
+    let err = refused_with("CREATE VIEW users_active AS SELECT id FROM users WHERE name <> ''");
+    assert!(err.contains("users: view users_active"), "{err}");
+}
+
+#[test]
+fn rebuild_refuses_a_table_with_a_trigger() {
+    let err = refused_with(
+        "CREATE TABLE audit (id TEXT);
+         CREATE TRIGGER users_audit AFTER INSERT ON users BEGIN INSERT INTO audit VALUES (new.id); END;",
+    );
+    assert!(err.contains("users: trigger users_audit"), "{err}");
+}
+
+#[test]
+fn rebuild_refuses_a_table_a_foreign_key_points_at() {
+    let err = refused_with(
+        "CREATE TABLE orders (id TEXT PRIMARY KEY, user_id TEXT REFERENCES users (id))",
+    );
+    assert!(err.contains("users: foreign key from orders"), "{err}");
+}
+
+#[test]
+fn preflight_ignores_names_that_only_contain_the_table_name() {
+    let p = project();
+    rusqlite::Connection::open(&p.db)
+        .unwrap()
+        .execute_batch(
+            "CREATE TABLE users_archive (id TEXT);
+             CREATE VIEW old_users AS SELECT id FROM users_archive;",
+        )
+        .unwrap();
+    pipeline::rebuild(
+        &p.config(),
+        &p.mappings("v2"),
+        &p.events(),
+        "sql",
+        &opts(),
+        |_| {},
+    )
+    .unwrap();
+}

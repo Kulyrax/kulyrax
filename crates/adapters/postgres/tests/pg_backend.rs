@@ -975,3 +975,90 @@ fn pg_rebuild_refuses_to_swap_when_another_writer_projected() -> R {
     assert!(pg_exists(&url, &tables[0].shadow)?, "the shadow is left");
     Ok(())
 }
+
+/// Add `ddl` (with `{t}` for the table) to a projected table, start a
+/// rebuild, and return its error, after checking that it created no shadow
+/// table and no guard lane.
+fn pg_rebuild_refused_with(url: &str, ddl: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let t = fresh_batch_table(url)?;
+    let live = pg_adapter(url, batch_mappings("P", &t));
+    for e in batch_stream("P") {
+        assert!(live.handle(&e).is_success());
+    }
+    pg_exec(url, &ddl.replace("{t}", &t))?;
+    let tables = shadow_of(&t);
+    let err = live
+        .shadow_rebuild()
+        .ok_or("Postgres supports rebuilds")?
+        .start_rebuild(&tables)
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default();
+    assert!(!pg_exists(url, &tables[0].shadow)?, "no shadow table");
+    let mut c = postgres::Client::connect(url, postgres::NoTls)?;
+    let lanes: i64 = c
+        .query_one(
+            "SELECT count(*) FROM conduit_projection_state WHERE target_table = $1",
+            &[&tables[0].shadow],
+        )?
+        .get(0);
+    assert_eq!(lanes, 0, "no shadow guard lanes");
+    assert!(err.contains(&format!("{t}: ")), "names the table: {err}");
+    Ok(err)
+}
+
+#[test]
+fn pg_rebuild_refuses_a_table_a_view_reads() -> R {
+    require_pg!(url);
+    let err = pg_rebuild_refused_with(&url, "CREATE VIEW {t}_v AS SELECT id FROM {t}")?;
+    assert!(err.contains("view ") && err.contains("_v"), "{err}");
+    Ok(())
+}
+
+#[test]
+fn pg_rebuild_refuses_a_foreign_key_into_the_table() -> R {
+    require_pg!(url);
+    let err = pg_rebuild_refused_with(
+        &url,
+        "CREATE TABLE {t}_child (id text PRIMARY KEY, parent text REFERENCES {t} (id))",
+    )?;
+    assert!(
+        err.contains("foreign key ") && err.contains("_child ->"),
+        "{err}"
+    );
+    Ok(())
+}
+
+#[test]
+fn pg_rebuild_refuses_a_foreign_key_out_of_the_table() -> R {
+    require_pg!(url);
+    let err = pg_rebuild_refused_with(
+        &url,
+        "CREATE TABLE {t}_parent (id text PRIMARY KEY);
+         ALTER TABLE {t} ADD COLUMN parent text REFERENCES {t}_parent (id)",
+    )?;
+    assert!(
+        err.contains("foreign key ") && err.contains("_parent)"),
+        "{err}"
+    );
+    Ok(())
+}
+
+#[test]
+fn pg_rebuild_refuses_a_serial_column() -> R {
+    require_pg!(url);
+    let err = pg_rebuild_refused_with(&url, "ALTER TABLE {t} ADD COLUMN n serial")?;
+    assert!(err.contains("column n owning sequence"), "{err}");
+    Ok(())
+}
+
+#[test]
+fn pg_rebuild_refuses_an_identity_column() -> R {
+    require_pg!(url);
+    let err = pg_rebuild_refused_with(
+        &url,
+        "ALTER TABLE {t} ADD COLUMN n bigint GENERATED ALWAYS AS IDENTITY",
+    )?;
+    assert!(err.contains("column n owning sequence"), "{err}");
+    Ok(())
+}

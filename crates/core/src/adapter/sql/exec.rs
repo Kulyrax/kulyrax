@@ -237,6 +237,15 @@ pub trait SqlTxn: Sized {
 
     fn commit(self) -> Result<(), SqlError>;
 
+    /// For a rebuild ([`crate::rebuild`]): the objects that would make
+    /// swapping `table` out fail or lose something (a dependent view, a
+    /// foreign key, an owned sequence…), each named with its kind, for
+    /// example `view users_active`. Checked before anything is created. The
+    /// default finds none.
+    fn rebuild_blockers(&mut self, _table: &str) -> Result<Vec<String>, SqlError> {
+        Ok(Vec::new())
+    }
+
     /// For a rebuild ([`crate::rebuild`]): drop `t.shadow` if a failed
     /// rebuild left it, create it empty with `t.table`'s columns, keys and
     /// indexes, and delete any guard lanes recorded under its name. The
@@ -295,12 +304,27 @@ pub struct GuardFingerprint {
     pub sequence_sum: i128,
 }
 
-/// Start a rebuild of `tables` in `txn`: create every shadow table, take the
-/// target tables' [`GuardFingerprint`], and commit.
+/// Start a rebuild of `tables` in `txn`: refuse if any table has a
+/// [`SqlTxn::rebuild_blockers`] (before anything is created), else create
+/// every shadow table, take the target tables' [`GuardFingerprint`], and
+/// commit.
 pub fn start_shadow_rebuild<T: SqlTxn>(
     mut txn: T,
     tables: &[ShadowTable],
 ) -> Result<GuardFingerprint, SqlError> {
+    let mut blockers = Vec::new();
+    for t in tables {
+        for object in txn.rebuild_blockers(&t.table)? {
+            blockers.push(format!("{}: {object}", t.table));
+        }
+    }
+    if !blockers.is_empty() {
+        return Err(SqlError::ExecutionFailed(format!(
+            "cannot rebuild into shadow tables, the swap would fail or drop these: {}. Remove \
+             them, or rebuild another way",
+            blockers.join("; ")
+        )));
+    }
     for t in tables {
         txn.create_shadow_table(t)?;
     }

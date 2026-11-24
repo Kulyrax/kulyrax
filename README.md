@@ -114,8 +114,10 @@ with one transaction. SQLite and Postgres. Hard limits:
 
 - **Every other writer to those tables must be paused** for the whole rebuild. If one
   wrote meanwhile, the swap is refused and nothing changes.
-- **Postgres:** a target table with dependent views, a foreign key into or out of it,
-  or a `serial` / identity column makes the swap fail.
+- **Tables it can't rebuild are refused up front,** before anything is created,
+  naming each object: on Postgres a dependent view, a foreign key into or out of
+  the table, or a `serial` / identity column; on SQLite a view or trigger that uses
+  the table, or a foreign key pointing at it.
 
 ## Why Kulyrax exists
 

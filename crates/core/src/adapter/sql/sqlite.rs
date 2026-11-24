@@ -504,6 +504,47 @@ impl SqlTxn for SqliteTxn<'_> {
         Ok(())
     }
 
+    /// Views and triggers whose SQL names the table (the swap's `DROP TABLE`
+    /// would drop its triggers and leave its views pointing at the shadow's
+    /// old name), and foreign keys that point at it.
+    fn rebuild_blockers(&mut self, table: &str) -> Result<Vec<String>, SqlError> {
+        let mut found = Vec::new();
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT type, name, tbl_name, sql FROM sqlite_master
+                 WHERE type IN ('view', 'trigger') AND sql IS NOT NULL ORDER BY type, name",
+            )
+            .map_err(sql_err)?;
+        let objects: Vec<(String, String, String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .map_err(sql_err)?
+            .collect::<Result<_, _>>()
+            .map_err(sql_err)?;
+        for (kind, name, on, sql) in objects {
+            if on.eq_ignore_ascii_case(table) || names_identifier(&sql, table) {
+                found.push(format!("{kind} {name}"));
+            }
+        }
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT m.name FROM sqlite_master m, pragma_foreign_key_list(m.name) f
+                 WHERE m.type = 'table' AND f.\"table\" = ?1 COLLATE NOCASE
+                 GROUP BY m.name ORDER BY m.name",
+            )
+            .map_err(sql_err)?;
+        let referencing: Vec<String> = stmt
+            .query_map(params![table], |r| r.get(0))
+            .map_err(sql_err)?
+            .collect::<Result<_, _>>()
+            .map_err(sql_err)?;
+        for from in referencing {
+            found.push(format!("foreign key from {from}"));
+        }
+        Ok(found)
+    }
+
     /// SQLite has no `CREATE TABLE … LIKE`: the shadow is created from the
     /// table's own `CREATE TABLE` statement in `sqlite_master`, and each of
     /// its indexes from theirs.
@@ -606,6 +647,13 @@ impl SqlTxn for SqliteTxn<'_> {
             ))
             .map_err(sql_err)
     }
+}
+
+/// Whether `sql` names `identifier` as a whole word, case-insensitively:
+/// `users` in `FROM users u` or `"users"`, not in `users_archive`.
+fn names_identifier(sql: &str, identifier: &str) -> bool {
+    sql.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .any(|word| word.eq_ignore_ascii_case(identifier))
 }
 
 /// `CREATE [UNIQUE] INDEX` for the shadow table, from an index's own

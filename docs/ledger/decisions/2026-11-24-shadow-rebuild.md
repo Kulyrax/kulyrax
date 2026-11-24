@@ -69,6 +69,21 @@ Option 1, as `kulyrax rebuild --adapter <id>` (`pipeline::rebuild`,
   rename the shadow's to the table's name, drop the table and rename the shadow
   in its place.
 
+**Refused at preflight.** Before creating anything, `start_rebuild` asks each
+target table for objects the swap would break or drop
+(`SqlTxn::rebuild_blockers`), and refuses with every one named, table first
+(`users: view users_active`). Nothing is created and no guard lane is touched;
+the error reaches the CLI as `PipelineError::Rebuild`.
+- Postgres: a view depending on the table (`pg_depend` / `pg_rewrite`); a
+  foreign key into or out of it (`pg_constraint`; `LIKE` copies none, and an
+  incoming one blocks the `DROP`); a column owning a sequence, `serial` or
+  identity (`pg_get_serial_sequence`; table and shadow would share it, and the
+  `DROP` takes it along).
+- SQLite: a view or trigger whose SQL names the table as a whole word, or that
+  is defined on it (the `DROP` would remove its triggers and leave views naming
+  a table that is about to be replaced); a foreign key pointing at it, from
+  another table or itself.
+
 **Why a fingerprint, not a lock.** Holding live writers off would mean every live
 SQL adapter taking a lock the rebuild can see. The fingerprint needs nothing from
 them: every projection write either adds a guard lane or raises one's sequence
@@ -89,12 +104,11 @@ shadow's indexes itself.
 - MySQL is not supported.
 - During the swap, Postgres readers of the tables wait for the
   `ACCESS EXCLUSIVE` lock (milliseconds: renames and a drop).
-- A table something else depends on (a view, a foreign key) makes the Postgres
-  `DROP` fail, and the swap with it. Columns with their own sequence
-  (`serial`) share it between table and shadow, and the drop then fails the
-  same way.
+- Tables with dependent views, foreign keys, triggers (SQLite) or sequence-owning
+  columns (Postgres) cannot be rebuilt this way at all: they are refused at
+  preflight, not handled.
 - New public API: `StorageAdapter::shadow_rebuild`, `crate::rebuild`
-  (`ShadowRebuild`, `rebuild`, `RebuildReport`), four `SqlTxn` methods with
+  (`ShadowRebuild`, `rebuild`, `RebuildReport`), five `SqlTxn` methods with
   defaults, `PipelineError::Rebuild`.
 
 ## Revisit if
