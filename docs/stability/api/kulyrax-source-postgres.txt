@@ -1,0 +1,70 @@
+pub mod kulyrax_source_postgres
+pub struct kulyrax_source_postgres::OutboxColumns
+pub kulyrax_source_postgres::OutboxColumns::event_id: alloc::string::String
+pub kulyrax_source_postgres::OutboxColumns::event_type: alloc::string::String
+pub kulyrax_source_postgres::OutboxColumns::metadata: core::option::Option<alloc::string::String>
+pub kulyrax_source_postgres::OutboxColumns::payload: alloc::string::String
+pub kulyrax_source_postgres::OutboxColumns::version: core::option::Option<alloc::string::String>
+impl core::clone::Clone for kulyrax_source_postgres::OutboxColumns
+pub fn kulyrax_source_postgres::OutboxColumns::clone(&self) -> Self
+impl core::default::Default for kulyrax_source_postgres::OutboxColumns
+pub fn kulyrax_source_postgres::OutboxColumns::default() -> Self
+impl core::fmt::Debug for kulyrax_source_postgres::OutboxColumns
+pub fn kulyrax_source_postgres::OutboxColumns::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'de> serde_core::de::Deserialize<'de> for kulyrax_source_postgres::OutboxColumns where kulyrax_source_postgres::OutboxColumns: core::default::Default
+pub fn kulyrax_source_postgres::OutboxColumns::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Forget for kulyrax_source_postgres::OutboxColumns
+impl core::marker::Freeze for kulyrax_source_postgres::OutboxColumns
+impl core::marker::Move for kulyrax_source_postgres::OutboxColumns
+impl core::marker::Send for kulyrax_source_postgres::OutboxColumns
+impl core::marker::Sync for kulyrax_source_postgres::OutboxColumns
+impl core::marker::Unpin for kulyrax_source_postgres::OutboxColumns
+impl core::marker::UnsafeUnpin for kulyrax_source_postgres::OutboxColumns
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_source_postgres::OutboxColumns
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_source_postgres::OutboxColumns
+pub struct kulyrax_source_postgres::OutboxConfig
+pub kulyrax_source_postgres::OutboxConfig::allow_unverified_sequence: bool
+pub kulyrax_source_postgres::OutboxConfig::columns: kulyrax_source_postgres::OutboxColumns
+pub kulyrax_source_postgres::OutboxConfig::gap_grace_ms: u64
+pub kulyrax_source_postgres::OutboxConfig::gap_timeout_ms: u64
+pub kulyrax_source_postgres::OutboxConfig::sequence_column: alloc::string::String
+pub kulyrax_source_postgres::OutboxConfig::table: alloc::string::String
+pub kulyrax_source_postgres::OutboxConfig::url: alloc::string::String
+pub kulyrax_source_postgres::OutboxConfig::watch_retention_ms: u64
+impl core::clone::Clone for kulyrax_source_postgres::OutboxConfig
+pub fn kulyrax_source_postgres::OutboxConfig::clone(&self) -> Self
+impl core::fmt::Debug for kulyrax_source_postgres::OutboxConfig
+pub fn kulyrax_source_postgres::OutboxConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'de> serde_core::de::Deserialize<'de> for kulyrax_source_postgres::OutboxConfig
+pub fn kulyrax_source_postgres::OutboxConfig::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Forget for kulyrax_source_postgres::OutboxConfig
+impl core::marker::Freeze for kulyrax_source_postgres::OutboxConfig
+impl core::marker::Move for kulyrax_source_postgres::OutboxConfig
+impl core::marker::Send for kulyrax_source_postgres::OutboxConfig
+impl core::marker::Sync for kulyrax_source_postgres::OutboxConfig
+impl core::marker::Unpin for kulyrax_source_postgres::OutboxConfig
+impl core::marker::UnsafeUnpin for kulyrax_source_postgres::OutboxConfig
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_source_postgres::OutboxConfig
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_source_postgres::OutboxConfig
+pub struct kulyrax_source_postgres::PostgresOutboxSource
+impl kulyrax_source_postgres::PostgresOutboxSource
+pub fn kulyrax_source_postgres::PostgresOutboxSource::inspect(alloc::string::String, std::path::PathBuf, kulyrax_source_postgres::OutboxConfig) -> core::result::Result<Self, kulyrax_core::source::SourceError>
+pub fn kulyrax_source_postgres::PostgresOutboxSource::open(alloc::string::String, std::path::PathBuf, kulyrax_source_postgres::OutboxConfig) -> core::result::Result<Self, kulyrax_core::source::SourceError>
+impl kulyrax_core::source::EventSource for kulyrax_source_postgres::PostgresOutboxSource
+pub fn kulyrax_source_postgres::PostgresOutboxSource::commit(&mut self, kulyrax_core::source::SourcePosition) -> core::result::Result<(), kulyrax_core::source::SourceError>
+pub fn kulyrax_source_postgres::PostgresOutboxSource::committed_position(&self) -> core::option::Option<&kulyrax_core::source::SourcePosition>
+pub fn kulyrax_source_postgres::PostgresOutboxSource::details(&self) -> alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
+pub fn kulyrax_source_postgres::PostgresOutboxSource::id(&self) -> &str
+pub fn kulyrax_source_postgres::PostgresOutboxSource::on_resolved(&mut self, &kulyrax_core::source::SourcedEvent, &kulyrax_core::execution::report::ExecutionReport)
+pub fn kulyrax_source_postgres::PostgresOutboxSource::poll(&mut self, usize) -> core::result::Result<alloc::vec::Vec<kulyrax_core::source::SourcedEvent>, kulyrax_core::source::SourceError>
+impl core::marker::Forget for kulyrax_source_postgres::PostgresOutboxSource
+impl !core::marker::Freeze for kulyrax_source_postgres::PostgresOutboxSource
+impl core::marker::Move for kulyrax_source_postgres::PostgresOutboxSource
+impl core::marker::Send for kulyrax_source_postgres::PostgresOutboxSource
+impl !core::marker::Sync for kulyrax_source_postgres::PostgresOutboxSource
+impl core::marker::Unpin for kulyrax_source_postgres::PostgresOutboxSource
+impl core::marker::UnsafeUnpin for kulyrax_source_postgres::PostgresOutboxSource
+impl !core::panic::unwind_safe::RefUnwindSafe for kulyrax_source_postgres::PostgresOutboxSource
+impl !core::panic::unwind_safe::UnwindSafe for kulyrax_source_postgres::PostgresOutboxSource
+pub const kulyrax_source_postgres::WATCH_CAP: usize
+pub fn kulyrax_source_postgres::factory(&kulyrax_core::runtime::config::CustomSourceConfig, &kulyrax_core::runtime::registry::SourceBuildContext) -> core::result::Result<alloc::boxed::Box<dyn kulyrax_core::source::EventSource>, kulyrax_core::source::SourceError>

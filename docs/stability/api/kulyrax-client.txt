@@ -1,0 +1,198 @@
+pub mod kulyrax_client
+pub mod kulyrax_client::pb
+pub mod kulyrax_client::pb::ingest_client
+pub struct kulyrax_client::pb::ingest_client::IngestClient<T>
+impl kulyrax_client::pb::ingest_client::IngestClient<tonic::transport::channel::Channel>
+pub async fn kulyrax_client::pb::ingest_client::IngestClient<tonic::transport::channel::Channel>::connect<D>(D) -> core::result::Result<Self, tonic::transport::error::Error> where D: core::convert::TryInto<tonic::transport::channel::endpoint::Endpoint>, <D as core::convert::TryInto>::Error: core::convert::Into<tonic::codegen::StdError>
+impl<T> kulyrax_client::pb::ingest_client::IngestClient<T> where T: tonic::client::service::GrpcService<tonic::body::BoxBody>, <T as tonic::client::service::GrpcService>::Error: core::convert::Into<tonic::codegen::StdError>, <T as tonic::client::service::GrpcService>::ResponseBody: http_body::Body<Data = bytes::bytes::Bytes> + core::marker::Send + 'static, <<T as tonic::client::service::GrpcService>::ResponseBody as http_body::Body>::Error: core::convert::Into<tonic::codegen::StdError> + core::marker::Send
+pub fn kulyrax_client::pb::ingest_client::IngestClient<T>::accept_compressed(self, tonic::codec::compression::CompressionEncoding) -> Self
+pub fn kulyrax_client::pb::ingest_client::IngestClient<T>::max_decoding_message_size(self, usize) -> Self
+pub fn kulyrax_client::pb::ingest_client::IngestClient<T>::max_encoding_message_size(self, usize) -> Self
+pub fn kulyrax_client::pb::ingest_client::IngestClient<T>::new(T) -> Self
+pub fn kulyrax_client::pb::ingest_client::IngestClient<T>::send_compressed(self, tonic::codec::compression::CompressionEncoding) -> Self
+pub async fn kulyrax_client::pb::ingest_client::IngestClient<T>::stream(&mut self, impl tonic::request::IntoStreamingRequest<Message = kulyrax_client::pb::EventEnvelope>) -> core::result::Result<tonic::response::Response<tonic::codec::decode::Streaming<kulyrax_client::pb::Ack>>, tonic::status::Status>
+pub fn kulyrax_client::pb::ingest_client::IngestClient<T>::with_interceptor<F>(T, F) -> kulyrax_client::pb::ingest_client::IngestClient<tonic::service::interceptor::InterceptedService<T, F>> where F: tonic::service::interceptor::Interceptor, <T as tonic::client::service::GrpcService>::ResponseBody: core::default::Default, T: tower_service::Service<http::request::Request<tonic::body::BoxBody>, Response = http::response::Response<<T as tonic::client::service::GrpcService<tonic::body::BoxBody>>::ResponseBody>>, <T as tower_service::Service<http::request::Request<tonic::body::BoxBody>>>::Error: core::convert::Into<tonic::codegen::StdError> + core::marker::Send + core::marker::Sync
+pub fn kulyrax_client::pb::ingest_client::IngestClient<T>::with_origin(T, http::uri::Uri) -> Self
+impl<T: core::clone::Clone> core::clone::Clone for kulyrax_client::pb::ingest_client::IngestClient<T>
+pub fn kulyrax_client::pb::ingest_client::IngestClient<T>::clone(&self) -> Self
+impl<T: core::fmt::Debug> core::fmt::Debug for kulyrax_client::pb::ingest_client::IngestClient<T>
+pub fn kulyrax_client::pb::ingest_client::IngestClient<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T> core::marker::Forget for kulyrax_client::pb::ingest_client::IngestClient<T>
+impl<T> !core::marker::Freeze for kulyrax_client::pb::ingest_client::IngestClient<T>
+impl<T> core::marker::Move for kulyrax_client::pb::ingest_client::IngestClient<T>
+impl<T> core::marker::Send for kulyrax_client::pb::ingest_client::IngestClient<T> where tonic::client::grpc::Grpc<T>: core::marker::Send
+impl<T> core::marker::Sync for kulyrax_client::pb::ingest_client::IngestClient<T> where tonic::client::grpc::Grpc<T>: core::marker::Sync
+impl<T> core::marker::Unpin for kulyrax_client::pb::ingest_client::IngestClient<T> where tonic::client::grpc::Grpc<T>: core::marker::Unpin
+impl<T> core::marker::UnsafeUnpin for kulyrax_client::pb::ingest_client::IngestClient<T> where tonic::client::grpc::Grpc<T>: core::marker::UnsafeUnpin
+impl<T> core::panic::unwind_safe::RefUnwindSafe for kulyrax_client::pb::ingest_client::IngestClient<T> where tonic::client::grpc::Grpc<T>: core::panic::unwind_safe::RefUnwindSafe
+impl<T> core::panic::unwind_safe::UnwindSafe for kulyrax_client::pb::ingest_client::IngestClient<T> where tonic::client::grpc::Grpc<T>: core::panic::unwind_safe::UnwindSafe
+pub struct kulyrax_client::pb::Ack
+pub kulyrax_client::pb::Ack::ack_protocol_version: u32
+pub kulyrax_client::pb::Ack::batch_events: u32
+pub kulyrax_client::pb::Ack::dlq_events: u32
+pub kulyrax_client::pb::Ack::position: alloc::string::String
+impl kulyrax_client::pb::Ack
+pub fn kulyrax_client::pb::Ack::outcome(&self) -> kulyrax_client::AckOutcome
+impl core::clone::Clone for kulyrax_client::pb::Ack
+pub fn kulyrax_client::pb::Ack::clone(&self) -> Self
+impl core::cmp::PartialEq for kulyrax_client::pb::Ack
+pub fn kulyrax_client::pb::Ack::eq(&self, &Self) -> bool
+impl core::default::Default for kulyrax_client::pb::Ack
+pub fn kulyrax_client::pb::Ack::default() -> Self
+impl core::fmt::Debug for kulyrax_client::pb::Ack
+pub fn kulyrax_client::pb::Ack::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for kulyrax_client::pb::Ack
+impl prost::message::Message for kulyrax_client::pb::Ack
+pub fn kulyrax_client::pb::Ack::clear(&mut self)
+pub fn kulyrax_client::pb::Ack::encoded_len(&self) -> usize
+impl core::marker::Forget for kulyrax_client::pb::Ack
+impl core::marker::Freeze for kulyrax_client::pb::Ack
+impl core::marker::Move for kulyrax_client::pb::Ack
+impl core::marker::Send for kulyrax_client::pb::Ack
+impl core::marker::Sync for kulyrax_client::pb::Ack
+impl core::marker::Unpin for kulyrax_client::pb::Ack
+impl core::marker::UnsafeUnpin for kulyrax_client::pb::Ack
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_client::pb::Ack
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_client::pb::Ack
+pub struct kulyrax_client::pb::EventEnvelope
+pub kulyrax_client::pb::EventEnvelope::event_id: alloc::string::String
+pub kulyrax_client::pb::EventEnvelope::event_type: alloc::string::String
+pub kulyrax_client::pb::EventEnvelope::metadata: std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>
+pub kulyrax_client::pb::EventEnvelope::payload: alloc::string::String
+pub kulyrax_client::pb::EventEnvelope::position: alloc::string::String
+pub kulyrax_client::pb::EventEnvelope::sequence: u64
+pub kulyrax_client::pb::EventEnvelope::version: u32
+impl core::clone::Clone for kulyrax_client::pb::EventEnvelope
+pub fn kulyrax_client::pb::EventEnvelope::clone(&self) -> Self
+impl core::cmp::PartialEq for kulyrax_client::pb::EventEnvelope
+pub fn kulyrax_client::pb::EventEnvelope::eq(&self, &Self) -> bool
+impl core::default::Default for kulyrax_client::pb::EventEnvelope
+pub fn kulyrax_client::pb::EventEnvelope::default() -> Self
+impl core::fmt::Debug for kulyrax_client::pb::EventEnvelope
+pub fn kulyrax_client::pb::EventEnvelope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for kulyrax_client::pb::EventEnvelope
+impl prost::message::Message for kulyrax_client::pb::EventEnvelope
+pub fn kulyrax_client::pb::EventEnvelope::clear(&mut self)
+pub fn kulyrax_client::pb::EventEnvelope::encoded_len(&self) -> usize
+impl core::marker::Forget for kulyrax_client::pb::EventEnvelope
+impl core::marker::Freeze for kulyrax_client::pb::EventEnvelope
+impl core::marker::Move for kulyrax_client::pb::EventEnvelope
+impl core::marker::Send for kulyrax_client::pb::EventEnvelope
+impl core::marker::Sync for kulyrax_client::pb::EventEnvelope
+impl core::marker::Unpin for kulyrax_client::pb::EventEnvelope
+impl core::marker::UnsafeUnpin for kulyrax_client::pb::EventEnvelope
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_client::pb::EventEnvelope
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_client::pb::EventEnvelope
+pub enum kulyrax_client::AckOutcome
+pub kulyrax_client::AckOutcome::Confirmed
+pub kulyrax_client::AckOutcome::DeadLettered
+pub kulyrax_client::AckOutcome::DeadLettered::count: u32
+pub kulyrax_client::AckOutcome::Unverified
+impl core::clone::Clone for kulyrax_client::AckOutcome
+pub fn kulyrax_client::AckOutcome::clone(&self) -> Self
+impl core::cmp::Eq for kulyrax_client::AckOutcome
+impl core::cmp::PartialEq for kulyrax_client::AckOutcome
+pub fn kulyrax_client::AckOutcome::eq(&self, &Self) -> bool
+impl core::fmt::Debug for kulyrax_client::AckOutcome
+pub fn kulyrax_client::AckOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for kulyrax_client::AckOutcome
+impl core::marker::StructuralPartialEq for kulyrax_client::AckOutcome
+impl core::marker::Forget for kulyrax_client::AckOutcome
+impl core::marker::Freeze for kulyrax_client::AckOutcome
+impl core::marker::Move for kulyrax_client::AckOutcome
+impl core::marker::Send for kulyrax_client::AckOutcome
+impl core::marker::Sync for kulyrax_client::AckOutcome
+impl core::marker::Unpin for kulyrax_client::AckOutcome
+impl core::marker::UnsafeUnpin for kulyrax_client::AckOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_client::AckOutcome
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_client::AckOutcome
+pub enum kulyrax_client::ClientError
+pub kulyrax_client::ClientError::Closed
+pub kulyrax_client::ClientError::Connect(alloc::string::String)
+pub kulyrax_client::ClientError::Rpc(alloc::boxed::Box<tonic::status::Status>)
+impl core::error::Error for kulyrax_client::ClientError
+impl core::fmt::Debug for kulyrax_client::ClientError
+pub fn kulyrax_client::ClientError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for kulyrax_client::ClientError
+pub fn kulyrax_client::ClientError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Forget for kulyrax_client::ClientError
+impl core::marker::Freeze for kulyrax_client::ClientError
+impl core::marker::Move for kulyrax_client::ClientError
+impl core::marker::Send for kulyrax_client::ClientError
+impl core::marker::Sync for kulyrax_client::ClientError
+impl core::marker::Unpin for kulyrax_client::ClientError
+impl core::marker::UnsafeUnpin for kulyrax_client::ClientError
+impl !core::panic::unwind_safe::RefUnwindSafe for kulyrax_client::ClientError
+impl !core::panic::unwind_safe::UnwindSafe for kulyrax_client::ClientError
+pub struct kulyrax_client::Ack
+pub kulyrax_client::Ack::ack_protocol_version: u32
+pub kulyrax_client::Ack::batch_events: u32
+pub kulyrax_client::Ack::dlq_events: u32
+pub kulyrax_client::Ack::position: alloc::string::String
+impl kulyrax_client::pb::Ack
+pub fn kulyrax_client::pb::Ack::outcome(&self) -> kulyrax_client::AckOutcome
+impl core::clone::Clone for kulyrax_client::pb::Ack
+pub fn kulyrax_client::pb::Ack::clone(&self) -> Self
+impl core::cmp::PartialEq for kulyrax_client::pb::Ack
+pub fn kulyrax_client::pb::Ack::eq(&self, &Self) -> bool
+impl core::default::Default for kulyrax_client::pb::Ack
+pub fn kulyrax_client::pb::Ack::default() -> Self
+impl core::fmt::Debug for kulyrax_client::pb::Ack
+pub fn kulyrax_client::pb::Ack::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for kulyrax_client::pb::Ack
+impl prost::message::Message for kulyrax_client::pb::Ack
+pub fn kulyrax_client::pb::Ack::clear(&mut self)
+pub fn kulyrax_client::pb::Ack::encoded_len(&self) -> usize
+impl core::marker::Forget for kulyrax_client::pb::Ack
+impl core::marker::Freeze for kulyrax_client::pb::Ack
+impl core::marker::Move for kulyrax_client::pb::Ack
+impl core::marker::Send for kulyrax_client::pb::Ack
+impl core::marker::Sync for kulyrax_client::pb::Ack
+impl core::marker::Unpin for kulyrax_client::pb::Ack
+impl core::marker::UnsafeUnpin for kulyrax_client::pb::Ack
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_client::pb::Ack
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_client::pb::Ack
+pub struct kulyrax_client::EventEnvelope
+pub kulyrax_client::EventEnvelope::event_id: alloc::string::String
+pub kulyrax_client::EventEnvelope::event_type: alloc::string::String
+pub kulyrax_client::EventEnvelope::metadata: std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>
+pub kulyrax_client::EventEnvelope::payload: alloc::string::String
+pub kulyrax_client::EventEnvelope::position: alloc::string::String
+pub kulyrax_client::EventEnvelope::sequence: u64
+pub kulyrax_client::EventEnvelope::version: u32
+impl core::clone::Clone for kulyrax_client::pb::EventEnvelope
+pub fn kulyrax_client::pb::EventEnvelope::clone(&self) -> Self
+impl core::cmp::PartialEq for kulyrax_client::pb::EventEnvelope
+pub fn kulyrax_client::pb::EventEnvelope::eq(&self, &Self) -> bool
+impl core::default::Default for kulyrax_client::pb::EventEnvelope
+pub fn kulyrax_client::pb::EventEnvelope::default() -> Self
+impl core::fmt::Debug for kulyrax_client::pb::EventEnvelope
+pub fn kulyrax_client::pb::EventEnvelope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for kulyrax_client::pb::EventEnvelope
+impl prost::message::Message for kulyrax_client::pb::EventEnvelope
+pub fn kulyrax_client::pb::EventEnvelope::clear(&mut self)
+pub fn kulyrax_client::pb::EventEnvelope::encoded_len(&self) -> usize
+impl core::marker::Forget for kulyrax_client::pb::EventEnvelope
+impl core::marker::Freeze for kulyrax_client::pb::EventEnvelope
+impl core::marker::Move for kulyrax_client::pb::EventEnvelope
+impl core::marker::Send for kulyrax_client::pb::EventEnvelope
+impl core::marker::Sync for kulyrax_client::pb::EventEnvelope
+impl core::marker::Unpin for kulyrax_client::pb::EventEnvelope
+impl core::marker::UnsafeUnpin for kulyrax_client::pb::EventEnvelope
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_client::pb::EventEnvelope
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_client::pb::EventEnvelope
+pub struct kulyrax_client::Producer
+impl kulyrax_client::Producer
+pub async fn kulyrax_client::Producer::connect(impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, kulyrax_client::ClientError>
+pub fn kulyrax_client::Producer::finish(self)
+pub async fn kulyrax_client::Producer::next_ack(&mut self) -> core::option::Option<core::result::Result<kulyrax_client::pb::Ack, kulyrax_client::ClientError>>
+pub async fn kulyrax_client::Producer::send(&self, kulyrax_client::pb::EventEnvelope) -> core::result::Result<(), kulyrax_client::ClientError>
+impl core::marker::Forget for kulyrax_client::Producer
+impl !core::marker::Freeze for kulyrax_client::Producer
+impl core::marker::Move for kulyrax_client::Producer
+impl core::marker::Send for kulyrax_client::Producer
+impl !core::marker::Sync for kulyrax_client::Producer
+impl core::marker::Unpin for kulyrax_client::Producer
+impl core::marker::UnsafeUnpin for kulyrax_client::Producer
+impl !core::panic::unwind_safe::RefUnwindSafe for kulyrax_client::Producer
+impl !core::panic::unwind_safe::UnwindSafe for kulyrax_client::Producer

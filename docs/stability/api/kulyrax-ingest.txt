@@ -1,0 +1,208 @@
+pub mod kulyrax_ingest
+pub mod kulyrax_ingest::pb
+pub mod kulyrax_ingest::pb::ingest_client
+pub struct kulyrax_ingest::pb::ingest_client::IngestClient<T>
+impl kulyrax_ingest::pb::ingest_client::IngestClient<tonic::transport::channel::Channel>
+pub async fn kulyrax_ingest::pb::ingest_client::IngestClient<tonic::transport::channel::Channel>::connect<D>(D) -> core::result::Result<Self, tonic::transport::error::Error> where D: core::convert::TryInto<tonic::transport::channel::endpoint::Endpoint>, <D as core::convert::TryInto>::Error: core::convert::Into<tonic::codegen::StdError>
+impl<T> kulyrax_ingest::pb::ingest_client::IngestClient<T> where T: tonic::client::service::GrpcService<tonic::body::BoxBody>, <T as tonic::client::service::GrpcService>::Error: core::convert::Into<tonic::codegen::StdError>, <T as tonic::client::service::GrpcService>::ResponseBody: http_body::Body<Data = bytes::bytes::Bytes> + core::marker::Send + 'static, <<T as tonic::client::service::GrpcService>::ResponseBody as http_body::Body>::Error: core::convert::Into<tonic::codegen::StdError> + core::marker::Send
+pub fn kulyrax_ingest::pb::ingest_client::IngestClient<T>::accept_compressed(self, tonic::codec::compression::CompressionEncoding) -> Self
+pub fn kulyrax_ingest::pb::ingest_client::IngestClient<T>::max_decoding_message_size(self, usize) -> Self
+pub fn kulyrax_ingest::pb::ingest_client::IngestClient<T>::max_encoding_message_size(self, usize) -> Self
+pub fn kulyrax_ingest::pb::ingest_client::IngestClient<T>::new(T) -> Self
+pub fn kulyrax_ingest::pb::ingest_client::IngestClient<T>::send_compressed(self, tonic::codec::compression::CompressionEncoding) -> Self
+pub async fn kulyrax_ingest::pb::ingest_client::IngestClient<T>::stream(&mut self, impl tonic::request::IntoStreamingRequest<Message = kulyrax_ingest::pb::EventEnvelope>) -> core::result::Result<tonic::response::Response<tonic::codec::decode::Streaming<kulyrax_ingest::pb::Ack>>, tonic::status::Status>
+pub fn kulyrax_ingest::pb::ingest_client::IngestClient<T>::with_interceptor<F>(T, F) -> kulyrax_ingest::pb::ingest_client::IngestClient<tonic::service::interceptor::InterceptedService<T, F>> where F: tonic::service::interceptor::Interceptor, <T as tonic::client::service::GrpcService>::ResponseBody: core::default::Default, T: tower_service::Service<http::request::Request<tonic::body::BoxBody>, Response = http::response::Response<<T as tonic::client::service::GrpcService<tonic::body::BoxBody>>::ResponseBody>>, <T as tower_service::Service<http::request::Request<tonic::body::BoxBody>>>::Error: core::convert::Into<tonic::codegen::StdError> + core::marker::Send + core::marker::Sync
+pub fn kulyrax_ingest::pb::ingest_client::IngestClient<T>::with_origin(T, http::uri::Uri) -> Self
+impl<T: core::clone::Clone> core::clone::Clone for kulyrax_ingest::pb::ingest_client::IngestClient<T>
+pub fn kulyrax_ingest::pb::ingest_client::IngestClient<T>::clone(&self) -> Self
+impl<T: core::fmt::Debug> core::fmt::Debug for kulyrax_ingest::pb::ingest_client::IngestClient<T>
+pub fn kulyrax_ingest::pb::ingest_client::IngestClient<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T> core::marker::Forget for kulyrax_ingest::pb::ingest_client::IngestClient<T>
+impl<T> !core::marker::Freeze for kulyrax_ingest::pb::ingest_client::IngestClient<T>
+impl<T> core::marker::Move for kulyrax_ingest::pb::ingest_client::IngestClient<T>
+impl<T> core::marker::Send for kulyrax_ingest::pb::ingest_client::IngestClient<T> where tonic::client::grpc::Grpc<T>: core::marker::Send
+impl<T> core::marker::Sync for kulyrax_ingest::pb::ingest_client::IngestClient<T> where tonic::client::grpc::Grpc<T>: core::marker::Sync
+impl<T> core::marker::Unpin for kulyrax_ingest::pb::ingest_client::IngestClient<T> where tonic::client::grpc::Grpc<T>: core::marker::Unpin
+impl<T> core::marker::UnsafeUnpin for kulyrax_ingest::pb::ingest_client::IngestClient<T> where tonic::client::grpc::Grpc<T>: core::marker::UnsafeUnpin
+impl<T> core::panic::unwind_safe::RefUnwindSafe for kulyrax_ingest::pb::ingest_client::IngestClient<T> where tonic::client::grpc::Grpc<T>: core::panic::unwind_safe::RefUnwindSafe
+impl<T> core::panic::unwind_safe::UnwindSafe for kulyrax_ingest::pb::ingest_client::IngestClient<T> where tonic::client::grpc::Grpc<T>: core::panic::unwind_safe::UnwindSafe
+pub mod kulyrax_ingest::pb::ingest_server
+pub struct kulyrax_ingest::pb::ingest_server::IngestServer<T>
+impl<T> kulyrax_ingest::pb::ingest_server::IngestServer<T>
+pub fn kulyrax_ingest::pb::ingest_server::IngestServer<T>::accept_compressed(self, tonic::codec::compression::CompressionEncoding) -> Self
+pub fn kulyrax_ingest::pb::ingest_server::IngestServer<T>::from_arc(alloc::rcs::arc::Arc<T>) -> Self
+pub fn kulyrax_ingest::pb::ingest_server::IngestServer<T>::max_decoding_message_size(self, usize) -> Self
+pub fn kulyrax_ingest::pb::ingest_server::IngestServer<T>::max_encoding_message_size(self, usize) -> Self
+pub fn kulyrax_ingest::pb::ingest_server::IngestServer<T>::new(T) -> Self
+pub fn kulyrax_ingest::pb::ingest_server::IngestServer<T>::send_compressed(self, tonic::codec::compression::CompressionEncoding) -> Self
+pub fn kulyrax_ingest::pb::ingest_server::IngestServer<T>::with_interceptor<F>(T, F) -> tonic::service::interceptor::InterceptedService<Self, F> where F: tonic::service::interceptor::Interceptor
+impl<T, B> tower_service::Service<http::request::Request<B>> for kulyrax_ingest::pb::ingest_server::IngestServer<T> where T: kulyrax_ingest::pb::ingest_server::Ingest, B: http_body::Body + core::marker::Send + 'static, <B as http_body::Body>::Error: core::convert::Into<tonic::codegen::StdError> + core::marker::Send + 'static
+pub type kulyrax_ingest::pb::ingest_server::IngestServer<T>::Error = never
+pub type kulyrax_ingest::pb::ingest_server::IngestServer<T>::Future = core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<<kulyrax_ingest::pb::ingest_server::IngestServer<T> as tower_service::Service<http::request::Request<B>>>::Response, <kulyrax_ingest::pb::ingest_server::IngestServer<T> as tower_service::Service<http::request::Request<B>>>::Error>> + core::marker::Send)>>
+pub type kulyrax_ingest::pb::ingest_server::IngestServer<T>::Response = http::response::Response<http_body_util::combinators::box_body::UnsyncBoxBody<bytes::bytes::Bytes, tonic::status::Status>>
+pub fn kulyrax_ingest::pb::ingest_server::IngestServer<T>::call(&mut self, http::request::Request<B>) -> Self::Future
+pub fn kulyrax_ingest::pb::ingest_server::IngestServer<T>::poll_ready(&mut self, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), Self::Error>>
+impl<T: core::fmt::Debug> core::fmt::Debug for kulyrax_ingest::pb::ingest_server::IngestServer<T>
+pub fn kulyrax_ingest::pb::ingest_server::IngestServer<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T> core::clone::Clone for kulyrax_ingest::pb::ingest_server::IngestServer<T>
+pub fn kulyrax_ingest::pb::ingest_server::IngestServer<T>::clone(&self) -> Self
+impl<T> tonic::server::NamedService for kulyrax_ingest::pb::ingest_server::IngestServer<T>
+pub const kulyrax_ingest::pb::ingest_server::IngestServer<T>::NAME: &'static str
+impl<T> core::marker::Forget for kulyrax_ingest::pb::ingest_server::IngestServer<T>
+impl<T> core::marker::Freeze for kulyrax_ingest::pb::ingest_server::IngestServer<T> where alloc::rcs::arc::Arc<T>: core::marker::Freeze
+impl<T> core::marker::Move for kulyrax_ingest::pb::ingest_server::IngestServer<T>
+impl<T> core::marker::Send for kulyrax_ingest::pb::ingest_server::IngestServer<T> where alloc::rcs::arc::Arc<T>: core::marker::Send
+impl<T> core::marker::Sync for kulyrax_ingest::pb::ingest_server::IngestServer<T> where alloc::rcs::arc::Arc<T>: core::marker::Sync
+impl<T> core::marker::Unpin for kulyrax_ingest::pb::ingest_server::IngestServer<T> where alloc::rcs::arc::Arc<T>: core::marker::Unpin
+impl<T> core::marker::UnsafeUnpin for kulyrax_ingest::pb::ingest_server::IngestServer<T> where alloc::rcs::arc::Arc<T>: core::marker::UnsafeUnpin
+impl<T> core::panic::unwind_safe::RefUnwindSafe for kulyrax_ingest::pb::ingest_server::IngestServer<T> where alloc::rcs::arc::Arc<T>: core::panic::unwind_safe::RefUnwindSafe
+impl<T> core::panic::unwind_safe::UnwindSafe for kulyrax_ingest::pb::ingest_server::IngestServer<T> where alloc::rcs::arc::Arc<T>: core::panic::unwind_safe::UnwindSafe
+pub const kulyrax_ingest::pb::ingest_server::SERVICE_NAME: &str
+pub trait kulyrax_ingest::pb::ingest_server::Ingest: core::marker::Send + core::marker::Sync + 'static
+pub type kulyrax_ingest::pb::ingest_server::Ingest::StreamStream: futures_core::stream::Stream<Item = core::result::Result<kulyrax_ingest::pb::Ack, tonic::status::Status>> + core::marker::Send + 'static
+pub fn kulyrax_ingest::pb::ingest_server::Ingest::stream<'life0, 'async_trait>(&'life0 self, tonic::request::Request<tonic::codec::decode::Streaming<kulyrax_ingest::pb::EventEnvelope>>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<tonic::response::Response<Self::StreamStream>, tonic::status::Status>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait
+pub struct kulyrax_ingest::pb::Ack
+pub kulyrax_ingest::pb::Ack::ack_protocol_version: u32
+pub kulyrax_ingest::pb::Ack::batch_events: u32
+pub kulyrax_ingest::pb::Ack::dlq_events: u32
+pub kulyrax_ingest::pb::Ack::position: alloc::string::String
+impl core::clone::Clone for kulyrax_ingest::pb::Ack
+pub fn kulyrax_ingest::pb::Ack::clone(&self) -> Self
+impl core::cmp::PartialEq for kulyrax_ingest::pb::Ack
+pub fn kulyrax_ingest::pb::Ack::eq(&self, &Self) -> bool
+impl core::default::Default for kulyrax_ingest::pb::Ack
+pub fn kulyrax_ingest::pb::Ack::default() -> Self
+impl core::fmt::Debug for kulyrax_ingest::pb::Ack
+pub fn kulyrax_ingest::pb::Ack::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for kulyrax_ingest::pb::Ack
+impl prost::message::Message for kulyrax_ingest::pb::Ack
+pub fn kulyrax_ingest::pb::Ack::clear(&mut self)
+pub fn kulyrax_ingest::pb::Ack::encoded_len(&self) -> usize
+impl core::marker::Forget for kulyrax_ingest::pb::Ack
+impl core::marker::Freeze for kulyrax_ingest::pb::Ack
+impl core::marker::Move for kulyrax_ingest::pb::Ack
+impl core::marker::Send for kulyrax_ingest::pb::Ack
+impl core::marker::Sync for kulyrax_ingest::pb::Ack
+impl core::marker::Unpin for kulyrax_ingest::pb::Ack
+impl core::marker::UnsafeUnpin for kulyrax_ingest::pb::Ack
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_ingest::pb::Ack
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_ingest::pb::Ack
+pub struct kulyrax_ingest::pb::EventEnvelope
+pub kulyrax_ingest::pb::EventEnvelope::event_id: alloc::string::String
+pub kulyrax_ingest::pb::EventEnvelope::event_type: alloc::string::String
+pub kulyrax_ingest::pb::EventEnvelope::metadata: std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>
+pub kulyrax_ingest::pb::EventEnvelope::payload: alloc::string::String
+pub kulyrax_ingest::pb::EventEnvelope::position: alloc::string::String
+pub kulyrax_ingest::pb::EventEnvelope::sequence: u64
+pub kulyrax_ingest::pb::EventEnvelope::version: u32
+impl kulyrax_ingest::pb::EventEnvelope
+pub fn kulyrax_ingest::pb::EventEnvelope::into_sourced(self) -> kulyrax_core::source::SourcedEvent
+impl core::clone::Clone for kulyrax_ingest::pb::EventEnvelope
+pub fn kulyrax_ingest::pb::EventEnvelope::clone(&self) -> Self
+impl core::cmp::PartialEq for kulyrax_ingest::pb::EventEnvelope
+pub fn kulyrax_ingest::pb::EventEnvelope::eq(&self, &Self) -> bool
+impl core::convert::From<&kulyrax_core::event::Event> for kulyrax_ingest::pb::EventEnvelope
+pub fn kulyrax_ingest::pb::EventEnvelope::from(&kulyrax_core::event::Event) -> Self
+impl core::default::Default for kulyrax_ingest::pb::EventEnvelope
+pub fn kulyrax_ingest::pb::EventEnvelope::default() -> Self
+impl core::fmt::Debug for kulyrax_ingest::pb::EventEnvelope
+pub fn kulyrax_ingest::pb::EventEnvelope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for kulyrax_ingest::pb::EventEnvelope
+impl prost::message::Message for kulyrax_ingest::pb::EventEnvelope
+pub fn kulyrax_ingest::pb::EventEnvelope::clear(&mut self)
+pub fn kulyrax_ingest::pb::EventEnvelope::encoded_len(&self) -> usize
+impl core::marker::Forget for kulyrax_ingest::pb::EventEnvelope
+impl core::marker::Freeze for kulyrax_ingest::pb::EventEnvelope
+impl core::marker::Move for kulyrax_ingest::pb::EventEnvelope
+impl core::marker::Send for kulyrax_ingest::pb::EventEnvelope
+impl core::marker::Sync for kulyrax_ingest::pb::EventEnvelope
+impl core::marker::Unpin for kulyrax_ingest::pb::EventEnvelope
+impl core::marker::UnsafeUnpin for kulyrax_ingest::pb::EventEnvelope
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_ingest::pb::EventEnvelope
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_ingest::pb::EventEnvelope
+pub enum kulyrax_ingest::IngestError
+pub kulyrax_ingest::IngestError::Bind(alloc::string::String)
+pub kulyrax_ingest::IngestError::Config(alloc::string::String)
+pub kulyrax_ingest::IngestError::Runtime(core::io::error::Error)
+impl core::error::Error for kulyrax_ingest::IngestError
+impl core::fmt::Debug for kulyrax_ingest::IngestError
+pub fn kulyrax_ingest::IngestError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for kulyrax_ingest::IngestError
+pub fn kulyrax_ingest::IngestError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Forget for kulyrax_ingest::IngestError
+impl core::marker::Freeze for kulyrax_ingest::IngestError
+impl core::marker::Move for kulyrax_ingest::IngestError
+impl core::marker::Send for kulyrax_ingest::IngestError
+impl core::marker::Sync for kulyrax_ingest::IngestError
+impl core::marker::Unpin for kulyrax_ingest::IngestError
+impl core::marker::UnsafeUnpin for kulyrax_ingest::IngestError
+impl !core::panic::unwind_safe::RefUnwindSafe for kulyrax_ingest::IngestError
+impl !core::panic::unwind_safe::UnwindSafe for kulyrax_ingest::IngestError
+pub enum kulyrax_ingest::ServeError
+pub kulyrax_ingest::ServeError::Ingest(kulyrax_ingest::IngestError)
+pub kulyrax_ingest::ServeError::Pipeline(kulyrax_core::pipeline::PipelineError)
+pub kulyrax_ingest::ServeError::Source(kulyrax_core::source::SourceError)
+impl core::error::Error for kulyrax_ingest::ServeError
+impl core::fmt::Debug for kulyrax_ingest::ServeError
+pub fn kulyrax_ingest::ServeError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for kulyrax_ingest::ServeError
+pub fn kulyrax_ingest::ServeError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Forget for kulyrax_ingest::ServeError
+impl core::marker::Freeze for kulyrax_ingest::ServeError
+impl core::marker::Move for kulyrax_ingest::ServeError
+impl core::marker::Send for kulyrax_ingest::ServeError
+impl core::marker::Sync for kulyrax_ingest::ServeError
+impl core::marker::Unpin for kulyrax_ingest::ServeError
+impl core::marker::UnsafeUnpin for kulyrax_ingest::ServeError
+impl !core::panic::unwind_safe::RefUnwindSafe for kulyrax_ingest::ServeError
+impl !core::panic::unwind_safe::UnwindSafe for kulyrax_ingest::ServeError
+pub struct kulyrax_ingest::GrpcServer
+pub kulyrax_ingest::GrpcServer::local_addr: core::option::Option<core::net::socket_addr::SocketAddr>
+pub kulyrax_ingest::GrpcServer::local_path: core::option::Option<std::path::PathBuf>
+impl kulyrax_ingest::GrpcServer
+pub fn kulyrax_ingest::GrpcServer::shutdown(self)
+impl core::marker::Forget for kulyrax_ingest::GrpcServer
+impl !core::marker::Freeze for kulyrax_ingest::GrpcServer
+impl core::marker::Move for kulyrax_ingest::GrpcServer
+impl core::marker::Send for kulyrax_ingest::GrpcServer
+impl core::marker::Sync for kulyrax_ingest::GrpcServer
+impl core::marker::Unpin for kulyrax_ingest::GrpcServer
+impl core::marker::UnsafeUnpin for kulyrax_ingest::GrpcServer
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_ingest::GrpcServer
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_ingest::GrpcServer
+pub struct kulyrax_ingest::GrpcSource
+impl kulyrax_core::source::EventSource for kulyrax_ingest::GrpcSource
+pub fn kulyrax_ingest::GrpcSource::commit(&mut self, kulyrax_core::source::SourcePosition) -> core::result::Result<(), kulyrax_core::source::SourceError>
+pub fn kulyrax_ingest::GrpcSource::commit_with_dlq_count(&mut self, kulyrax_core::source::SourcePosition, u32) -> core::result::Result<(), kulyrax_core::source::SourceError>
+pub fn kulyrax_ingest::GrpcSource::committed_position(&self) -> core::option::Option<&kulyrax_core::source::SourcePosition>
+pub fn kulyrax_ingest::GrpcSource::id(&self) -> &str
+pub fn kulyrax_ingest::GrpcSource::poll(&mut self, usize) -> core::result::Result<alloc::vec::Vec<kulyrax_core::source::SourcedEvent>, kulyrax_core::source::SourceError>
+impl core::marker::Forget for kulyrax_ingest::GrpcSource
+impl core::marker::Freeze for kulyrax_ingest::GrpcSource
+impl core::marker::Move for kulyrax_ingest::GrpcSource
+impl core::marker::Send for kulyrax_ingest::GrpcSource
+impl core::marker::Sync for kulyrax_ingest::GrpcSource
+impl core::marker::Unpin for kulyrax_ingest::GrpcSource
+impl core::marker::UnsafeUnpin for kulyrax_ingest::GrpcSource
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_ingest::GrpcSource
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_ingest::GrpcSource
+pub struct kulyrax_ingest::ServeOptions
+pub kulyrax_ingest::ServeOptions::dlq_dir: core::option::Option<std::path::PathBuf>
+pub kulyrax_ingest::ServeOptions::listen: alloc::string::String
+pub kulyrax_ingest::ServeOptions::max_batch: usize
+pub kulyrax_ingest::ServeOptions::max_batch_delay: core::time::Duration
+pub kulyrax_ingest::ServeOptions::poll_interval: core::time::Duration
+pub kulyrax_ingest::ServeOptions::retry_budget: u32
+impl core::default::Default for kulyrax_ingest::ServeOptions
+pub fn kulyrax_ingest::ServeOptions::default() -> Self
+impl core::marker::Forget for kulyrax_ingest::ServeOptions
+impl core::marker::Freeze for kulyrax_ingest::ServeOptions
+impl core::marker::Move for kulyrax_ingest::ServeOptions
+impl core::marker::Send for kulyrax_ingest::ServeOptions
+impl core::marker::Sync for kulyrax_ingest::ServeOptions
+impl core::marker::Unpin for kulyrax_ingest::ServeOptions
+impl core::marker::UnsafeUnpin for kulyrax_ingest::ServeOptions
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_ingest::ServeOptions
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_ingest::ServeOptions
+pub fn kulyrax_ingest::serve(&std::path::Path, &std::path::Path, &kulyrax_ingest::ServeOptions, &core::sync::atomic::AtomicBool, impl core::ops::function::Fn(&mut kulyrax_core::runtime::engine::KulyraxRuntime) + core::clone::Clone + 'static) -> core::result::Result<kulyrax_core::source::runner::SourceRunReport, kulyrax_ingest::ServeError>
+pub fn kulyrax_ingest::start(impl core::convert::Into<alloc::string::String>, &str) -> core::result::Result<(kulyrax_ingest::GrpcServer, kulyrax_ingest::GrpcSource), kulyrax_ingest::IngestError>
