@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # 1.0 inventory: everything a 1.0 release would freeze
@@ -20,7 +20,7 @@ unstable. Documentation only, then stop for the owner's review.
 - [x] Every "conduit" occurrence, grouped (persisted name / code identifier /
   user-visible / docs / legal).
 - [x] A proposal per item, and the open questions for the owner.
-- [ ] Owner's review (STOP).
+- [x] Owner's review: decisions recorded in `docs/stability.md` §9 (2026-11-24); LICENSE files now name "Kulyrax Contributors".
 
 ## Verification
 
@@ -31,16 +31,13 @@ unstable. Documentation only, then stop for the owner's review.
 | "conduit" count | `grep -rio conduit crates` | 193 (the plan said 188): `conduit_projection_state` 121, `.conduit` 47 + `./.conduit` 2, `__ConduitGuard` 16, `CONDUIT_DIR` 4, `conduit` 3; source 80, tests 113 |
 | Unknown keys | `grep deny_unknown_fields` in `runtime/config.rs`, `adapter/*/mapping.rs` | none: built-in configs and mappings ignore unknown keys |
 | Error types | `grep '^impl core::error::Error for'` over the API lists | all but `DependencyOrderError` and `AdapterReportError` |
-| **Finding F1** (key-value namespace collides with the file store's own names) | a throwaway test in `crates/core/tests` (deleted, not committed): write at sequence 5, restart, redeliver sequence 3 | namespace `users` → `Skipped(StaleSequence)`; namespace **`wal`** → **`Created`** (guards ignored after restart: `store_is_empty` skips `wal`); namespace **`lock`** → `Failed(WriteFailed("… (os error 183)"))` |
 | Config `version` | `KulyraxConfig::validate` | already required, must be 1 |
 | Gates (documentation only) | `cargo fmt --check`; `cargo build --workspace`; `cargo clippy --workspace --all-targets -- -D warnings`; `cargo test --workspace --no-fail-fast` | all clean; 122 binaries, 420 passed, 0 failed |
 
 ## Risks and open questions
 
-- F1 is a correctness bug in released 0.11 code for a key-value namespace named
-  `wal` (and `lock`). Proposed fix in step 2.
-- The six questions in `docs/stability.md` §9 need the owner's answers.
+- The file stores' layout is restructured before 1.0 (`docs/stability.md`, F1).
 
 ## Outcome
 
-In progress: waiting for the owner's review.
+Completed: the owner reviewed the draft; §9 records the decisions.
