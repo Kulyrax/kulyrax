@@ -94,7 +94,13 @@ gap, and nothing past it is delivered yet.
   snapshot that saw it. On every later poll, the gap is **final** once that poll's
   `pg_snapshot_xmin(pg_current_snapshot())` is at or above the recorded `xmax`:
   every transaction that could have inserted the missing rows has ended, and the
-  same read shows they did not commit. A final gap is skipped at once.
+  same read shows they did not commit.
+- **Grace** (owner, 2026-11-24). A gap is skipped only when it is final **and** has
+  been held at least `gap_grace_ms` (default **1,000**, `0` allowed, on the source's
+  monotonic clock). `xmax` cannot account for a producer that took its value with
+  `nextval()` before it had a transaction id (it gets one at its first write, at or
+  above the recorded `xmax`), so the gap looks final at once; the grace gives such
+  a producer that long to insert, and its row is then delivered in order.
 - **Backstop.** `gap_timeout_ms` (default **10,000**, on the source's own monotonic
   clock, `Instant`) skips a gap that has not become final, for instance while a
   long transaction on the database holds `xmin` back.
@@ -173,7 +179,8 @@ sources:
         payload: payload
         metadata: metadata           # may be ~ (no column): empty metadata
         version: version             # may be ~ (no column): version 1
-      gap_timeout_ms: 10000          # backstop; final gaps skip at once
+      gap_grace_ms: 1000             # a final gap is still held this long
+      gap_timeout_ms: 10000          # backstop for a gap that never turns final
       watch_retention_ms: 3600000
       allow_unverified_sequence: false
 ```
@@ -201,13 +208,18 @@ start-up by a factory registered on the runtime (`register_source_factory`).
 - **A gap waits for every older transaction.** The primary rule waits until the
   database's oldest running transaction is newer than the gap; an unrelated long
   transaction holds gaps back until it ends or `gap_timeout_ms` passes.
-- **A rare row can still arrive late.** A transaction that took its sequence value
-  but had no transaction id yet when the gap was seen (one that called `nextval()`
-  before inserting) can commit after the gap is judged final; so can one slower
-  than the backstop. Such a row is delivered late from the watch list, and the
-  guards judge it by its sequence: if its entity has a newer event, it is skipped
-  as stale; under `on_existing: ignore`, a late create is skipped. Late rows and
-  late skips are logged and counted.
+- **Every final gap costs `gap_grace_ms`.** A rolled-back insert now holds the source
+  for the grace (1 s by default) before it is skipped; `0` restores skipping on the
+  next poll, and reopens the window below.
+- **A rare row can still arrive late.** The grace narrows the `nextval()`-before-
+  transaction-id window, it does not close it: a producer that waits longer than
+  `gap_grace_ms` between taking its value and inserting still has its gap skipped as
+  final. So can a transaction slower than the backstop. Such a row is delivered
+  late from the watch list, and the guards judge it by its sequence: if its entity
+  has a newer event, it is skipped as stale; under `on_existing: ignore`, a late
+  create is skipped. Late rows and late skips are logged and counted. A producer
+  that inserts with the column's default takes its value and its transaction id
+  in the same statement, microseconds apart, well inside the grace.
 - **The watch list is bounded** (one hour, 10,000 values). A value dropped from it
   is not read again.
 - Polling costs a query per poll interval even when idle.

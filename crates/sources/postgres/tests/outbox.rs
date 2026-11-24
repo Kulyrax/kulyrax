@@ -68,6 +68,7 @@ fn config(url: &str, table: &str) -> OutboxConfig {
         table: table.to_string(),
         sequence_column: "id".into(),
         columns: OutboxColumns::default(),
+        gap_grace_ms: 1_000,
         gap_timeout_ms: 60_000,
         watch_retention_ms: 3_600_000,
         allow_unverified_sequence: false,
@@ -102,6 +103,34 @@ fn open(
 
 fn seqs(events: &[SourcedEvent]) -> Vec<u64> {
     events.iter().map(|e| e.event.sequence).collect()
+}
+
+/// Poll every 50 ms until a poll delivers something, for at most `limit`.
+fn poll_until_some(
+    s: &mut PostgresOutboxSource,
+    limit: Duration,
+) -> Result<Vec<SourcedEvent>, Box<dyn std::error::Error>> {
+    let started = Instant::now();
+    loop {
+        let events = s.poll(10)?;
+        if !events.is_empty() || started.elapsed() >= limit {
+            return Ok(events);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// The value the outbox's sequence hands out next, taken with `nextval()`
+/// on `c` (outside any insert, so the session has no transaction id yet).
+fn take_next_value(
+    c: &mut impl postgres::GenericClient,
+    table: &str,
+) -> Result<i64, postgres::Error> {
+    Ok(c.query_one(
+        &format!("SELECT nextval(pg_get_serial_sequence('{table}', 'id'))"),
+        &[],
+    )?
+    .get(0))
 }
 
 fn detail(source: &PostgresOutboxSource, name: &str) -> String {
@@ -235,16 +264,17 @@ fn a_rolled_back_insert_is_skipped_without_waiting_for_the_timeout() -> R {
 
     let started = Instant::now();
     assert!(s.poll(10)?.is_empty(), "first sight of the gap holds it");
-    let events = s.poll(10)?;
+    let events = poll_until_some(&mut s, Duration::from_secs(10))?;
     assert_eq!(
         seqs(&events),
         vec![after as u64],
         "the gap at {lost} is final"
     );
+    // Held for the grace (1 s by default), not the 60 s timeout.
+    let waited = started.elapsed();
     assert!(
-        started.elapsed() < Duration::from_secs(10),
-        "{:?}",
-        started.elapsed()
+        waited >= Duration::from_millis(1_000) && waited < Duration::from_secs(10),
+        "{waited:?}"
     );
     s.commit(events[0].position.clone())?;
     assert_eq!(
@@ -266,6 +296,7 @@ fn watched_values_expire() -> R {
         dir.path(),
         OutboxConfig {
             watch_retention_ms: 200,
+            gap_grace_ms: 0,
             ..config(&url, &t)
         },
     )?;
@@ -509,7 +540,7 @@ fn a_late_row_is_delivered_logged_and_counted() -> R {
     for _ in 0..2 {
         run_once(
             &db,
-            PostgresOutboxSource::open("outbox".into(), state.clone(), config(&url, &t))?,
+            PostgresOutboxSource::open("outbox".into(), state.clone(), no_grace(&url, &t))?,
         )?;
     }
     assert_eq!(users(&db), vec![("u1".into(), "newer".into())]);
@@ -523,7 +554,7 @@ fn a_late_row_is_delivered_logged_and_counted() -> R {
     )?;
     let report = run_once(
         &db,
-        PostgresOutboxSource::open("outbox".into(), state.clone(), config(&url, &t))?,
+        PostgresOutboxSource::open("outbox".into(), state.clone(), no_grace(&url, &t))?,
     )?;
     assert_eq!(report.events_processed, 1, "the late row");
     assert_eq!(
@@ -532,9 +563,107 @@ fn a_late_row_is_delivered_logged_and_counted() -> R {
         "stale: skipped"
     );
 
-    let s = PostgresOutboxSource::inspect("outbox".into(), state, config(&url, &t))?;
+    let s = PostgresOutboxSource::inspect("outbox".into(), state, no_grace(&url, &t))?;
     assert_eq!(detail(&s, "late rows"), "1");
     assert_eq!(detail(&s, "late rows skipped"), "1");
     assert_eq!(detail(&s, "watched gaps"), "0");
+    Ok(())
+}
+
+/// [`config`] with `gap_grace_ms: 0`: a final gap skips on the next poll.
+fn no_grace(url: &str, table: &str) -> OutboxConfig {
+    OutboxConfig {
+        gap_grace_ms: 0,
+        ..config(url, table)
+    }
+}
+
+/// A producer that takes its value with `nextval()`, then pauses before its
+/// insert: it has no transaction id yet, so the gap at its value looks final
+/// at once. The grace keeps it held, and once the insert commits the row is
+/// delivered in order, not late.
+#[test]
+fn a_value_taken_before_the_insert_is_held_by_the_grace() -> R {
+    require_pg!(url, _serial);
+    let t = fresh_outbox(&url)?;
+    let mut c = connect(&url)?;
+    insert(&mut c, &t, "u1", "a")?;
+    let dir = tempfile::tempdir()?;
+    let mut s = open(
+        dir.path(),
+        OutboxConfig {
+            gap_grace_ms: 5_000,
+            ..config(&url, &t)
+        },
+    )?;
+    let events = s.poll(10)?;
+    s.commit(events[0].position.clone())?;
+
+    let mut producer = connect(&url)?;
+    let mut tx = producer.transaction()?;
+    let value: i64 = tx
+        .query_one(
+            &format!("SELECT nextval(pg_get_serial_sequence('{t}', 'id'))"),
+            &[],
+        )?
+        .get(0);
+    let after = insert(&mut c, &t, "u3", "after")?;
+    assert!(s.poll(10)?.is_empty(), "first sight of the gap at {value}");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        s.poll(10)?.is_empty(),
+        "final (no transaction id behind it) but within the grace: held"
+    );
+    tx.execute(
+        &format!(
+            "INSERT INTO {t} (id, event_id, event_type, payload)
+             VALUES ($1, 'evt-u2', 'UserUpserted', '{{\"id\": \"u2\", \"name\": \"b\"}}')"
+        ),
+        &[&value],
+    )?;
+    tx.commit()?;
+    let events = s.poll(10)?;
+    assert_eq!(seqs(&events), vec![value as u64, after as u64], "in order");
+    s.commit(events[1].position.clone())?;
+    assert_eq!(detail(&s, "watched gaps"), "0", "nothing was skipped");
+    Ok(())
+}
+
+/// The same producer without a grace: the gap is skipped as final, and the
+/// row arrives late. This is the window the grace exists for.
+#[test]
+fn without_a_grace_a_value_taken_before_the_insert_arrives_late() -> R {
+    require_pg!(url, _serial);
+    let t = fresh_outbox(&url)?;
+    let mut c = connect(&url)?;
+    insert(&mut c, &t, "u1", "a")?;
+    let dir = tempfile::tempdir()?;
+    let mut s = open(dir.path(), no_grace(&url, &t))?;
+    let events = s.poll(10)?;
+    s.commit(events[0].position.clone())?;
+
+    let mut producer = connect(&url)?;
+    let mut tx = producer.transaction()?;
+    let value = take_next_value(&mut tx, &t)?;
+    let after = insert(&mut c, &t, "u3", "after")?;
+    assert!(s.poll(10)?.is_empty(), "first sight of the gap at {value}");
+    let events = s.poll(10)?;
+    assert_eq!(seqs(&events), vec![after as u64], "skipped as final");
+    s.commit(events[0].position.clone())?;
+
+    tx.execute(
+        &format!(
+            "INSERT INTO {t} (id, event_id, event_type, payload)
+             VALUES ($1, 'evt-u2', 'UserUpserted', '{{\"id\": \"u2\", \"name\": \"b\"}}')"
+        ),
+        &[&value],
+    )?;
+    tx.commit()?;
+    let events = s.poll(10)?;
+    assert_eq!(seqs(&events), vec![value as u64], "delivered late");
+    assert!(
+        events[0].position.as_str().ends_with(".0000000001"),
+        "a late position"
+    );
     Ok(())
 }

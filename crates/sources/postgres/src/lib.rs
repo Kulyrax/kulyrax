@@ -13,8 +13,11 @@
 //! source records the `xmax` of that read's snapshot; the gap is final once a
 //! later read's `xmin` reaches it (every transaction that could still insert
 //! the missing rows has ended, and the same read shows they did not commit),
-//! and is skipped at once. `gap_timeout_ms` is a backstop for a gap held
-//! back by a long-running transaction. Skipped values are watched for
+//! and is skipped once it has also been held `gap_grace_ms`: a producer that
+//! took its value with `nextval()` before it had a transaction id is
+//! invisible to `xmax`, and the grace gives it that long to insert.
+//! `gap_timeout_ms` is a backstop for a gap held back by a long-running
+//! transaction. Skipped values are watched for
 //! `watch_retention_ms` (at most [`WATCH_CAP`] of them): one that appears is
 //! delivered late, logged with its outcome, and counted.
 //!
@@ -37,6 +40,10 @@ use kulyrax_core::source::{EventSource, SourceError, SourcePosition, SourcedEven
 /// Most skipped values watched at once; the oldest drop off first.
 pub const WATCH_CAP: usize = 10_000;
 
+fn default_gap_grace_ms() -> u64 {
+    1_000
+}
+
 fn default_gap_timeout_ms() -> u64 {
     10_000
 }
@@ -58,6 +65,11 @@ pub struct OutboxConfig {
     pub sequence_column: String,
     #[serde(default)]
     pub columns: OutboxColumns,
+    /// A final gap is still held at least this long, for a producer that
+    /// took its value before it had a transaction id. `0` skips final gaps
+    /// on the next poll.
+    #[serde(default = "default_gap_grace_ms")]
+    pub gap_grace_ms: u64,
     /// Backstop: skip a gap that has not become final after this long.
     #[serde(default = "default_gap_timeout_ms")]
     pub gap_timeout_ms: u64,
@@ -530,6 +542,7 @@ impl EventSource for PostgresOutboxSource {
 
         let now = Instant::now();
         let timeout = Duration::from_millis(self.config.gap_timeout_ms);
+        let grace = Duration::from_millis(self.config.gap_grace_ms);
         self.pending.clear();
         self.late.clear();
         let mut out = Vec::new();
@@ -569,7 +582,13 @@ impl EventSource for PostgresOutboxSource {
                         }
                         Some(gap) => {
                             let is_final = xmin >= gap.xmax;
-                            if !is_final && now.duration_since(gap.seen) < timeout {
+                            let held = now.duration_since(gap.seen);
+                            // The grace covers a producer that took its value
+                            // with `nextval()` before it had a transaction id:
+                            // no `xmax` can account for it, so a final gap is
+                            // still held this long.
+                            let skip = (is_final && held >= grace) || held >= timeout;
+                            if !skip {
                                 break;
                             }
                             let missing = seq - expected;
@@ -577,8 +596,8 @@ impl EventSource for PostgresOutboxSource {
                                 "kulyrax: source {}: skipping {missing} missing value(s) {expected}..={} ({}); watching for them",
                                 self.id,
                                 seq - 1,
-                                if is_final {
-                                    "no transaction that could insert them is still running"
+                                if is_final && held >= grace {
+                                    "no transaction that could insert them is still running, and gap_grace_ms passed"
                                 } else {
                                     "gap_timeout_ms passed"
                                 }

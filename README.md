@@ -108,7 +108,8 @@ Kulyrax only reads the table (a role with `SELECT` is enough) and never deletes 
 updates a row: cleaning the outbox stays your job. At start-up it checks the table,
 the columns, and that the sequence behind `sequence_column` has `INCREMENT 1` and
 `CACHE 1`. A missing value (an insert still in flight, or rolled back) holds delivery
-until no transaction that could still insert it is running, then is skipped; if it
+until no transaction that could still insert it is running and `gap_grace_ms`
+(default 1 s) has passed, then is skipped; if it
 commits after all within `watch_retention_ms` (default one hour), it is delivered
 late, logged, and counted in `kulyrax sources`. One process reads a source at a time.
 Details: [decision record](docs/ledger/decisions/2026-11-24-postgres-outbox-source.md).
