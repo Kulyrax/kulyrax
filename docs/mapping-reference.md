@@ -258,6 +258,64 @@ Two records that resolve to the same lane (the same node twice, say, because two
 first is written, and the second is skipped as stale. Validation can't detect this,
 since keys are resolved from the payload.
 
+## Names
+
+What a name in a mapping may be, per backend. Each rule is checked when the
+adapter is prepared, before anything is written; a name outside it stops the
+start-up with an error naming it. Values from events (keys, ids) are a separate
+matter, covered at the end.
+
+### File stores (`file`, `keyvalue`, `graph`)
+
+A key-value `namespace`, a document `collection`, a graph `label` or
+`edge_type` becomes a directory under the store's root, so it must:
+
+- be 1 to 64 bytes of ASCII letters, digits, `_` and `-` (so no `/`, `.`, `:`
+  or spaces);
+- not be a Windows device name (`con`, `prn`, `aux`, `nul`, `com1`–`com9`,
+  `lpt1`–`lpt9`, in any case).
+
+Two names that are one directory on a case-insensitive file system are refused
+together (`Users` and `users`), and so are two adapters on one root that would
+write the same directory (a key-value namespace and a document collection both
+named `users`).
+
+### SQL (`sqlite`, `postgres`, `mysql`)
+
+`table`, every column name and `primary_key` are written into SQL unquoted, so
+each must be a plain identifier: ASCII letters, digits and `_`, not starting
+with a digit. A table may be `schema.table`, each part a plain identifier.
+
+### Redis
+
+A `namespace` must be non-empty, contain no `:`, and not start with `__kulyrax`.
+Values live at `<namespace>:<key>` and guards under `__kulyrax:guard:`, so such
+a namespace could meet another namespace's keys or the guards.
+
+### Neo4j
+
+A `label` or `edge_type` must be non-empty and contain no backtick: it is
+written into Cypher between backticks.
+
+### MongoDB and Elasticsearch
+
+No extra rule on collection or index names; they reach the driver as data.
+
+### Values from events
+
+Keys, document ids and node ids come from the payload and can be any string:
+
+- **File stores** encode them into file names. Ids made of lowercase letters,
+  digits, `_`, `-`, `@` and inner `.` keep their names; any other byte becomes
+  `^` and two hex digits (`User` → `^55ser`), and ids too long for a file name
+  are hashed. No id can leave the store's root, and two different ids never
+  share a file, even on a case-insensitive file system.
+- **Elasticsearch** refuses the document ids `.` and `..` (the event fails):
+  they are URL dot segments and would address another endpoint. Any other id
+  is sent percent-encoded.
+- **SQL and Neo4j** bind event values as parameters; **Redis** and **MongoDB**
+  use them as keys and fields as they are.
+
 ## Next
 
 - [`docs/concepts.md`](concepts.md) for `decide()`, the guard, and facets.
