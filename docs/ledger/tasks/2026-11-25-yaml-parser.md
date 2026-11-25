@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: in-progress
 ---
 
 # Replace serde_yaml (1.0 plan, step 3)
@@ -16,18 +16,30 @@ unsafe code, YAML 1.1 vs 1.2 parsing, line numbers in errors, and
 
 - [x] Decision record comparing the maintained options against the owner's
   criteria, with evidence observed on 2026-11-25.
-- [ ] Owner's approval (STOP).
-- [ ] After approval: a golden test parses every YAML file in the repo, every YAML
-  string in Rust tests and examples, and every YAML code block in the docs with
-  serde_yaml 0.9 and with the new parser, into identical structs, before
-  serde_yaml is removed.
+- [x] Owner's approval: accepted 2026-11-25 with four changes (the decision's
+  "Owner's changes"; runbook C1).
+- [ ] C2: serde-saphyr 2.x behind `kulyrax_core::yaml`, with the strict options
+  and `with_snippet: true`. Every error names the file, and the field path
+  where available. A test checks that a wrong-type error in a mapping names the
+  file, the line and the field path.
+- [ ] C3: `raw` is a `serde_json::Value` in `CustomAdapterConfig` and
+  `CustomSourceConfig`, with before/after code in the release notes.
+- [ ] C4: the golden test compares serde_yaml 0.9 and `kulyrax_core::yaml` on
+  every YAML file in the repo, every YAML string in Rust tests and examples, and
+  every YAML code block in the docs. Both must give identical results, into the
+  real structs and into `serde_json::Value`. It also holds the permanent refusal
+  corpus, which both parsers must refuse.
+- [ ] C5: a CI grep allows only `crates/core/src/yaml.rs` and the golden test to
+  name `serde_saphyr` or `serde_yaml`.
+- [x] C6: serde-saphyr does not backport (its SECURITY.md). The move to 3.x is
+  recorded: [2026-11-25-yaml-parser-3x](2026-11-25-yaml-parser-3x.md).
+- [ ] C7: serde_yaml removed, along with the `unsafe-libyaml` audit ignore.
 - [ ] Every difference goes in the release notes.
-- [ ] Four gates green.
+- [ ] Four gates green; every Docker suite green; PR merged.
 
 ## Constraints and assumptions
 
-- Doc only until approved. Branch `docs/yaml-parser`, from `origin/phase-3`, so it
-  carries nothing private.
+- Branch `docs/yaml-parser`, rebased onto main (`d04ca00`, after the rename).
 - Kulyrax never writes YAML. The only `serde_yaml::to_value` calls build a `raw`
   config in tests.
 
@@ -61,5 +73,5 @@ findings.
   module and a major pin; yaml_serde is the fallback.
 - The YAML embedded in Rust tests and docs is not compared yet. The golden test
   covers it after approval.
-- `raw: serde_json::Value` changes the API for third-party factories. It needs the
-  owner's yes as part of this decision.
+- `raw: serde_json::Value` changes the API for third-party factories. The owner
+  accepted it with the decision.

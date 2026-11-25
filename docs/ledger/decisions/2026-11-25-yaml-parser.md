@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Replace serde_yaml with serde-saphyr, behind one module, configured to read YAML as 0.12 did
@@ -91,6 +91,8 @@ serde_saphyr::options! {
 }
 ```
 
+(The owner changed `with_snippet` to `true`; see "Owner's changes" below.)
+
 With them, serde-saphyr agrees with serde_yaml 0.9 on every row. The only
 difference is that a merge key fails with a clearer message, where serde_yaml
 fails with a confusing one.
@@ -129,7 +131,7 @@ step 4 requires for `source()` chains.
 - serde-saphyr has published 1.x, 2.x and a 3.0 release candidate since
   August 2026. Its API moves fast.
 
-## Decision (proposed)
+## Decision
 
 1. **Parser: serde-saphyr 2.x**, with `default-features = false, features =
    ["deserialize"]` (Kulyrax never writes YAML), and the strict options above.
@@ -158,6 +160,48 @@ step 4 requires for `source()` chains.
    namely the source snippet in place of the field path. Scripts that parsed
    serde_yaml's messages break; error text was never covered by semver (stability
    §3).
+
+### Owner's changes
+
+Accepted 2026-11-25 with four changes. The source is the owner's message,
+quoted:
+
+> Step 3 record: approved with four changes. Update it to accepted and implement after the CI branch is committed.
+>
+> 1. with_snippet: true. kulyrax_core::yaml adds the file name to every error, and the field path where available (serde_path_to_error or saphyr's own path). Add a test asserting that a wrong-type error in a mapping names the file, the line, and the field path.
+> 2. Golden test covers refusals: every input serde_yaml 0.9 refuses (the table's error rows: yes/on into bool, 0755 into int, merge key, duplicate key, wrong type, unknown field under deny_unknown_fields) must also be refused by kulyrax_core::yaml. Keep that corpus permanently as a regression test, even after serde_yaml is removed.
+> 3. CI grep: only crates/core/src/yaml.rs and the golden test may name serde_saphyr / serde_yaml. Same mechanism as the conduit check.
+> 4. Find out whether serde-saphyr backports fixes to 2.x. If not, record a task: move to 3.x when it's final, gated by the golden test, before 1.0.0-rc.1.
+
+What each means for the decision above:
+
+1. **Errors.** The options use `with_snippet: true`. `kulyrax_core::yaml` puts
+   the file name into every error, and the field path where one is available. A
+   test checks that a wrong-type error in a mapping names the file, the line and
+   the field path. This replaces "Error format" in item 5: errors keep the field
+   path *and* gain the snippet.
+2. **Refusal corpus.** The golden test also holds every input serde_yaml 0.9
+   refuses:
+   - `yes` and `on` into `bool`;
+   - `0755` into an integer;
+   - a merge key;
+   - a duplicate key;
+   - a wrong type;
+   - an unknown field under `deny_unknown_fields`.
+
+   `kulyrax_core::yaml` must refuse each one. The corpus stays as a permanent
+   test after serde_yaml is removed.
+3. **CI grep.** Only `crates/core/src/yaml.rs` and the golden test may name
+   `serde_saphyr` or `serde_yaml`. This works like the old-name job. Cargo
+   manifests and the lock file spell the crate `serde-saphyr`, and
+   `docs/ledger/` and `RELEASES/` record history, so they are outside the check.
+4. **Backports: none.** serde-saphyr's SECURITY.md (master, read 2026-11-25)
+   says: "serde-saphyr supports only the latest released version. Security
+   fixes are provided via new releases; we do not backport fixes to older
+   versions." The latest stable release is 2.2.0; 3.0.0-rc.1 came out the same
+   day, 2026-11-18. A task records the move to 3.x once 3.0 is final, gated by
+   the golden test, before 1.0.0-rc.1:
+   [2026-11-25-yaml-parser-3x](../tasks/2026-11-25-yaml-parser-3x.md).
 
 Fallback: if the golden test finds a difference we cannot configure away, or
 serde-saphyr's API churn makes the pin unworkable before 1.0, **yaml_serde** takes
