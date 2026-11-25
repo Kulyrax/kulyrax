@@ -56,7 +56,7 @@ fn mappings() -> HashMap<String, SqlMapping> {
     let mut m = HashMap::new();
     m.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserCreated
 table: users
@@ -71,7 +71,7 @@ columns:
     );
     m.insert(
         "UserEmailChanged".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserEmailChanged
 table: users
@@ -87,7 +87,7 @@ columns:
     );
     m.insert(
         "UserDeleted".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserDeleted
 table: users

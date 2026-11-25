@@ -63,7 +63,7 @@ fn placed(seq: u64, order: &str, customer: &str) -> Event {
 }
 
 fn mapping() -> GraphMapping {
-    serde_yaml::from_str(ORDER_PLACED).unwrap()
+    kulyrax_core::yaml::from_str(ORDER_PLACED).unwrap()
 }
 
 fn store(root: &Path) -> GraphStore {
@@ -186,7 +186,7 @@ fn records_take_event_and_version_from_the_subgraph() {
     );
 
     let err = |yaml: &str| {
-        serde_yaml::from_str::<GraphMapping>(yaml)
+        kulyrax_core::yaml::from_str::<GraphMapping>(yaml)
             .err()
             .map(|e| e.to_string())
             .unwrap_or_default()
@@ -251,7 +251,7 @@ fn every_record_is_validated() {
     let empty_label = ORDER_PLACED.replacen("label: Customer", "label: ' '", 1);
     let err = validate(
         &config(vec![Write, Upsert]),
-        serde_yaml::from_str(&empty_label).unwrap(),
+        kulyrax_core::yaml::from_str(&empty_label).unwrap(),
     )
     .unwrap_err();
     assert!(err.contains("records[1]: empty label"), "{err}");
@@ -259,7 +259,7 @@ fn every_record_is_validated() {
     let none = "kind: subgraph\nevent: OrderPlaced\nversion: 1\nrecords: []\n";
     let err = validate(
         &config(vec![Write, Upsert]),
-        serde_yaml::from_str(none).unwrap(),
+        kulyrax_core::yaml::from_str(none).unwrap(),
     )
     .unwrap_err();
     assert!(

@@ -26,7 +26,7 @@ fn assert_hidden(what: &str, text: &str) {
 #[test]
 fn the_connect_error_hides_the_secrets() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let raw = serde_yaml::to_value(serde_json::json!({
+    let raw = serde_json::to_value(serde_json::json!({
         "type": "postgres_outbox", "id": "o", "state_dir": "state", "config": config(),
     }))
     .expect("raw");

@@ -29,7 +29,7 @@ fn assert_hidden(what: &str, text: &str) {
 
 #[test]
 fn the_factory_error_hides_the_secrets() {
-    let raw = serde_yaml::to_value(serde_json::json!({
+    let raw = serde_json::to_value(serde_json::json!({
         "type": "elasticsearch", "id": "x", "priority": 10, "config": config(),
     }))
     .expect("raw");

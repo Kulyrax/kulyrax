@@ -841,7 +841,7 @@ mod tests {
     use super::*;
 
     fn build(url: &str, database: &str) -> Result<Box<dyn StorageAdapter>, ConfigError> {
-        let raw = serde_yaml::to_value(serde_json::json!({
+        let raw = serde_json::to_value(serde_json::json!({
             "type": "mongodb",
             "id": "m1",
             "priority": 10,

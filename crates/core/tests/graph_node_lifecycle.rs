@@ -55,7 +55,7 @@ fn mappings() -> HashMap<String, GraphMapping> {
     ] {
         m.insert(
             event.to_string(),
-            serde_yaml::from_str::<GraphMapping>(&format!(
+            kulyrax_core::yaml::from_str::<GraphMapping>(&format!(
                 "kind: node\nevent: {event}\nlabel: User\nversion: 1\nkey: payload.user_id\n{extra}\nproperties:\n  name: payload.name\n"
             ))
             .unwrap(),
@@ -63,7 +63,7 @@ fn mappings() -> HashMap<String, GraphMapping> {
     }
     m.insert(
         "UserDeregistered".to_string(),
-        serde_yaml::from_str::<GraphMapping>(
+        kulyrax_core::yaml::from_str::<GraphMapping>(
             "kind: node\nevent: UserDeregistered\nlabel: User\nversion: 1\nkey: payload.user_id\noperation: delete\n",
         )
         .unwrap(),

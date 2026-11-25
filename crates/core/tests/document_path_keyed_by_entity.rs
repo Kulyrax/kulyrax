@@ -25,7 +25,7 @@ fn output_file_and_guard_are_named_by_entity_id_not_event_id()
     let mut doc_mappings = HashMap::new();
     doc_mappings.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: UserCreated
 collection: users

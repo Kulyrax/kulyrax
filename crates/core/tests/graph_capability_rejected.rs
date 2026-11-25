@@ -37,7 +37,7 @@ fn config_with_graph_capabilities(capabilities: Option<Vec<AdapterCapability>>) 
 }
 
 fn delete_node_mapping() -> GraphMapping {
-    serde_yaml::from_str(
+    kulyrax_core::yaml::from_str(
         "kind: node\nevent: UserDeregistered\nlabel: User\nversion: 1\nkey: payload.user_id\noperation: delete\n",
     )
     .unwrap()

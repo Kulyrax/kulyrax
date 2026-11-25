@@ -67,6 +67,23 @@ cannot take a turbofish (compile error; now an `ident`). The `compare` binary go
 MSYS paths it could not open (now `pwd -W`). Both were harness bugs, not
 findings.
 
+Implementation (runbook C2–C7), on `docs/yaml-parser` from `d04ca00`:
+
+| Check | Command | Result |
+|---|---|---|
+| serde-saphyr API | its 2.2.0 sources | `with_deserializer_from_str_with_options` hands a closure the real deserializer, so `serde_path_to_error` can wrap it; the closure's errors still get the snippet. Options exist for every recorded setting; duplicate keys default to `Error` |
+| `kulyrax_core::yaml` unit tests, first run | `cargo test -p kulyrax-core --lib yaml::` | 4 of 5. **Test bug**: I expected a syntax error inside `adapters: [` to have no field, but it belongs to `adapters`, which is right. Test rewritten: it names the file and the line; an error outside any field has none. Then 5/5 |
+| Loader test, first run | `cargo test -p kulyrax-core --lib` | `invalid_yaml_names_the_file` failed. **Expected**: it matched the old wording `Invalid YAML in`. Now `Invalid SQL mapping: <file>: …`; the test also checks the line. Then 103/103 |
+| Every call site moved | `git grep 'serde_yaml::'` outside `yaml.rs` | 180 `from_str`, 13 `to_value`, 5 `Value` in 94 files, all moved to `kulyrax_core::yaml` / `serde_json`. `raw` is a `serde_json::Value` (C3) |
+| Workspace on the new parser, first run | `cargo test --workspace --no-fail-fast` | 523 passed, 0 failed |
+| Golden mode, run 1 | `cargo test --workspace --features kulyrax-core/yaml-golden` with `KULYRAX_YAML_GOLDEN_LOG` | 1,508 lines, 0 marked different, **but 164 malformed**: parallel processes appended to one file. Unusable. Fixed: one file per process and a mutex per write |
+| Golden mode, run 2 | the same | 1,733 comparisons, 0 malformed, **4 different**, plus 2 golden-test failures. **Finding**: serde_yaml 0.9 refuses a duplicate key or `<<` only into a struct. Into a map or `Value`, the last duplicate wins and `<<` is an ordinary key; the recorded options refused both. Also two **test bugs**: an "untyped duplicate key" refusal case that serde_yaml never refused, and a docs-block minimum of 20 where there are 16 |
+| `duplicate_keys` and `merge_keys` options | probe test, every case against serde_yaml | `PassThrough` + `AsOrdinary` match serde_yaml on all six cases (struct, map and `Value`, duplicate and merge). `LastWins` and `FirstWins` accept a struct duplicate, so they don't match. **Owner chose "Read exactly as 0.12"** (decision record) |
+| Golden mode, run 3 | the same | **1,687 comparisons across 168 test processes: 1,687 same, 0 different, 0 malformed.** 529 passed, 0 failed, including `yaml_golden.rs`: every YAML file, the 16 docs blocks, the refusal corpus, and the owner's file/line/field test |
+| Real errors from the binary | `kulyrax run` with a bad config and a bad mapping, 1.0 and 0.12.1 | 1.0 printed the error with `Debug`, so the snippet came out as `\n` escapes. Fixed: `main` prints with `Display`, exit code still 1. A config error inside an adapter entry points at the entry (`adapters[0]`, its first line), as 0.12's did (`adapters`, line 5). A mapping error points at the field and line. Both samples are in the release notes |
+| Golden mode over every Docker suite | `cargo test -p <crate> --features kulyrax-core/yaml-golden -- --test-threads=1`, every backend URL set (Neo4j on this branch's 7688), and `KULYRAX_V0121_BIN` | postgres 30, mysql 25, redis 14, mongodb 21, elasticsearch 11, neo4j 20, source-postgres 14, ingest 14, cli 32, all passed. **1,342 comparisons across 150 processes: 1,342 same, 0 different, 0 malformed** |
+| Non-finite floats into `raw` | probe: `.inf` / `.nan` into `serde_json::Value` | new: refused, with field and line. serde_yaml into `serde_json::Value`: `null`. 0.12's `raw` held the YAML float |
+
 ## Risks and open questions
 
 - serde-saphyr's API churn (three majors since August 2026). Contained by one

@@ -40,7 +40,7 @@ fn user_created_and_failing_mappings() -> (
     let (mut sql, mut doc) = user_created_mappings();
     sql.insert(
         "FailingEvent".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: FailingEvent
 table: users
@@ -54,7 +54,7 @@ columns:
     );
     doc.insert(
         "FailingEvent".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: FailingEvent
 collection: users
@@ -109,7 +109,7 @@ fn user_created_mappings() -> (
     let mut sql = HashMap::new();
     sql.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserCreated
 table: users
@@ -124,7 +124,7 @@ columns:
     let mut doc = HashMap::new();
     doc.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: UserCreated
 collection: users

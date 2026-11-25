@@ -116,7 +116,7 @@ fn unprepared_neo4j_adapter(uri: &str, mappings: HashMap<String, GraphMapping>) 
 }
 
 fn graph_mapping(yaml: &str) -> GraphMapping {
-    serde_yaml::from_str(yaml).unwrap()
+    kulyrax_core::yaml::from_str(yaml).unwrap()
 }
 
 fn ev(event_type: &str, seq: u64, payload: serde_json::Value) -> Event {

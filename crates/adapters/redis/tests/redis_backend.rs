@@ -78,7 +78,7 @@ fn redis_adapter(url: &str, mappings: HashMap<String, KvMapping>) -> RedisAdapte
 }
 
 fn kv_mapping(yaml: &str) -> KvMapping {
-    serde_yaml::from_str(yaml).unwrap()
+    kulyrax_core::yaml::from_str(yaml).unwrap()
 }
 
 fn ev(event_type: &str, seq: u64, payload: serde_json::Value) -> Event {

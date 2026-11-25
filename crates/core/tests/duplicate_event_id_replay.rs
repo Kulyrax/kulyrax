@@ -46,7 +46,7 @@ fn sql_replaying_the_same_event_id_is_still_deduplicated() -> Result<(), Box<dyn
     let mut sql_mappings = HashMap::new();
     sql_mappings.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserCreated
 table: users
@@ -91,7 +91,7 @@ fn document_replaying_the_same_event_id_is_still_deduplicated()
     let mut doc_mappings = HashMap::new();
     doc_mappings.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: UserCreated
 collection: users

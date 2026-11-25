@@ -15,6 +15,7 @@ pub mod runtime;
 pub mod scaffold;
 pub mod source;
 pub mod upcast;
+pub mod yaml;
 
 use std::collections::HashMap;
 use std::sync::Arc;

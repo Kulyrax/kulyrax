@@ -267,7 +267,7 @@ fn rebuild_replaces_a_table_after_a_mapping_change() {
 }
 
 fn live_adapter(db: &Path) -> SqliteAdapter {
-    let mapping: SqlMapping = serde_yaml::from_str(MAPPING_V1).unwrap();
+    let mapping: SqlMapping = kulyrax_core::yaml::from_str(MAPPING_V1).unwrap();
     let adapter = SqliteAdapter::new(
         "sql".into(),
         db.to_string_lossy().into(),

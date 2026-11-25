@@ -35,7 +35,7 @@ fn test_event(version: u32) -> Event {
 
 /// Mapping targets schema v2 (expects a `tier` column added by the v1->v2 upcaster).
 fn sql_mapping_v2() -> SqlMapping {
-    serde_yaml::from_str(
+    kulyrax_core::yaml::from_str(
         r#"
 event: UserCreated
 table: users
@@ -188,7 +188,7 @@ fn matching_versions_skip_upcasting_entirely() {
     // Mapping and event both at v1: no upcaster needed, no registry lookup required.
     mappings.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserCreated
 table: users

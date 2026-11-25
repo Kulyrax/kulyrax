@@ -31,7 +31,7 @@ fn kv_out_of_order_converges_to_highest_sequence() -> Result<(), Box<dyn std::er
     let mut mappings = HashMap::new();
     mappings.insert(
         "UserViewUpdated".to_string(),
-        serde_yaml::from_str::<KvMapping>(
+        kulyrax_core::yaml::from_str::<KvMapping>(
             r#"
 event: UserViewUpdated
 namespace: user-view

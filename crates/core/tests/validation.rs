@@ -46,7 +46,7 @@ fn base_config() -> KulyraxConfig {
 }
 
 fn sql_uc() -> SqlMapping {
-    serde_yaml::from_str(
+    kulyrax_core::yaml::from_str(
         r#"
 event: UserCreated
 table: users
@@ -60,7 +60,7 @@ columns:
 }
 
 fn doc_uc() -> DocumentMapping {
-    serde_yaml::from_str(
+    kulyrax_core::yaml::from_str(
         r#"
 event: UserCreated
 collection: users
@@ -782,7 +782,7 @@ fn phase15_rejects_delete_on_a_named_facet() {
     sql.insert("UserCreated".to_string(), sql_uc());
     sql.insert(
         "UserEmailCleared".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             "event: UserEmailCleared\ntable: users\nprimary_key: id\nversion: 1\nfacet: contact\noperation: delete\ncolumns:\n  id: payload.id\n",
         )
         .unwrap(),
@@ -818,7 +818,7 @@ fn phase15_rejects_facet_identity_that_differs_from_the_entity() {
     sql.insert("UserCreated".to_string(), sql_uc());
     sql.insert(
         "UserEmailChanged".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             "event: UserEmailChanged\ntable: users\nprimary_key: email\nversion: 1\nfacet: contact\ncolumns:\n  email: payload.email\n  note: payload.note\n",
         )
         .unwrap(),
@@ -857,7 +857,7 @@ fn config_with_custom_adapter(type_name: &str) -> KulyraxConfig {
             type_name: type_name.into(),
             id: "custom".into(),
             priority: 10,
-            raw: serde_yaml::Value::Null,
+            raw: serde_json::Value::Null,
             capabilities: None,
             depends_on: vec![],
         })],

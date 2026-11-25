@@ -39,7 +39,7 @@ fn mappings() -> Result<HashMap<String, KvMapping>, Box<dyn std::error::Error>> 
     let mut m = HashMap::new();
     m.insert(
         "UserViewUpdated".to_string(),
-        serde_yaml::from_str::<KvMapping>(
+        kulyrax_core::yaml::from_str::<KvMapping>(
             r#"
 event: UserViewUpdated
 namespace: user-view
@@ -53,7 +53,7 @@ value:
     );
     m.insert(
         "CacheInvalidated".to_string(),
-        serde_yaml::from_str::<KvMapping>(
+        kulyrax_core::yaml::from_str::<KvMapping>(
             r#"
 event: CacheInvalidated
 namespace: user-view

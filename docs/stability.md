@@ -116,8 +116,8 @@ file-format version: a mapping file has no format version of its own.
 
 `EventType: [adapter-id, …]`. **FREEZE**.
 
-All YAML is parsed by `serde_yaml` (YAML 1.1 rules); step 3 replaces it, and any
-parsing difference is decided there.
+All YAML is read by `kulyrax_core::yaml`, configured to read it exactly as 0.12
+did (decision `2026-11-25-yaml-parser`, step 3).
 
 ---
 
@@ -211,7 +211,7 @@ outside the migration code, its tests, the release notes and the ledger.
 | Step | Changes from this page |
 |---|---|
 | 2 | rename to `kulyrax` (§5, §6); done |
-| 3 | `serde_yaml` replacement (§2) |
+| 3 | YAML parser replacement (§2); done |
 | 4 | `#[non_exhaustive]` (including `Event`), one path per item, UNSTABLE items hidden, adapter constructors from config, `pb` hidden, errors (`Error` on all, `source()`, `AdapterReportError` renamed), `deny_unknown_fields` everywhere built in, `missing_docs`, `cargo-semver-checks` and `buf breaking` in CI, the exit codes of §3 |
 | 5 | format versions (§5) |
 

@@ -37,7 +37,7 @@ fn config_with_kv_capabilities(capabilities: Option<Vec<AdapterCapability>>) -> 
 }
 
 fn delete_kv_mapping() -> KvMapping {
-    serde_yaml::from_str(
+    kulyrax_core::yaml::from_str(
         r#"
 event: CacheInvalidated
 namespace: user-view

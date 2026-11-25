@@ -71,7 +71,7 @@ fn user_created_event() -> Event {
 }
 
 fn doc_mapping() -> DocumentMapping {
-    serde_yaml::from_str(
+    kulyrax_core::yaml::from_str(
         r#"
 event: UserCreated
 collection: users
@@ -110,7 +110,7 @@ fn registered_adapter_participates_identically_in_dependency_order_and_dispatch(
                 type_name: type_name.into(),
                 id: "sql-primary".into(),
                 priority: 10,
-                raw: serde_yaml::to_value(serde_json::json!({
+                raw: serde_json::to_value(serde_json::json!({
                     "type": type_name,
                     "id": "sql-primary",
                     "priority": 10,
@@ -190,7 +190,7 @@ fn unregistered_custom_type_becomes_a_failed_placeholder_not_a_panic() {
             type_name: "definitely-unregistered-25-5".into(),
             id: "kv-cache".into(),
             priority: 10,
-            raw: serde_yaml::Value::Null,
+            raw: serde_json::Value::Null,
             capabilities: None,
             depends_on: vec![],
         })],

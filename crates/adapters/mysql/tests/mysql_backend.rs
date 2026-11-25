@@ -74,7 +74,7 @@ fn prepared<A: StorageAdapter>(adapter: A) -> A {
 }
 
 fn upsert_mapping(event: &str, table: &str, cols: &str) -> SqlMapping {
-    serde_yaml::from_str(&format!(
+    kulyrax_core::yaml::from_str(&format!(
         "event: {event}\ntable: {table}\nprimary_key: id\nversion: 1\non_existing: replace\ncolumns:\n{cols}"
     ))
     .unwrap()
@@ -164,7 +164,7 @@ fn mysql_delete_lifecycle() -> R {
     );
     m.insert(
         "D".into(),
-        serde_yaml::from_str(&format!(
+        kulyrax_core::yaml::from_str(&format!(
             "event: D\ntable: {t}\nprimary_key: id\nversion: 1\noperation: delete\ncolumns:\n  id: payload.id\n"
         ))
         .unwrap(),
@@ -214,13 +214,13 @@ fn mysql_facet_disjoint() -> R {
     .ok();
 
     let mut m = HashMap::new();
-    m.insert("C".into(), serde_yaml::from_str(&format!(
+    m.insert("C".into(), kulyrax_core::yaml::from_str(&format!(
         "event: C\ntable: {t}\nprimary_key: id\nversion: 1\ncolumns:\n  id: payload.id\n  display_name: payload.display_name\n"
     )).unwrap());
-    m.insert("Email".into(), serde_yaml::from_str(&format!(
+    m.insert("Email".into(), kulyrax_core::yaml::from_str(&format!(
         "event: Email\ntable: {t}\nprimary_key: id\nversion: 1\nfacet: contact\ncolumns:\n  id: payload.id\n  email: payload.email\n"
     )).unwrap());
-    m.insert("Login".into(), serde_yaml::from_str(&format!(
+    m.insert("Login".into(), kulyrax_core::yaml::from_str(&format!(
         "event: Login\ntable: {t}\nprimary_key: id\nversion: 1\nfacet: login\ncolumns:\n  id: payload.id\n  last_login: payload.last_login\n"
     )).unwrap());
     let a = my_adapter(&url, m);
@@ -561,7 +561,7 @@ fn mysql_new_guard_rows_take_no_gap_lock() -> R {
 /// Upsert, delete and facet mappings on `table`, under event types
 /// `{prefix}Up` / `{prefix}Del` / `{prefix}Mail`.
 fn batch_mappings(prefix: &str, table: &str) -> HashMap<String, SqlMapping> {
-    let yaml = |s: String| serde_yaml::from_str::<SqlMapping>(&s).unwrap();
+    let yaml = |s: String| kulyrax_core::yaml::from_str::<SqlMapping>(&s).unwrap();
     HashMap::from([
         (
             format!("{prefix}Up"),

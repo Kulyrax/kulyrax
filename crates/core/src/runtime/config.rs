@@ -191,7 +191,11 @@ pub struct CustomAdapterConfig {
     pub type_name: String,
     pub id: String,
     pub priority: u32,
-    pub raw: serde_yaml::Value,
+    /// The whole list entry, as JSON. Since 1.0 a `serde_json::Value`, not a
+    /// YAML value: read your block with [`Self::backend_config`] or
+    /// `serde_json::from_value`. A YAML key that is not a string (`1: x`)
+    /// arrives as a string (`"1"`).
+    pub raw: serde_json::Value,
     pub capabilities: Option<AdapterCapabilities>,
     pub depends_on: Vec<AdapterId>,
 }
@@ -205,7 +209,7 @@ impl CustomAdapterConfig {
                 "{type_name} adapter {id:?} missing `config`"
             ))
         })?;
-        serde_yaml::from_value(block).map_err(|e| {
+        serde_json::from_value(block).map_err(|e| {
             ConfigError::FactoryConfigInvalid(format!(
                 "{type_name} adapter {id:?}: invalid `config`: {e}"
             ))
@@ -223,7 +227,7 @@ impl<'de> Deserialize<'de> for AdapterConfig {
     {
         use serde::de::Error as _;
 
-        let value = serde_yaml::Value::deserialize(deserializer)?;
+        let value = serde_json::Value::deserialize(deserializer)?;
         let type_name = value
             .get("type")
             .and_then(|v| v.as_str())
@@ -250,11 +254,11 @@ impl<'de> Deserialize<'de> for AdapterConfig {
             .ok_or_else(|| D::Error::custom("adapter config missing `priority` field"))?
             as u32;
         let capabilities = match value.get("capabilities") {
-            Some(v) => Some(serde_yaml::from_value(v.clone()).map_err(D::Error::custom)?),
+            Some(v) => Some(serde_json::from_value(v.clone()).map_err(D::Error::custom)?),
             None => None,
         };
         let depends_on = match value.get("depends_on") {
-            Some(v) => serde_yaml::from_value(v.clone()).map_err(D::Error::custom)?,
+            Some(v) => serde_json::from_value(v.clone()).map_err(D::Error::custom)?,
             None => Vec::new(),
         };
 
@@ -416,7 +420,11 @@ pub struct CustomSourceConfig {
     /// Where the source keeps its checkpoint, relative to the config file's
     /// directory, if it has one.
     pub state_dir: Option<String>,
-    pub raw: serde_yaml::Value,
+    /// The whole list entry, as JSON. Since 1.0 a `serde_json::Value`, not a
+    /// YAML value: read your block with [`Self::source_config`] or
+    /// `serde_json::from_value`. A YAML key that is not a string (`1: x`)
+    /// arrives as a string (`"1"`).
+    pub raw: serde_json::Value,
 }
 
 impl CustomSourceConfig {
@@ -426,7 +434,7 @@ impl CustomSourceConfig {
         let block = self.raw.get("config").cloned().ok_or_else(|| {
             ConfigError::FactoryConfigInvalid(format!("{type_name} source {id:?} missing `config`"))
         })?;
-        serde_yaml::from_value(block).map_err(|e| {
+        serde_json::from_value(block).map_err(|e| {
             ConfigError::FactoryConfigInvalid(format!(
                 "{type_name} source {id:?}: invalid `config`: {e}"
             ))
@@ -441,7 +449,7 @@ impl<'de> Deserialize<'de> for SourceConfig {
     {
         use serde::de::Error as _;
 
-        let value = serde_yaml::Value::deserialize(deserializer)?;
+        let value = serde_json::Value::deserialize(deserializer)?;
         let type_name = value
             .get("type")
             .and_then(|v| v.as_str())
@@ -631,7 +639,7 @@ sources:
     id: pipe
     state_dir: ./.kulyrax/sources
 "#;
-        let cfg: KulyraxConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: KulyraxConfig = crate::yaml::from_str(yaml).unwrap();
         cfg.validate().unwrap();
         assert_eq!(cfg.sources.len(), 2);
         assert_eq!(cfg.sources[0].id(), "inbox");
@@ -652,7 +660,7 @@ sources:
   - { type: stdin, id: dup, state_dir: /tmp }
   - { type: stdin, id: dup, state_dir: /tmp }
 "#;
-        let cfg: KulyraxConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: KulyraxConfig = crate::yaml::from_str(yaml).unwrap();
         let err = cfg.validate().unwrap_err();
         assert!(err.to_string().contains("duplicate source id"), "{err}");
     }
@@ -668,7 +676,7 @@ adapters:
     priority: 1
     config: { path: ":memory:" }
 "#;
-        let cfg: KulyraxConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: KulyraxConfig = crate::yaml::from_str(yaml).unwrap();
         cfg.validate().unwrap();
         assert!(cfg.sources.is_empty());
     }
@@ -719,7 +727,7 @@ adapters:
       url: postgres://kulyrax@localhost/readmodel
       pool_size: 8
 "#;
-        let cfg: KulyraxConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: KulyraxConfig = crate::yaml::from_str(yaml).unwrap();
         cfg.validate().unwrap();
         match &cfg.adapters[0] {
             AdapterConfig::Custom(c) => {
@@ -727,7 +735,7 @@ adapters:
                 assert_eq!(c.id, "pg-primary");
                 assert_eq!(
                     c.raw.get("config").and_then(|v| v.get("pool_size")),
-                    Some(&serde_yaml::Value::Number(8.into()))
+                    Some(&serde_json::Value::Number(8.into()))
                 );
             }
             other => panic!("{other:?}"),

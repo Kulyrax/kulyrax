@@ -14,7 +14,11 @@ readme = "README.md"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_yaml = "0.9"
+# YAML is read only through `crate::yaml` (decision 2026-11-25-yaml-parser).
+serde-saphyr = { version = "2.2", default-features = false, features = ["deserialize"] }
+serde_path_to_error = "0.1"
+# Only for the `yaml-golden` feature below; removed with it.
+serde_yaml = { version = "0.9", optional = true }
 once_cell = "1.19"
 rusqlite = { version = "0.43", features = ["bundled"] }
 crc32fast = "1.4"
@@ -25,6 +29,13 @@ sha2 = "0.10"
 # file stores' commit path. For crash tests only (kulyrax-cli enables it in
 # its dev-dependencies); release builds leave it off.
 crash-points = []
+# The golden test of the YAML parser change (step 3): every `crate::yaml` read
+# is also made with serde_yaml 0.9, and any difference is logged to the file
+# named by `KULYRAX_YAML_GOLDEN_LOG`. For one test run only; removed with
+# serde_yaml.
+yaml-golden = ["dep:serde_yaml"]
 
 [dev-dependencies]
 tempfile = "3"
+# tests/yaml_golden.rs compares it with `crate::yaml`; removed with it.
+serde_yaml = "0.9"

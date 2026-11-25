@@ -34,7 +34,7 @@ use std::sync::atomic::AtomicBool;
 use tempfile::tempdir;
 
 fn mapping(yaml: &str) -> SqlMapping {
-    serde_yaml::from_str(yaml).unwrap()
+    kulyrax_core::yaml::from_str(yaml).unwrap()
 }
 
 fn mappings() -> HashMap<String, SqlMapping> {

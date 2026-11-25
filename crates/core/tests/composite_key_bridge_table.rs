@@ -46,7 +46,7 @@ fn duplicate_pair_across_event_ids_is_skipped_distinct_pair_is_not()
     let mut sql_mappings = HashMap::new();
     sql_mappings.insert(
         "TagAssigned".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: TagAssigned
 table: post_tags

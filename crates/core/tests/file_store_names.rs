@@ -43,7 +43,7 @@ fn kv(root: &Path, namespaces: &[&str]) -> FileKvStore {
         .enumerate()
         .map(|(i, ns)| {
             let event = if i == 0 { "U".to_string() } else { format!("U{i}") };
-            let m: KvMapping = serde_yaml::from_str(&format!(
+            let m: KvMapping = kulyrax_core::yaml::from_str(&format!(
                 "event: {event}\nnamespace: {ns}\nversion: 1\nkey: payload.id\non_existing: replace\nvalue:\n  v: payload.v\n"
             ))
             .unwrap();
@@ -61,7 +61,7 @@ fn kv(root: &Path, namespaces: &[&str]) -> FileKvStore {
 }
 
 fn doc(root: &Path, collection: &str) -> FileDocumentAdapter {
-    let m: DocumentMapping = serde_yaml::from_str(&format!(
+    let m: DocumentMapping = kulyrax_core::yaml::from_str(&format!(
         "event: U\ncollection: {collection}\nversion: 1\nid: payload.id\non_existing: replace\ndocument:\n  v: payload.v\n"
     ))
     .unwrap();
@@ -76,11 +76,11 @@ fn doc(root: &Path, collection: &str) -> FileDocumentAdapter {
 }
 
 fn graph(root: &Path, label: &str) -> GraphStore {
-    let node: GraphMapping = serde_yaml::from_str(&format!(
+    let node: GraphMapping = kulyrax_core::yaml::from_str(&format!(
         "kind: node\nevent: U\nlabel: {label}\nversion: 1\nkey: payload.id\non_existing: replace\nproperties:\n  v: payload.v\n"
     ))
     .unwrap();
-    let edge: GraphMapping = serde_yaml::from_str(
+    let edge: GraphMapping = kulyrax_core::yaml::from_str(
         "kind: edge\nevent: E\nedge_type: LINKS\nversion: 1\nfrom: payload.id\nto: payload.to\non_existing: replace\nproperties:\n  v: payload.v\n",
     )
     .unwrap();
@@ -352,7 +352,7 @@ fn directories_are_not_shared() {
 fn sql_names_must_be_plain_identifiers() {
     let dir = tempfile::tempdir().unwrap();
     let sqlite = |table: &str, column: &str| {
-        let m: SqlMapping = serde_yaml::from_str(&format!(
+        let m: SqlMapping = kulyrax_core::yaml::from_str(&format!(
             "event: U\ntable: {table}\nprimary_key: id\nversion: 1\ncolumns:\n  id: payload.id\n  '{column}': payload.v\n"
         ))
         .unwrap();
@@ -418,11 +418,11 @@ fn a_dlq_file_stays_in_the_dlq_directory() {
     let dlq = outer.path().join("a").join("b").join("dlq");
     // A mapping to a table that does not exist: the event fails, and is
     // dead-lettered once its retries are spent.
-    let m: SqlMapping = serde_yaml::from_str(
+    let m: SqlMapping = kulyrax_core::yaml::from_str(
         "event: U\ntable: missing\nprimary_key: id\nversion: 1\ncolumns:\n  id: payload.id\n",
     )
     .unwrap();
-    let config: kulyrax_core::runtime::config::KulyraxConfig = serde_yaml::from_str(&format!(
+    let config: kulyrax_core::runtime::config::KulyraxConfig = kulyrax_core::yaml::from_str(&format!(
         "version: 1\nrouting:\n  file: r.yaml\nadapters:\n  - type: sqlite\n    id: sql\n    priority: 10\n    config:\n      path: {}\n",
         outer.path().join("app.db").display().to_string().replace('\\', "/")
     ))

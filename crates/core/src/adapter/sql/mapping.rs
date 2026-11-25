@@ -238,7 +238,7 @@ mod tests {
     use super::*;
 
     fn mapping_with_primary_key(yaml_primary_key: &str) -> SqlMapping {
-        serde_yaml::from_str(&format!(
+        crate::yaml::from_str(&format!(
             r#"
 event: UserCreated
 table: users

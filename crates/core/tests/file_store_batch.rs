@@ -77,8 +77,8 @@ fn stream() -> Vec<Event> {
     ]
 }
 
-fn yaml<T: serde::de::DeserializeOwned>(s: &str) -> T {
-    serde_yaml::from_str(s).unwrap()
+fn yaml<T: kulyrax_core::yaml::Target>(s: &str) -> T {
+    kulyrax_core::yaml::from_str(s).unwrap()
 }
 
 fn document_store(root: &Path) -> Box<dyn StorageAdapter> {

@@ -127,7 +127,7 @@ fn unprepared_mongo_adapter(
 }
 
 fn doc_mapping(yaml: &str) -> DocumentMapping {
-    serde_yaml::from_str(yaml).unwrap()
+    kulyrax_core::yaml::from_str(yaml).unwrap()
 }
 
 fn ev(event_type: &str, seq: u64, payload: serde_json::Value) -> Event {

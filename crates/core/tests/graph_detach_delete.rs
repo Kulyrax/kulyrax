@@ -53,21 +53,21 @@ fn mappings() -> HashMap<String, GraphMapping> {
     let mut m = HashMap::new();
     m.insert(
         "UserRegistered".to_string(),
-        serde_yaml::from_str::<GraphMapping>(
+        kulyrax_core::yaml::from_str::<GraphMapping>(
             "kind: node\nevent: UserRegistered\nlabel: User\nversion: 1\nkey: payload.user_id\non_existing: replace\nproperties:\n  name: payload.name\n",
         )
         .unwrap(),
     );
     m.insert(
         "UserDeregistered".to_string(),
-        serde_yaml::from_str::<GraphMapping>(
+        kulyrax_core::yaml::from_str::<GraphMapping>(
             "kind: node\nevent: UserDeregistered\nlabel: User\nversion: 1\nkey: payload.user_id\noperation: delete\n",
         )
         .unwrap(),
     );
     m.insert(
         "UserFollowed".to_string(),
-        serde_yaml::from_str::<GraphMapping>(
+        kulyrax_core::yaml::from_str::<GraphMapping>(
             "kind: edge\nevent: UserFollowed\nedge_type: FOLLOWS\nversion: 1\nfrom: payload.follower\nto: payload.followee\non_existing: replace\nproperties:\n  since: payload.ts\n",
         )
         .unwrap(),

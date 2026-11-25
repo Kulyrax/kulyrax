@@ -179,7 +179,7 @@ mod tests {
         }
     }
 
-    fn entry(type_name: &str, raw: serde_yaml::Value) -> CustomAdapterConfig {
+    fn entry(type_name: &str, raw: serde_json::Value) -> CustomAdapterConfig {
         CustomAdapterConfig {
             type_name: type_name.to_string(),
             id: "a".to_string(),
@@ -201,7 +201,7 @@ mod tests {
     #[test]
     fn unregistered_type_resolves_to_none() {
         let registry = AdapterRegistry::new();
-        let e = entry("definitely-not-registered-xyz", serde_yaml::Value::Null);
+        let e = entry("definitely-not-registered-xyz", serde_json::Value::Null);
         assert!(registry.build(&e, &ctx()).is_none());
     }
 
@@ -214,7 +214,7 @@ mod tests {
         });
         let e = entry(
             "test-noop-registry",
-            serde_yaml::Value::String("hello".into()),
+            serde_json::Value::String("hello".into()),
         );
         assert!(matches!(registry.build(&e, &ctx()), Some(Ok(_))));
     }
@@ -226,7 +226,7 @@ mod tests {
             Ok(Box::new(Noop) as Box<dyn StorageAdapter>)
         });
         let b = AdapterRegistry::new();
-        let e = entry("shared-name", serde_yaml::Value::Null);
+        let e = entry("shared-name", serde_json::Value::Null);
         assert!(a.build(&e, &ctx()).is_some());
         assert!(b.build(&e, &ctx()).is_none());
     }
@@ -238,24 +238,24 @@ mod tests {
 
     #[test]
     fn backend_config_reads_the_config_block() {
-        let raw = serde_yaml::from_str("{type: mydb, id: a, priority: 0, config: {url: x}}")
-            .unwrap_or(serde_yaml::Value::Null);
+        let raw = crate::yaml::from_str("{type: mydb, id: a, priority: 0, config: {url: x}}")
+            .unwrap_or(serde_json::Value::Null);
         let cfg: UrlConfig = entry("mydb", raw).backend_config().unwrap();
         assert_eq!(cfg.url, "x");
     }
 
     #[test]
     fn backend_config_errors_name_the_type_and_id() {
-        let missing = serde_yaml::from_str("{type: mydb, id: a, priority: 0}")
-            .unwrap_or(serde_yaml::Value::Null);
+        let missing = crate::yaml::from_str("{type: mydb, id: a, priority: 0}")
+            .unwrap_or(serde_json::Value::Null);
         let err = entry("mydb", missing)
             .backend_config::<UrlConfig>()
             .err()
             .map(|e| e.to_string());
         assert_eq!(err.as_deref(), Some("mydb adapter \"a\" missing `config`"));
 
-        let invalid = serde_yaml::from_str("{type: mydb, id: a, priority: 0, config: {}}")
-            .unwrap_or(serde_yaml::Value::Null);
+        let invalid = crate::yaml::from_str("{type: mydb, id: a, priority: 0, config: {}}")
+            .unwrap_or(serde_json::Value::Null);
         let err = entry("mydb", invalid)
             .backend_config::<UrlConfig>()
             .err()

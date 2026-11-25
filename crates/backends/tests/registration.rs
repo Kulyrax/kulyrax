@@ -12,7 +12,7 @@ fn build_error_for(type_name: &str, config_block: &str) -> String {
     let yaml = format!(
         "version: 1\nrouting:\n  file: routing.yaml\nadapters:\n  - type: {type_name}\n    id: a1\n    priority: 10\n    config: {config_block}\n"
     );
-    let config: KulyraxConfig = match serde_yaml::from_str(&yaml) {
+    let config: KulyraxConfig = match kulyrax_core::yaml::from_str(&yaml) {
         Ok(c) => c,
         Err(e) => return format!("config did not parse: {e}"),
     };

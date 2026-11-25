@@ -46,7 +46,7 @@ fn sql_ignore_mode_skips_a_higher_sequence_update() -> Result<(), Box<dyn std::e
     let mut sql_mappings = HashMap::new();
     sql_mappings.insert(
         "UserUpdated".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserUpdated
 table: users
@@ -103,7 +103,7 @@ fn document_ignore_mode_skips_a_higher_sequence_update() -> Result<(), Box<dyn s
     let mut doc_mappings = HashMap::new();
     doc_mappings.insert(
         "UserUpdated".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: UserUpdated
 collection: users

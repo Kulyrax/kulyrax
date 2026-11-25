@@ -70,7 +70,7 @@ fn relkinds(url: &str, schema: &str) -> Result<Vec<(String, String)>, Box<dyn st
 }
 
 fn adapter(url: &str) -> PostgresAdapter {
-    let m: SqlMapping = serde_yaml::from_str(
+    let m: SqlMapping = kulyrax_core::yaml::from_str(
         "event: U\ntable: users\nprimary_key: id\nversion: 1\non_existing: replace\ncolumns:\n  id: payload.id\n  v: payload.v\n",
     )
     .unwrap();

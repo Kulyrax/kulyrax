@@ -57,7 +57,7 @@ fn sql_delete_then_create_leaves_entity_absent() -> Result<(), Box<dyn std::erro
     let mut mappings = HashMap::new();
     mappings.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserCreated
 table: users
@@ -72,7 +72,7 @@ columns:
     );
     mappings.insert(
         "UserDeleted".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserDeleted
 table: users
@@ -128,7 +128,7 @@ fn document_delete_then_create_leaves_entity_absent() -> Result<(), Box<dyn std:
     let mut mappings = HashMap::new();
     mappings.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: UserCreated
 collection: users
@@ -143,7 +143,7 @@ document:
     );
     mappings.insert(
         "UserDeleted".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: UserDeleted
 collection: users

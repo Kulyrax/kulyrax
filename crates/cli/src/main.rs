@@ -227,7 +227,20 @@ enum Commands {
     },
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// Errors are printed with `Display`, not the `Debug` a `main` returning
+/// `Result` would print: a YAML error quotes the offending lines, and `Debug`
+/// would show them as one line of `\n` escapes. The exit code stays 1.
+fn main() {
+    match run() {
+        Ok(exit_code) => std::process::exit(exit_code),
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run() -> Result<i32, Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     let exit_code = match cli.command {
@@ -331,7 +344,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?,
     };
 
-    std::process::exit(exit_code);
+    Ok(exit_code)
 }
 
 // --------------------------------------------------

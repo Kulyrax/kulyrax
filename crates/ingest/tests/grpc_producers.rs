@@ -58,7 +58,7 @@ fn routing() -> HashMap<String, Vec<String>> {
 fn mappings() -> HashMap<String, SqlMapping> {
     HashMap::from([(
         "UserUpserted".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             "event: UserUpserted\ntable: users\nprimary_key: id\nversion: 1\non_existing: replace\ncolumns:\n  id: payload.id\n  name: payload.name\n",
         )
         .unwrap(),

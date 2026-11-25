@@ -43,7 +43,7 @@ fn kv_permanent_tombstone_rejects_later_resurrection_attempt()
     let mut mappings = HashMap::new();
     mappings.insert(
         "UserViewUpdated".to_string(),
-        serde_yaml::from_str::<KvMapping>(
+        kulyrax_core::yaml::from_str::<KvMapping>(
             r#"
 event: UserViewUpdated
 namespace: user-view
@@ -57,7 +57,7 @@ value:
     );
     mappings.insert(
         "CacheInvalidated".to_string(),
-        serde_yaml::from_str::<KvMapping>(
+        kulyrax_core::yaml::from_str::<KvMapping>(
             r#"
 event: CacheInvalidated
 namespace: user-view

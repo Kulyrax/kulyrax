@@ -41,7 +41,7 @@ fn mappings() -> HashMap<String, DocumentMapping> {
     let mut m = HashMap::new();
     m.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: UserCreated
 collection: users
@@ -56,7 +56,7 @@ document:
     );
     m.insert(
         "UserEmailChanged".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: UserEmailChanged
 collection: users

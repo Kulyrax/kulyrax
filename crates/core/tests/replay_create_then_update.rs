@@ -17,7 +17,7 @@ use std::fs;
 use tempfile::tempdir;
 
 fn sql_mapping_replace() -> SqlMapping {
-    serde_yaml::from_str(
+    kulyrax_core::yaml::from_str(
         r#"
 event: UserUpdated
 table: users

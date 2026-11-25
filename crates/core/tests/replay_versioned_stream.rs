@@ -75,7 +75,7 @@ fn registry() -> UpcasterRegistry {
 
 /// Mapping targets schema v3 (id, email, tier columns).
 fn sql_mapping_v3() -> SqlMapping {
-    serde_yaml::from_str(
+    kulyrax_core::yaml::from_str(
         r#"
 event: UserCreated
 table: users

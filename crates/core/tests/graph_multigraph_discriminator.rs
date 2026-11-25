@@ -31,7 +31,7 @@ fn mappings() -> HashMap<String, GraphMapping> {
     let mut m = HashMap::new();
     m.insert(
         "UserRated".to_string(),
-        serde_yaml::from_str::<GraphMapping>(
+        kulyrax_core::yaml::from_str::<GraphMapping>(
             "kind: edge\nevent: UserRated\nedge_type: RATED\nversion: 1\nfrom: payload.from\nto: payload.to\ndiscriminator: payload.rating_id\non_existing: replace\nproperties:\n  score: payload.score\n",
         )
         .unwrap(),

@@ -76,8 +76,8 @@ libyaml-based crates agree on every row, so they share one column.
 | `mode: 0o755` into `i64` | 493 | 493 | 493 |
 | `n: ~` into `Option` | `None` | `None` | `None` |
 | anchor + alias | works | works | works |
-| merge key `<<` | not expanded: `missing field x` | **expanded** | error: merge keys not allowed, line 3 |
-| duplicate key | error | error, line 2 | error, line 2 |
+| merge key `<<`, into a struct | not expanded: `missing field x` | **expanded** | error: merge keys not allowed, line 3 |
+| duplicate key, into a struct (into a map: see "Duplicate keys and merge keys" below) | error | error, line 2 | error, line 2 |
 | untyped `c: yes` (into `serde_json::Value`) | `"yes"` | **`true`** | `"yes"` |
 
 The strict options are:
@@ -184,8 +184,8 @@ What each means for the decision above:
    refuses:
    - `yes` and `on` into `bool`;
    - `0755` into an integer;
-   - a merge key;
-   - a duplicate key;
+   - a merge key, into a struct;
+   - a duplicate key, into a struct;
    - a wrong type;
    - an unknown field under `deny_unknown_fields`.
 
@@ -202,6 +202,42 @@ What each means for the decision above:
    day, 2026-11-18. A task records the move to 3.x once 3.0 is final, gated by
    the golden test, before 1.0.0-rc.1:
    [2026-11-25-yaml-parser-3x](../tasks/2026-11-25-yaml-parser-3x.md).
+
+### Duplicate keys and merge keys: read exactly as 0.12 (owner, 2026-11-25)
+
+The golden test (golden mode over the whole test suite) found that
+Evidence §1 was incomplete. serde_yaml 0.9 refuses a duplicate key or a merge
+key only when it reads into a **struct**:
+- into a map or a `Value`, a duplicate key keeps the last value
+  (`a: 1\na: 2` → `{"a": 2}`);
+- `<<` is an ordinary key there.
+
+Kulyrax's maps include routing files, a mapping's `columns:`, and custom
+adapters' `config:` blocks. The strict options above (`merge_keys: Error`,
+duplicate keys `Error` by default) refused both everywhere, which would make a
+file that worked in 0.12 fail.
+
+serde-saphyr's `duplicate_keys: PassThrough` with `merge_keys: AsOrdinary`
+hands repeated entries and `<<` to the receiving type as serde_yaml did. A
+probe on 2026-11-25 matched serde_yaml exactly on every case: struct
+duplicate, map duplicate, `Value` duplicate, merge into a struct, into a `Value`,
+and into a map.
+
+The owner chose "Read exactly as 0.12" when asked. The options are therefore:
+
+```rust
+serde_saphyr::options! {
+    strict_booleans: true,
+    merge_keys: MergeKeyPolicy::AsOrdinary,
+    duplicate_keys: DuplicateKeyPolicy::PassThrough,
+    leading_zero_numbers_as_strings: true,
+    with_snippet: true,
+}
+```
+
+The refusal corpus still holds: a struct refuses a repeated field, and refuses a
+merge key that was meant to supply its fields. Refusing duplicates in maps would
+be a separate decision, and a breaking change.
 
 Fallback: if the golden test finds a difference we cannot configure away, or
 serde-saphyr's API churn makes the pin unworkable before 1.0, **yaml_serde** takes

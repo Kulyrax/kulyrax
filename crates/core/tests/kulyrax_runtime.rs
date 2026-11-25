@@ -63,7 +63,7 @@ fn config_with_one_custom_adapter(type_name: &str) -> KulyraxConfig {
             type_name: type_name.into(),
             id: "sql-primary".into(),
             priority: 10,
-            raw: serde_yaml::Value::Null,
+            raw: serde_json::Value::Null,
             capabilities: None,
             depends_on: vec![],
         })],
@@ -225,7 +225,7 @@ fn adapters_rebuilt_after_run_sources_still_receive_the_mappings() {
     let type_name = "test-mapping-count-sql";
     let seen_mapping_counts = Arc::new(std::sync::Mutex::new(Vec::new()));
     let seen_in_factory = Arc::clone(&seen_mapping_counts);
-    let sql_mapping: kulyrax_core::adapter::sql::mapping::SqlMapping = serde_yaml::from_str(
+    let sql_mapping: kulyrax_core::adapter::sql::mapping::SqlMapping = kulyrax_core::yaml::from_str(
         "event: UserCreated\ntable: users\nprimary_key: id\nversion: 1\ncolumns:\n  id: payload.id\n",
     )
     .expect("mapping parses");

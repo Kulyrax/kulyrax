@@ -59,7 +59,7 @@ fn delete_removes_only_the_matching_pair() -> Result<(), Box<dyn std::error::Err
     let mut mappings = HashMap::new();
     mappings.insert(
         "TagAssigned".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: TagAssigned
 table: post_tags
@@ -73,7 +73,7 @@ columns:
     );
     mappings.insert(
         "TagRemoved".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: TagRemoved
 table: post_tags
