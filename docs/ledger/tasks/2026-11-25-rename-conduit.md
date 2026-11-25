@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # Rename conduit → kulyrax (1.0 plan, step 2)
@@ -59,8 +59,8 @@ lane kept. A migration killed halfway completes on the next start. Design:
   - Neo4j: a test owns the whole database (process and file lock, wipe before
     and after, a leftover guard fails loudly);
   - CONTRIBUTING documents one Neo4j container per branch.
-- [ ] Pushed to origin, PR opened, CI green (including `upgrade from 0.12.1` and
-  `old name only in the migration`), merged.
+- [x] Pushed to origin, PR opened, CI green (including `upgrade from 0.12.1` and
+  `old name only in the migration`), merged: #26, `d04ca00`.
 
 ## Constraints and assumptions
 
@@ -125,9 +125,7 @@ After the rebase onto main at 0.12.2 (runbook B1) and the isolation fix (B2):
 | Every Docker suite after B2, first run | `cargo test -p <crate> -- --test-threads=1`: Postgres, MySQL, Redis, MongoDB, Elasticsearch, this branch's own Neo4j (`bolt://localhost:7688`), outbox, ingest, CLI with `KULYRAX_V0121_BIN` | 0 failures: postgres 30, mysql 25, redis 14, mongodb 21, elasticsearch 11, neo4j 20, source-postgres 14, ingest 14, cli 32. A rerun with `--nocapture` printed no `SKIP` line in the CLI, Neo4j, MongoDB, Postgres, MySQL, ingest or outbox suites |
 | Shared guard objects after the run | the same queries, then `diff` | unchanged |
 | CI `old name only in the migration`, PR #26, first run | the CI job | **failed**. Cause: B2's Neo4j wipe helpers (`crates/adapters/neo4j/tests/common/mod.rs`, `crates/cli/tests/support/neo4j.rs`) and CONTRIBUTING named the 0.12 guard label and constraint prefix. The local grep had run before B2, not after. Fixed: both old names moved to a `legacy.rs` beside each helper (the allowlist's convention), and CONTRIBUTING says "0.12's prefix". The grep over tracked files then finds nothing. Neo4j 13 + 1 + 4 and CLI `ordering` 3 + `rename_migration` 15 rerun green, with no SKIP lines |
-
-Not run: the new CI jobs (`old-name`, `upgrade-from-0-12-1`). They run on the
-PR.
+| CI on PR #26 | the PR's checks | head `aa6e48f`: 14 of 15 green; `old name only in the migration` failed (above). Head `25bacc4`: 15 of 15 green, including `upgrade from 0.12.1` (15 upgrade and kill tests, every backend, 0.12.1 built from the tag) |
 
 ## Risks and open questions
 
@@ -150,5 +148,5 @@ PR.
 
 ## Outcome
 
-Implemented and verified on `step2-rename`, rebased onto main at 0.12.2, with
-the test-isolation fix.
+Merged as #26 (`d04ca00`): the rename, its start-up migration per backend, the
+test-isolation fix, and the two CI jobs.
