@@ -37,7 +37,7 @@ fn config() -> KulyraxConfig {
 }
 
 fn sql(event: &str, facet: &str, col: &str) -> SqlMapping {
-    serde_yaml::from_str(&format!(
+    kulyrax_core::yaml::from_str(&format!(
         r#"
 event: {event}
 table: users
@@ -60,7 +60,7 @@ fn two_facets_claiming_the_same_column_is_rejected() {
     let mut sqlm = HashMap::new();
     sqlm.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserCreated
 table: users

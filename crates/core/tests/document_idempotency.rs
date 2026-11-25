@@ -39,7 +39,7 @@ fn document_adapter_is_idempotent() -> Result<(), Box<dyn std::error::Error>> {
     let mut doc_mappings = HashMap::new();
     doc_mappings.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: UserCreated
 collection: users

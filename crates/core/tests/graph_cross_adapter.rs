@@ -47,7 +47,7 @@ fn sql_row_and_graph_node_agree() -> Result<(), Box<dyn std::error::Error>> {
     let mut sql_m = HashMap::new();
     sql_m.insert(
         "UserRegistered".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             "event: UserRegistered\ntable: users\nprimary_key: user_id\nversion: 1\non_existing: replace\ncolumns:\n  user_id: payload.user_id\n  name: payload.name\n",
         )
         .unwrap(),
@@ -64,7 +64,7 @@ fn sql_row_and_graph_node_agree() -> Result<(), Box<dyn std::error::Error>> {
     let mut graph_m = HashMap::new();
     graph_m.insert(
         "UserRegistered".to_string(),
-        serde_yaml::from_str::<GraphMapping>(
+        kulyrax_core::yaml::from_str::<GraphMapping>(
             "kind: node\nevent: UserRegistered\nlabel: User\nversion: 1\nkey: payload.user_id\non_existing: replace\nproperties:\n  name: payload.name\n",
         )
         .unwrap(),

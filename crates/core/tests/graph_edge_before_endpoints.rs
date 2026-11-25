@@ -29,7 +29,7 @@ fn mappings() -> HashMap<String, GraphMapping> {
     let mut m = HashMap::new();
     m.insert(
         "UserFollowed".to_string(),
-        serde_yaml::from_str::<GraphMapping>(
+        kulyrax_core::yaml::from_str::<GraphMapping>(
             "kind: edge\nevent: UserFollowed\nedge_type: FOLLOWS\nversion: 1\nfrom: payload.follower\nto: payload.followee\nproperties:\n  since: payload.ts\n",
         )
         .unwrap(),

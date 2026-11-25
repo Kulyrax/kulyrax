@@ -44,7 +44,7 @@ fn sql_out_of_order_converges_to_highest_sequence() -> Result<(), Box<dyn std::e
     let mut sql_mappings = HashMap::new();
     sql_mappings.insert(
         "UserUpdated".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserUpdated
 table: users
@@ -102,7 +102,7 @@ fn document_out_of_order_converges_to_highest_sequence() -> Result<(), Box<dyn s
     let mut doc_mappings = HashMap::new();
     doc_mappings.insert(
         "UserUpdated".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: UserUpdated
 collection: users

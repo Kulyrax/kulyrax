@@ -33,7 +33,7 @@ fn password() -> String {
 }
 
 fn adapter(uri: &str, label: &str) -> Neo4jAdapter {
-    let m: GraphMapping = serde_yaml::from_str(&format!(
+    let m: GraphMapping = kulyrax_core::yaml::from_str(&format!(
         "kind: node\nevent: U\nlabel: {label}\nkey: payload.id\nversion: 1\non_existing: replace\nproperties:\n  v: payload.v\n"
     ))
     .unwrap();

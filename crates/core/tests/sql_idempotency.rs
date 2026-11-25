@@ -56,7 +56,7 @@ fn sql_adapter_is_idempotent() -> Result<(), Box<dyn std::error::Error>> {
     let mut sql_mappings = HashMap::new();
     sql_mappings.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str(
+        kulyrax_core::yaml::from_str(
             r#"
 event: UserCreated
 table: users

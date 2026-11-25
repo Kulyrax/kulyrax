@@ -57,7 +57,7 @@ fn sql_second_event_id_for_same_entity_is_skipped_first_write_persists()
     let mut sql_mappings = HashMap::new();
     sql_mappings.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserCreated
 table: users
@@ -128,7 +128,7 @@ fn document_second_event_id_for_same_entity_is_skipped_first_write_persists()
     let mut doc_mappings = HashMap::new();
     doc_mappings.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: UserCreated
 collection: users

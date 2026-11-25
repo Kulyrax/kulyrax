@@ -1137,7 +1137,7 @@ mod tests {
 
     #[test]
     fn factory_rejects_an_unparseable_url() {
-        let raw = serde_yaml::to_value(serde_json::json!({
+        let raw = serde_json::to_value(serde_json::json!({
             "type": "postgres",
             "id": "pg1",
             "priority": 10,

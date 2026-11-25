@@ -52,7 +52,7 @@ fn same_pair_updates_in_place_different_pair_inserts() -> Result<(), Box<dyn std
     let mut sql_mappings = HashMap::new();
     sql_mappings.insert(
         "TagAssigned".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: TagAssigned
 table: post_tags

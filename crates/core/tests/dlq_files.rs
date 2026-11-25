@@ -21,11 +21,11 @@ fn line(id: &str, seq: u64) -> String {
 /// Run the given sources into a SQLite table that does not exist: every event
 /// fails and, with no retries, is dead-lettered into `dlq`.
 fn run(root: &Path, dlq: &Path, sources: Vec<Box<dyn EventSource>>) -> u64 {
-    let mapping: SqlMapping = serde_yaml::from_str(
+    let mapping: SqlMapping = kulyrax_core::yaml::from_str(
         "event: U\ntable: missing\nprimary_key: id\nversion: 1\ncolumns:\n  id: payload.id\n",
     )
     .expect("mapping");
-    let config: KulyraxConfig = serde_yaml::from_str(&format!(
+    let config: KulyraxConfig = kulyrax_core::yaml::from_str(&format!(
         "version: 1\nrouting:\n  file: r.yaml\nadapters:\n  - type: sqlite\n    id: sql\n    priority: 10\n    config:\n      path: {}\n",
         root.join("app.db").display().to_string().replace('\\', "/")
     ))

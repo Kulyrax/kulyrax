@@ -52,7 +52,7 @@ fn sql_primary_key_resolving_to_an_array_fails_the_build() -> Result<(), Box<dyn
     let mut sql_mappings = HashMap::new();
     sql_mappings.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserCreated
 table: users
@@ -106,7 +106,7 @@ fn document_id_resolving_to_an_object_fails_the_build() -> Result<(), Box<dyn st
     let mut doc_mappings = HashMap::new();
     doc_mappings.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: UserCreated
 collection: users

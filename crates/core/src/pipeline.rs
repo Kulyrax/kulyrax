@@ -150,9 +150,10 @@ pub fn resolve_routing_path(config_path: &Path, routing_file: &str) -> PathBuf {
 
 /// Load and validate a [KulyraxConfig] from a YAML file.
 pub fn load_config(path: &Path) -> Result<KulyraxConfig, PipelineError> {
-    let file = fs::File::open(path)?;
-    let config: KulyraxConfig =
-        serde_yaml::from_reader(file).map_err(|e| PipelineError::ConfigParse(e.to_string()))?;
+    let input = fs::read_to_string(path)?;
+    // The error names the file, the field and the line.
+    let config: KulyraxConfig = crate::yaml::from_str_in(&input, &path.display().to_string())
+        .map_err(|e| PipelineError::ConfigParse(e.to_string()))?;
     config.validate()?;
     Ok(config)
 }

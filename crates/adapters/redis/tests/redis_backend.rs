@@ -44,15 +44,28 @@ macro_rules! require_redis {
 static NS_SEQ: AtomicU32 = AtomicU32::new(0);
 
 /// A unique namespace per test invocation, so the shared keyspace stays
-/// isolated (the Redis analog of `pg_backend.rs`'s `fresh_table`). The
-/// process id keeps a rerun against the same server off an earlier run's
-/// guards.
+/// isolated (the Redis analog of `pg_backend.rs`'s `fresh_table`). The run
+/// token keeps a rerun against the same server off an earlier run's guards.
 fn fresh_namespace() -> String {
     format!(
         "t{}-{}",
-        std::process::id(),
+        run_token(),
         NS_SEQ.fetch_add(1, Ordering::Relaxed)
     )
+}
+
+/// The process id and this run's start time. The process id alone repeats:
+/// Windows reuses ids soon, and a namespace that met an earlier run's guards
+/// made its events stale.
+fn run_token() -> &'static str {
+    static TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TOKEN.get_or_init(|| {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        format!("{}x{}", std::process::id(), nanos % 1_000_000_000_000)
+    })
 }
 
 fn redis_conn(url: &str) -> Result<redis::Connection, redis::RedisError> {
@@ -78,7 +91,7 @@ fn redis_adapter(url: &str, mappings: HashMap<String, KvMapping>) -> RedisAdapte
 }
 
 fn kv_mapping(yaml: &str) -> KvMapping {
-    serde_yaml::from_str(yaml).unwrap()
+    kulyrax_core::yaml::from_str(yaml).unwrap()
 }
 
 fn ev(event_type: &str, seq: u64, payload: serde_json::Value) -> Event {

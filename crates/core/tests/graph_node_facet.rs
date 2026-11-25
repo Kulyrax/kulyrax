@@ -52,21 +52,21 @@ fn mappings() -> HashMap<String, GraphMapping> {
     let mut m = HashMap::new();
     m.insert(
         "UserRegistered".to_string(),
-        serde_yaml::from_str::<GraphMapping>(
+        kulyrax_core::yaml::from_str::<GraphMapping>(
             "kind: node\nevent: UserRegistered\nlabel: User\nversion: 1\nkey: payload.user_id\nproperties:\n  name: payload.name\n",
         )
         .unwrap(),
     );
     m.insert(
         "ProfileUpdated".to_string(),
-        serde_yaml::from_str::<GraphMapping>(
+        kulyrax_core::yaml::from_str::<GraphMapping>(
             "kind: node\nevent: ProfileUpdated\nlabel: User\nversion: 1\nkey: payload.user_id\nfacet: profile\nproperties:\n  bio: payload.bio\n",
         )
         .unwrap(),
     );
     m.insert(
         "StatsRecomputed".to_string(),
-        serde_yaml::from_str::<GraphMapping>(
+        kulyrax_core::yaml::from_str::<GraphMapping>(
             "kind: node\nevent: StatsRecomputed\nlabel: User\nversion: 1\nkey: payload.user_id\nfacet: stats\nproperties:\n  followers: payload.followers\n",
         )
         .unwrap(),

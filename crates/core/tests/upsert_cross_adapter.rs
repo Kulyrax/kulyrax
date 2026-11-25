@@ -65,7 +65,7 @@ fn sql_and_document_projections_agree_on_final_entity_state()
     let mut sql_mappings = HashMap::new();
     sql_mappings.insert(
         "UserUpdated".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserUpdated
 table: users
@@ -92,7 +92,7 @@ columns:
     let mut doc_mappings = HashMap::new();
     doc_mappings.insert(
         "UserUpdated".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: UserUpdated
 collection: users

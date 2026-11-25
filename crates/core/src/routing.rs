@@ -75,5 +75,7 @@ pub fn load_routing<P: AsRef<Path>>(path: P) -> Result<HashMap<String, Vec<Adapt
 
     let data = fs::read_to_string(path)
         .map_err(|e| format!("Failed to read routing file {}: {e}", path.display()))?;
-    serde_yaml::from_str(&data).map_err(|e| format!("Invalid routing file {}: {e}", path.display()))
+    // The error names the file, the field and the line.
+    crate::yaml::from_str_in(&data, &path.display().to_string())
+        .map_err(|e| format!("Invalid routing file: {e}"))
 }

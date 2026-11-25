@@ -31,7 +31,7 @@ fn kv_redelivery_is_stale_not_already_projected() -> Result<(), Box<dyn std::err
     let mut mappings = HashMap::new();
     mappings.insert(
         "UserViewUpdated".to_string(),
-        serde_yaml::from_str::<KvMapping>(
+        kulyrax_core::yaml::from_str::<KvMapping>(
             r#"
 event: UserViewUpdated
 namespace: user-view

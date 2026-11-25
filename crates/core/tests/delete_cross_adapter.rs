@@ -63,7 +63,7 @@ fn sql_and_document_agree_after_the_same_lifecycle() -> Result<(), Box<dyn std::
     let mut sql_mappings = HashMap::new();
     sql_mappings.insert(
         "UserUpdated".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserUpdated
 table: users
@@ -78,7 +78,7 @@ columns:
     );
     sql_mappings.insert(
         "UserDeleted".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserDeleted
 table: users
@@ -104,7 +104,7 @@ columns:
     let mut doc_mappings = HashMap::new();
     doc_mappings.insert(
         "UserUpdated".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: UserUpdated
 collection: users
@@ -119,7 +119,7 @@ document:
     );
     doc_mappings.insert(
         "UserDeleted".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: UserDeleted
 collection: users

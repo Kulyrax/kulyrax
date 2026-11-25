@@ -879,7 +879,7 @@ mod tests {
     // Only rejection paths: they return before `Neo4jAdapter::new`, which
     // would otherwise try to connect.
     fn error_of(uri: &str) -> String {
-        let raw = serde_yaml::to_value(serde_json::json!({
+        let raw = serde_json::to_value(serde_json::json!({
             "type": "neo4j",
             "id": "n1",
             "priority": 10,

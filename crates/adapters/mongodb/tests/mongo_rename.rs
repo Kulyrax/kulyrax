@@ -44,7 +44,7 @@ fn fresh_db(client: &mongodb::sync::Client) -> String {
 }
 
 fn adapter(url: &str, db: &str) -> MongoDbAdapter {
-    let m: DocumentMapping = serde_yaml::from_str(
+    let m: DocumentMapping = kulyrax_core::yaml::from_str(
         "event: U\ncollection: users\nversion: 1\nid: payload.id\non_existing: replace\ndocument:\n  v: payload.v\n",
     )
     .unwrap();

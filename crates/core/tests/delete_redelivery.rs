@@ -60,7 +60,7 @@ fn sql_exact_redelivery_is_stale_newer_delete_is_already_deleted()
     let mut mappings = HashMap::new();
     mappings.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserCreated
 table: users
@@ -75,7 +75,7 @@ columns:
     );
     mappings.insert(
         "UserDeleted".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserDeleted
 table: users
@@ -165,7 +165,7 @@ fn document_exact_redelivery_is_stale_newer_delete_is_already_deleted()
     let mut mappings = HashMap::new();
     mappings.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: UserCreated
 collection: users
@@ -180,7 +180,7 @@ document:
     );
     mappings.insert(
         "UserDeleted".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: UserDeleted
 collection: users

@@ -43,7 +43,7 @@ fn kv(root: &Path, namespaces: &[&str]) -> FileKvStore {
         .enumerate()
         .map(|(i, ns)| {
             let event = if i == 0 { "U".to_string() } else { format!("U{i}") };
-            let m: KvMapping = serde_yaml::from_str(&format!(
+            let m: KvMapping = kulyrax_core::yaml::from_str(&format!(
                 "event: {event}\nnamespace: {ns}\nversion: 1\nkey: payload.id\non_existing: replace\nvalue:\n  v: payload.v\n"
             ))
             .unwrap();
@@ -61,7 +61,7 @@ fn kv(root: &Path, namespaces: &[&str]) -> FileKvStore {
 }
 
 fn doc(root: &Path, collection: &str) -> FileDocumentAdapter {
-    let m: DocumentMapping = serde_yaml::from_str(&format!(
+    let m: DocumentMapping = kulyrax_core::yaml::from_str(&format!(
         "event: U\ncollection: {collection}\nversion: 1\nid: payload.id\non_existing: replace\ndocument:\n  v: payload.v\n"
     ))
     .unwrap();
@@ -76,11 +76,11 @@ fn doc(root: &Path, collection: &str) -> FileDocumentAdapter {
 }
 
 fn graph(root: &Path, label: &str) -> GraphStore {
-    let node: GraphMapping = serde_yaml::from_str(&format!(
+    let node: GraphMapping = kulyrax_core::yaml::from_str(&format!(
         "kind: node\nevent: U\nlabel: {label}\nversion: 1\nkey: payload.id\non_existing: replace\nproperties:\n  v: payload.v\n"
     ))
     .unwrap();
-    let edge: GraphMapping = serde_yaml::from_str(
+    let edge: GraphMapping = kulyrax_core::yaml::from_str(
         "kind: edge\nevent: E\nedge_type: LINKS\nversion: 1\nfrom: payload.id\nto: payload.to\non_existing: replace\nproperties:\n  v: payload.v\n",
     )
     .unwrap();
@@ -138,11 +138,11 @@ fn refused(a: &dyn StorageAdapter) -> String {
 /// A key-value store with an upsert (`U`) and a delete (`D`) mapping on
 /// `users`.
 fn kv_with_delete(root: &Path) -> FileKvStore {
-    let upsert: KvMapping = serde_yaml::from_str(
+    let upsert: KvMapping = kulyrax_core::yaml::from_str(
         "event: U\nnamespace: users\nversion: 1\nkey: payload.id\non_existing: replace\nvalue:\n  v: payload.v\n",
     )
     .unwrap();
-    let delete: KvMapping = serde_yaml::from_str(
+    let delete: KvMapping = kulyrax_core::yaml::from_str(
         "event: D\nnamespace: users\nversion: 1\nkey: payload.id\noperation: delete\nvalue: {}\n",
     )
     .unwrap();
@@ -396,7 +396,7 @@ fn an_interrupted_move_finishes_on_the_next_start() {
 // ---------------------------------------------------------------------------
 
 fn sqlite(path: &Path) -> SqliteAdapter {
-    let m: SqlMapping = serde_yaml::from_str(
+    let m: SqlMapping = kulyrax_core::yaml::from_str(
         "event: U\ntable: users\nprimary_key: id\nversion: 1\non_existing: replace\ncolumns:\n  id: payload.id\n  v: payload.v\n",
     )
     .unwrap();

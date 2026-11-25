@@ -14,7 +14,6 @@ categories = ["database"]
 kulyrax-core = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_yaml = "0.9"
 
 # Phase 19 (moved out of kulyrax-core in Phase 28): sync `postgres` (no TLS
 # features → no openssl); r2d2 pool. The adapter path stays synchronous — the

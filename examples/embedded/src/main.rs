@@ -47,7 +47,7 @@ fn main() {
     let mut sql_mappings = HashMap::new();
     sql_mappings.insert(
         "UserRegistered".to_string(),
-        serde_yaml::from_str(
+        kulyrax_core::yaml::from_str(
             "event: UserRegistered\ntable: users\nprimary_key: id\nversion: 1\ncolumns:\n  id: payload.id\n  name: payload.name\n",
         )
         .unwrap(),

@@ -669,7 +669,7 @@ mod tests {
     }
 
     fn build(url: &str) -> Result<Box<dyn StorageAdapter>, ConfigError> {
-        let raw = serde_yaml::to_value(serde_json::json!({
+        let raw = serde_json::to_value(serde_json::json!({
             "type": "mysql",
             "id": "my1",
             "priority": 10,

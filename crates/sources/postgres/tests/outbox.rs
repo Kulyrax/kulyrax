@@ -376,7 +376,7 @@ fn start_up_refuses_a_bad_table_or_sequence() -> R {
     );
 
     // A config without sequence_column does not parse.
-    let err = serde_yaml::from_str::<OutboxConfig>(&format!("url: {url}\ntable: {t}\n"))
+    let err = kulyrax_core::yaml::from_str::<OutboxConfig>(&format!("url: {url}\ntable: {t}\n"))
         .err()
         .map(|e| e.to_string())
         .unwrap_or_default();
@@ -440,7 +440,7 @@ fn run_once(
         migration_policy: Default::default(),
         sources: Vec::new(),
     };
-    let mapping: SqlMapping = serde_yaml::from_str(
+    let mapping: SqlMapping = kulyrax_core::yaml::from_str(
         "event: UserUpserted\ntable: users\nprimary_key: id\nversion: 1\non_existing: replace\ncolumns:\n  id: payload.id\n  name: payload.name\n",
     )
     .map_err(|e| kulyrax_core::SourceError::Parse(e.to_string()))?;

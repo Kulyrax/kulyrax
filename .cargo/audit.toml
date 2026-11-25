@@ -31,7 +31,4 @@ ignore = [
     # rustls-pki-types). Pulled in by mysql, neo4rs and rustls-native-certs.
     # Goes when they move. Revisit 2027-02-25.
     "RUSTSEC-2025-0134",
-    # unsafe-libyaml: unmaintained, no fix. serde_yaml's parser. Removed by step
-    # 3 of the 1.0 plan (serde_yaml -> serde-saphyr); drop this ignore then.
-    "RUSTSEC-2024-0449",
 ]

@@ -2,8 +2,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::de::DeserializeOwned;
-
 /// Load every mapping file under `dir` into a table keyed by event type.
 ///
 /// Mapping files end in `.yaml` or `.yml` (any case) and may sit in
@@ -14,7 +12,7 @@ use serde::de::DeserializeOwned;
 ///
 /// Files are read in sorted path order, so a duplicate event is always reported
 /// against the same pair of files.
-pub(crate) fn load_mapping_dir<M: DeserializeOwned>(
+pub(crate) fn load_mapping_dir<M: serde::de::DeserializeOwned>(
     dir: &Path,
     kind: &str,
     event_of: impl Fn(&M) -> &str,
@@ -28,8 +26,9 @@ pub(crate) fn load_mapping_dir<M: DeserializeOwned>(
     for path in files {
         let content =
             fs::read_to_string(&path).map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
-        let mapping: M = serde_yaml::from_str(&content)
-            .map_err(|e| format!("Invalid YAML in {:?}: {}", path, e))?;
+        // The error names the file, the field and the line.
+        let mapping: M = crate::yaml::from_str_in(&content, &path.display().to_string())
+            .map_err(|e| format!("Invalid {kind} mapping: {e}"))?;
 
         let event = event_of(&mapping).to_string();
         if let Some(first) = sources.get(&event) {
@@ -160,7 +159,9 @@ mod tests {
         fs::write(dir.path().join("broken.yaml"), "event: [unclosed").expect("write");
         let err = load(dir.path()).expect_err("invalid YAML is an error");
         assert!(
-            err.starts_with("Invalid YAML in") && err.contains("broken.yaml"),
+            err.starts_with("Invalid SQL mapping: ")
+                && err.contains("broken.yaml")
+                && err.contains("line 1"),
             "{err}"
         );
     }

@@ -56,7 +56,7 @@ fn sql_resurrection_after_delete() -> Result<(), Box<dyn std::error::Error>> {
     let mut mappings = HashMap::new();
     mappings.insert(
         "UserUpdated".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserUpdated
 table: users
@@ -71,7 +71,7 @@ columns:
     );
     mappings.insert(
         "UserDeleted".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserDeleted
 table: users
@@ -155,7 +155,7 @@ fn document_resurrection_after_delete() -> Result<(), Box<dyn std::error::Error>
     let mut mappings = HashMap::new();
     mappings.insert(
         "UserUpdated".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: UserUpdated
 collection: users
@@ -170,7 +170,7 @@ document:
     );
     mappings.insert(
         "UserDeleted".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             r#"
 event: UserDeleted
 collection: users

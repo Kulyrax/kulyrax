@@ -58,7 +58,7 @@ fn prepare_makes_old_case_insensitive_guard_keys_binary() -> R {
         (table,),
     )?;
 
-    let mapping: SqlMapping = serde_yaml::from_str(&format!(
+    let mapping: SqlMapping = kulyrax_core::yaml::from_str(&format!(
         "event: Up\ntable: {table}\nprimary_key: id\nversion: 1\non_existing: replace\ncolumns:\n  id: payload.id\n  name: payload.name\n"
     ))?;
     let adapter = MySqlAdapter::new(

@@ -73,8 +73,9 @@ guard table, collection or label:
   recreated when the binary starts, and the binary fails at once if it is not empty
   then. Tests that need more than one (the `*_rename` suites, the CLI upgrade tests)
   make one per test and drop it at the end.
-- **Redis, Elasticsearch:** each test uses a namespace or index of its own. The CLI
-  upgrade tests delete theirs at the end.
+- **Redis, Elasticsearch:** each test uses a namespace or index of its own, named
+  after the process id and the run's start time: a process id alone repeats, since
+  Windows reuses them. The CLI upgrade tests delete theirs at the end.
 - **Neo4j** has a single database, and the guard-label migration relabels every guard
   node in it, so a Neo4j test owns the whole database while it runs. It takes a
   process-wide lock and an OS file lock in `target/tmp`, then wipes everything: every

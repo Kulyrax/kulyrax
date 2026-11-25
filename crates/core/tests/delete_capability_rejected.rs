@@ -45,7 +45,7 @@ fn config_with_sqlite_capabilities(capabilities: Option<Vec<AdapterCapability>>)
 }
 
 fn delete_sql_mapping() -> SqlMapping {
-    serde_yaml::from_str(
+    kulyrax_core::yaml::from_str(
         r#"
 event: UserDeleted
 table: users
@@ -60,7 +60,7 @@ columns:
 }
 
 fn ignore_doc_mapping() -> DocumentMapping {
-    serde_yaml::from_str(
+    kulyrax_core::yaml::from_str(
         r#"
 event: UserDeleted
 collection: users

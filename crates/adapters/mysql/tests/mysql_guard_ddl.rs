@@ -59,7 +59,7 @@ fn my_adapter(url: &str, mappings: HashMap<String, SqlMapping>) -> MySqlAdapter 
 }
 
 fn upsert_mapping(event: &str, table: &str, cols: &str) -> SqlMapping {
-    serde_yaml::from_str(&format!(
+    kulyrax_core::yaml::from_str(&format!(
         "event: {event}\ntable: {table}\nprimary_key: id\nversion: 1\non_existing: replace\ncolumns:\n{cols}"
     ))
     .unwrap()

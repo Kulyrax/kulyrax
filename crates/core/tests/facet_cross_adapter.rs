@@ -68,21 +68,21 @@ fn sql_mappings() -> HashMap<String, SqlMapping> {
     let mut m = HashMap::new();
     m.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             "event: UserCreated\ntable: users\nprimary_key: id\nversion: 1\ncolumns:\n  id: payload.id\n  display_name: payload.display_name\n",
         )
         .unwrap(),
     );
     m.insert(
         "UserEmailChanged".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             "event: UserEmailChanged\ntable: users\nprimary_key: id\nversion: 1\nfacet: contact\ncolumns:\n  id: payload.id\n  email: payload.email\n",
         )
         .unwrap(),
     );
     m.insert(
         "UserLoggedIn".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             "event: UserLoggedIn\ntable: users\nprimary_key: id\nversion: 1\nfacet: login\ncolumns:\n  id: payload.id\n  last_login: payload.last_login\n",
         )
         .unwrap(),
@@ -94,21 +94,21 @@ fn doc_mappings() -> HashMap<String, DocumentMapping> {
     let mut m = HashMap::new();
     m.insert(
         "UserCreated".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             "event: UserCreated\ncollection: users\nversion: 1\nid: payload.id\ndocument:\n  id: payload.id\n  display_name: payload.display_name\n",
         )
         .unwrap(),
     );
     m.insert(
         "UserEmailChanged".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             "event: UserEmailChanged\ncollection: users\nversion: 1\nid: payload.id\nfacet: contact\ndocument:\n  email: payload.email\n",
         )
         .unwrap(),
     );
     m.insert(
         "UserLoggedIn".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(
             "event: UserLoggedIn\ncollection: users\nversion: 1\nid: payload.id\nfacet: login\ndocument:\n  last_login: payload.last_login\n",
         )
         .unwrap(),

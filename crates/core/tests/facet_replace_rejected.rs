@@ -42,7 +42,7 @@ fn faceted_table_with_replace_mapping_is_rejected() {
     // Whole-entity replace on `users`...
     sqlm.insert(
         "UserUpserted".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserUpserted
 table: users
@@ -59,7 +59,7 @@ columns:
     // ...and a facet on the same table.
     sqlm.insert(
         "UserEmailChanged".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             r#"
 event: UserEmailChanged
 table: users

@@ -66,7 +66,7 @@ fn routing() -> HashMap<String, Vec<String>> {
 fn mappings() -> HashMap<String, SqlMapping> {
     HashMap::from([(
         "UserUpserted".to_string(),
-        serde_yaml::from_str::<SqlMapping>(
+        kulyrax_core::yaml::from_str::<SqlMapping>(
             "event: UserUpserted\ntable: users\nprimary_key: id\nversion: 1\non_existing: replace\ncolumns:\n  id: payload.id\n  name: payload.name\n",
         )
         .unwrap(),
@@ -434,14 +434,14 @@ fn grpc_dlq_count_reflects_a_real_cross_backend_failure() {
 
     let sql_mappings = HashMap::from([(
         "VehicleUpserted".to_string(),
-        serde_yaml::from_str::<SqlMapping>(&format!(
+        kulyrax_core::yaml::from_str::<SqlMapping>(&format!(
             "event: VehicleUpserted\ntable: {table}\nprimary_key: id\nversion: 1\non_existing: replace\ncolumns:\n  id: payload.id\n  name: payload.name\n"
         ))
         .unwrap(),
     )]);
     let doc_mappings = HashMap::from([(
         "VehicleUpserted".to_string(),
-        serde_yaml::from_str::<DocumentMapping>(&format!(
+        kulyrax_core::yaml::from_str::<DocumentMapping>(&format!(
             "event: VehicleUpserted\ncollection: {index}\nversion: 1\nid: payload.id\non_existing: replace\ndocument:\n  id: payload.id\n  name: payload.name\n  mileage: payload.mileage\n"
         ))
         .unwrap(),
@@ -463,7 +463,7 @@ fn grpc_dlq_count_reflects_a_real_cross_backend_failure() {
                 type_name: "postgres".into(),
                 id: "pg".into(),
                 priority: 10,
-                raw: serde_yaml::Value::Null,
+                raw: serde_json::Value::Null,
                 capabilities: caps.clone(),
                 depends_on: vec![],
             }),
@@ -471,7 +471,7 @@ fn grpc_dlq_count_reflects_a_real_cross_backend_failure() {
                 type_name: "elasticsearch".into(),
                 id: "es".into(),
                 priority: 10,
-                raw: serde_yaml::Value::Null,
+                raw: serde_json::Value::Null,
                 capabilities: caps,
                 depends_on: vec![],
             }),
