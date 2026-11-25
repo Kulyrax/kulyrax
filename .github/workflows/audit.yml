@@ -1,0 +1,65 @@
+name: Scheduled cargo audit
+
+# The RustSec database changes without any change to this repository, so the
+# advisory check also runs daily on main, not only on pull requests (ci.yml).
+# On failure it opens an issue, or comments on the one already open, with the
+# report and a link to the run.
+
+on:
+  schedule:
+    - cron: "17 6 * * *" # daily, 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    name: cargo audit (scheduled)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      # Same loop and flags as the `cargo audit` job in ci.yml; ignores are in
+      # .cargo/audit.toml.
+      - name: cargo audit (workspace and examples)
+        id: audit
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          (
+            status=0
+            for lock in Cargo.lock $(git ls-files 'examples/**/Cargo.lock'); do
+              echo "== $lock"
+              cargo audit --file "$lock" --deny unsound --deny unmaintained --deny yanked || status=1
+            done
+            exit $status
+          ) 2>&1 | tee audit-report.txt
+      - name: open or update the tracking issue
+        if: steps.audit.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="cargo audit: scheduled check failing"
+          {
+            echo "The scheduled \`cargo audit\` failed on \`main\` ($(date -u +%Y-%m-%d)): $RUN_URL"
+            echo
+            echo '```'
+            tail -c 60000 audit-report.txt
+            echo '```'
+          } > issue-body.md
+          number=$(gh issue list --state open --search "in:title \"$title\"" --json number,title \
+            --jq ".[] | select(.title == \"$title\") | .number" | head -1)
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body-file issue-body.md
+          else
+            gh issue create --title "$title" --body-file issue-body.md
+          fi
+      - name: fail the run when the audit failed
+        if: steps.audit.outcome == 'failure'
+        run: exit 1
