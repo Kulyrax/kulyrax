@@ -262,7 +262,7 @@ Non-responsibilities:
 
 Idempotency:
 
-* enforced via the `conduit_projection_state` guard table, primary-keyed on `(target_table, entity_key, facet)`
+* enforced via the `kulyrax_projection_state` guard table, primary-keyed on `(target_table, entity_key, facet)`
 * stored in the same database, atomic with projection execution
 * `on_existing: replace` builds `INSERT … ON CONFLICT (<pk>) DO UPDATE SET …` (`ON DUPLICATE KEY UPDATE` on MySQL, which has no `ON CONFLICT` syntax); a named facet restricts the `SET` list to its own columns
 

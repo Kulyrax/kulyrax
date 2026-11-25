@@ -14,7 +14,7 @@
 //! *before* the `WHERE` reads `last_sequence`. See that function's doc
 //! comment.
 //!
-//! Guard placement: one `__ConduitGuard` node per `(kind, target, entity_key,
+//! Guard placement: one `__KulyraxGuard` node per `(kind, target, entity_key,
 //! facet)` — `kind` is `"node"` or `"edge"` (disambiguating a node label and
 //! an edge type that happen to share a name), `target` is the label or edge
 //! type, `entity_key` the node id or canonical edge key. This is flatter
@@ -31,6 +31,8 @@
 //! the usual retry.
 
 use std::sync::{Arc, Mutex};
+
+mod legacy;
 
 use neo4rs::{BoltList, BoltMap, BoltType, ConfigBuilder, Graph, Neo4jErrorKind, Query, Row, Txn};
 use serde::Deserialize;
@@ -136,8 +138,8 @@ fn check_bolt_uri(uri: &str) -> Result<(), &'static str> {
 }
 
 const MAX_ATTEMPTS: u32 = 5;
-const GUARD_CONSTRAINT: &str = "CREATE CONSTRAINT IF NOT EXISTS FOR (g:__ConduitGuard) \
-    REQUIRE (g.kind, g.target, g.entity_key, g.facet) IS UNIQUE";
+const GUARD_CONSTRAINT: &str = "CREATE CONSTRAINT kulyrax_guard_key IF NOT EXISTS \
+    FOR (g:__KulyraxGuard) REQUIRE (g.kind, g.target, g.entity_key, g.facet) IS UNIQUE";
 
 fn json_to_bolt(v: &Value) -> BoltType {
     match v {
@@ -181,7 +183,7 @@ fn de_err(e: neo4rs::DeError) -> GraphError {
     GraphError::WriteFailed(format!("corrupt guard row: {e}"))
 }
 
-/// The four flat fields one `__ConduitGuard` lane carries.
+/// The four flat fields one `__KulyraxGuard` lane carries.
 fn lane_fields(guard: &GraphGuard, facet: &str) -> (u64, String, bool, bool) {
     if facet.is_empty() {
         (
@@ -278,10 +280,16 @@ impl Neo4jAdapter {
         AdapterResult::failure(self.id.clone(), StorageKind::Graph, error)
     }
 
-    /// Create the guard uniqueness constraint (idempotent: `IF NOT EXISTS`).
+    /// Create the guard uniqueness constraint (idempotent: `IF NOT EXISTS`),
+    /// then move any 0.12 guards onto it.
     fn ensure_constraint(&self, rt: &Runtime, graph: &Graph) -> Result<(), GraphError> {
-        rt.block_on(graph.run(Query::new(GUARD_CONSTRAINT.to_string())))
-            .map_err(neo_err)
+        rt.block_on(async {
+            graph
+                .run(Query::new(GUARD_CONSTRAINT.to_string()))
+                .await
+                .map_err(neo_err)?;
+            legacy::migrate_guards(graph).await
+        })
     }
 }
 
@@ -529,7 +537,7 @@ impl Neo4jBackend<'_> {
         entity_key: &str,
     ) -> Result<Option<GraphGuard>, GraphError> {
         let q = Query::new(
-            "MATCH (g:__ConduitGuard {kind: $kind, target: $target, entity_key: $entity_key}) \
+            "MATCH (g:__KulyraxGuard {kind: $kind, target: $target, entity_key: $entity_key}) \
              RETURN g.facet AS facet, g.last_sequence AS last_sequence, \
                     g.last_event_id AS last_event_id, g.deleted AS deleted, g.permanent AS permanent"
                 .to_string(),
@@ -610,7 +618,7 @@ impl Neo4jBackend<'_> {
         extra_params: Vec<(&str, BoltType)>,
     ) -> Result<(), GraphError> {
         let cypher = format!(
-            "MERGE (g:__ConduitGuard {{kind: $kind, target: $target, entity_key: $entity_key, facet: $facet}}) \
+            "MERGE (g:__KulyraxGuard {{kind: $kind, target: $target, entity_key: $entity_key, facet: $facet}}) \
              SET g.kind = $kind \
              WITH g WHERE g.last_sequence IS NULL OR g.last_sequence < $seq \
              SET g.last_sequence = $seq, g.last_event_id = $event_id, g.deleted = $deleted, g.permanent = $permanent \
@@ -657,7 +665,7 @@ impl GraphBackend for Neo4jBackend<'_> {
 
     fn node_is_tombstoned(&mut self, node_id: &str) -> Result<bool, GraphError> {
         let q = Query::new(
-            "MATCH (g:__ConduitGuard {kind: 'node', entity_key: $id, facet: '', deleted: true}) \
+            "MATCH (g:__KulyraxGuard {kind: 'node', entity_key: $id, facet: '', deleted: true}) \
              RETURN count(g) > 0 AS tombstoned"
                 .to_string(),
         )
@@ -786,7 +794,7 @@ impl GraphBackend for Neo4jBackend<'_> {
                 .into();
             let q = Query::new(
                 "UNWIND $facets AS f \
-                 MERGE (g:__ConduitGuard {kind: 'node', target: $label, entity_key: $id, facet: f.name}) \
+                 MERGE (g:__KulyraxGuard {kind: 'node', target: $label, entity_key: $id, facet: f.name}) \
                  SET g.last_sequence = f.seq, g.last_event_id = f.eid, g.deleted = true, g.permanent = f.permanent"
                     .to_string(),
             )
@@ -822,7 +830,7 @@ impl GraphBackend for Neo4jBackend<'_> {
                 .into();
             let q = Query::new(
                 "UNWIND $edges AS e \
-                 MERGE (g:__ConduitGuard {kind: 'edge', target: e.etype, entity_key: e.ekey, facet: ''}) \
+                 MERGE (g:__KulyraxGuard {kind: 'edge', target: e.etype, entity_key: e.ekey, facet: ''}) \
                  SET g.last_sequence = $seq, g.last_event_id = $eid, g.deleted = true, g.permanent = $permanent"
                     .to_string(),
             )

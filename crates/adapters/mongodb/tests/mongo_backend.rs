@@ -198,7 +198,7 @@ fn mongo_delete_lifecycle() -> R {
         target.find_one(doc! { "_id": "u1" }).run()?.is_none(),
         "document must be gone after delete"
     );
-    let guard_coll = db_handle.collection::<mongodb::bson::Document>("conduit_projection_state");
+    let guard_coll = db_handle.collection::<mongodb::bson::Document>("kulyrax_projection_state");
     let guard = guard_coll
         .find_one(doc! { "target": &coll, "entity_key": "u1" })
         .run()?
@@ -319,7 +319,7 @@ fn mongo_concurrent_writers() -> R {
 
     let client = mongo_client(&url)?;
     let db_handle = client.database(&db);
-    let guard_coll = db_handle.collection::<mongodb::bson::Document>("conduit_projection_state");
+    let guard_coll = db_handle.collection::<mongodb::bson::Document>("kulyrax_projection_state");
     let guard = guard_coll
         .find_one(doc! { "target": &coll, "entity_key": "u1" })
         .run()?
@@ -385,12 +385,12 @@ fn doc_cross_backend() -> R {
 
     let file_guard: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
         dir.path()
-            .join(".conduit")
+            .join(".kulyrax")
             .join("entities")
             .join(&coll)
             .join("u1.done"),
     )?)?;
-    let guard_coll = db_handle.collection::<mongodb::bson::Document>("conduit_projection_state");
+    let guard_coll = db_handle.collection::<mongodb::bson::Document>("kulyrax_projection_state");
     let mongo_guard = guard_coll
         .find_one(doc! { "target": &coll, "entity_key": "u1" })
         .run()?
@@ -471,7 +471,7 @@ fn mongo_prepare_twice_is_idempotent() -> R {
     a.prepare().map_err(|e| e.to_string())?;
     let guard_indexes = mongo_client(&url)?
         .database(&db)
-        .collection::<mongodb::bson::Document>("conduit_projection_state")
+        .collection::<mongodb::bson::Document>("kulyrax_projection_state")
         .list_indexes()
         .run()?
         .filter_map(Result::ok)
@@ -574,7 +574,7 @@ fn coll_state(url: &str, db: &str, coll: &str) -> Result<MongoState, Box<dyn std
             .find_one(doc! { "_id": id })
             .run()?;
         let guard = db
-            .collection::<mongodb::bson::Document>("conduit_projection_state")
+            .collection::<mongodb::bson::Document>("kulyrax_projection_state")
             .find_one(doc! { "target": coll, "entity_key": id })
             .run()?
             .map(|mut g| {

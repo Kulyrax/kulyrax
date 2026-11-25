@@ -151,9 +151,9 @@ fn tree(root: &Path) -> BTreeMap<String, String> {
                 .to_string_lossy()
                 .replace('\\', "/");
             // The store's own files: its lock, batch logs and layout markers.
-            if rel == ".conduit/lock"
-                || rel.starts_with(".conduit/wal")
-                || rel.starts_with(".conduit/layout")
+            if rel == ".kulyrax/lock"
+                || rel.starts_with(".kulyrax/wal")
+                || rel.starts_with(".kulyrax/layout")
             {
                 continue;
             }
@@ -170,7 +170,7 @@ fn tree(root: &Path) -> BTreeMap<String, String> {
 }
 
 fn wal_logs(root: &Path) -> Vec<PathBuf> {
-    match std::fs::read_dir(root.join(".conduit/wal")) {
+    match std::fs::read_dir(root.join(".kulyrax/wal")) {
         Ok(entries) => entries.map(|e| e.unwrap().path()).collect(),
         Err(_) => Vec::new(),
     }
@@ -346,8 +346,8 @@ fn a_second_writer_is_refused_at_prepare() {
     // same file through a handle of our own (OS file locks conflict between
     // handles, in one process or two).
     let dir = tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".conduit")).unwrap();
-    let lock_path = dir.path().join(".conduit/lock");
+    std::fs::create_dir_all(dir.path().join(".kulyrax")).unwrap();
+    let lock_path = dir.path().join(".kulyrax/lock");
     let held = OpenOptions::new()
         .create(true)
         .truncate(false)

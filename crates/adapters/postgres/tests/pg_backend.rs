@@ -44,7 +44,7 @@ macro_rules! require_pg {
 static TABLE_SEQ: AtomicU32 = AtomicU32::new(0);
 
 /// A unique table name per test invocation, so the shared
-/// `conduit_projection_state` (keyed by target_table) stays isolated.
+/// `kulyrax_projection_state` (keyed by target_table) stays isolated.
 fn fresh_table() -> String {
     // The process id keeps a rerun against the same server off an earlier
     // run's tables and guard lanes.
@@ -109,7 +109,7 @@ fn pg_upsert_out_of_order() -> R {
     )?;
     pg_exec(
         &url,
-        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+        &format!("DELETE FROM kulyrax_projection_state WHERE target_table = '{t}'"),
     )
     .ok();
 
@@ -154,7 +154,7 @@ fn pg_delete_lifecycle() -> R {
     )?;
     pg_exec(
         &url,
-        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+        &format!("DELETE FROM kulyrax_projection_state WHERE target_table = '{t}'"),
     )
     .ok();
 
@@ -188,7 +188,7 @@ fn pg_delete_lifecycle() -> R {
     assert_eq!(n, 0);
     let (seq, deleted): (i64, bool) = {
         let row = c.query_one(
-            "SELECT last_sequence, deleted FROM conduit_projection_state WHERE target_table = $1 AND facet = ''",
+            "SELECT last_sequence, deleted FROM kulyrax_projection_state WHERE target_table = $1 AND facet = ''",
             &[&t],
         )?;
         (row.get(0), row.get(1))
@@ -210,7 +210,7 @@ fn pg_facet_disjoint() -> R {
     )?;
     pg_exec(
         &url,
-        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+        &format!("DELETE FROM kulyrax_projection_state WHERE target_table = '{t}'"),
     )
     .ok();
 
@@ -267,7 +267,7 @@ fn pg_column_missing_rejected() -> R {
     // test in this file clears it first for exactly that reason.
     pg_exec(
         &url,
-        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+        &format!("DELETE FROM kulyrax_projection_state WHERE target_table = '{t}'"),
     )
     .ok();
     let mut m = HashMap::new();
@@ -297,7 +297,7 @@ fn pg_type_coercion() -> R {
     )?;
     pg_exec(
         &url,
-        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+        &format!("DELETE FROM kulyrax_projection_state WHERE target_table = '{t}'"),
     )
     .ok();
     let mut m = HashMap::new();
@@ -350,7 +350,7 @@ fn sql_cross_backend() -> R {
     )?;
     pg_exec(
         &url,
-        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+        &format!("DELETE FROM kulyrax_projection_state WHERE target_table = '{t}'"),
     )
     .ok();
 
@@ -412,7 +412,7 @@ fn pg_concurrent_writers() -> R {
     )?;
     pg_exec(
         &url,
-        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+        &format!("DELETE FROM kulyrax_projection_state WHERE target_table = '{t}'"),
     )
     .ok();
 
@@ -487,7 +487,7 @@ fn pg_failed_guard_write_leaves_neither_row() -> R {
     )?;
     pg_exec(
         &url,
-        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+        &format!("DELETE FROM kulyrax_projection_state WHERE target_table = '{t}'"),
     )
     .ok();
 
@@ -515,14 +515,14 @@ fn pg_failed_guard_write_leaves_neither_row() -> R {
     pg_exec(
         &url,
         &format!(
-            "ALTER TABLE conduit_projection_state ADD CONSTRAINT {check} CHECK (last_event_id <> '{}')",
+            "ALTER TABLE kulyrax_projection_state ADD CONSTRAINT {check} CHECK (last_event_id <> '{}')",
             fail.event_id
         ),
     )?;
     let r = a.handle(&fail);
     let dropped = pg_exec(
         &url,
-        &format!("ALTER TABLE conduit_projection_state DROP CONSTRAINT {check}"),
+        &format!("ALTER TABLE kulyrax_projection_state DROP CONSTRAINT {check}"),
     );
 
     assert!(
@@ -535,7 +535,7 @@ fn pg_failed_guard_write_leaves_neither_row() -> R {
     let guards: i64 = c
         .query_one(
             &format!(
-                "SELECT count(*) FROM conduit_projection_state WHERE target_table = '{t}' AND entity_key = '[\"u2\"]'"
+                "SELECT count(*) FROM kulyrax_projection_state WHERE target_table = '{t}' AND entity_key = '[\"u2\"]'"
             ),
             &[],
         )?
@@ -557,7 +557,8 @@ fn pg_prepare_twice_is_idempotent() -> R {
     let mut c = postgres::Client::connect(&url, postgres::NoTls)?;
     let tables: i64 = c
         .query_one(
-            "SELECT count(*) FROM information_schema.tables WHERE table_name = 'conduit_projection_state'",
+            "SELECT count(*) FROM information_schema.tables \
+             WHERE table_name = 'kulyrax_projection_state' AND table_schema = current_schema()",
             &[],
         )?
         .get(0);
@@ -639,7 +640,7 @@ fn pg_state(url: &str, table: &str) -> Result<PgState, Box<dyn std::error::Error
     let guards = c
         .query(
             "SELECT entity_key, facet, last_sequence, deleted, permanent
-             FROM conduit_projection_state WHERE target_table = $1 ORDER BY 1, 2",
+             FROM kulyrax_projection_state WHERE target_table = $1 ORDER BY 1, 2",
             &[&table],
         )?
         .iter()
@@ -659,7 +660,7 @@ fn fresh_batch_table(url: &str) -> Result<String, Box<dyn std::error::Error>> {
     // No guard table yet on a fresh database: nothing to clear.
     pg_exec(
         url,
-        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+        &format!("DELETE FROM kulyrax_projection_state WHERE target_table = '{t}'"),
     )
     .ok();
     Ok(t)
@@ -931,7 +932,7 @@ fn pg_rebuild_swaps_the_shadow_table_in() -> R {
     assert_eq!(indexes, 2, "primary key and name index");
     let shadow_lanes: i64 = c
         .query_one(
-            "SELECT count(*) FROM conduit_projection_state WHERE target_table = $1",
+            "SELECT count(*) FROM kulyrax_projection_state WHERE target_table = $1",
             &[&tables[0].shadow],
         )?
         .get(0);
@@ -998,7 +999,7 @@ fn pg_rebuild_refused_with(url: &str, ddl: &str) -> Result<String, Box<dyn std::
     let mut c = postgres::Client::connect(url, postgres::NoTls)?;
     let lanes: i64 = c
         .query_one(
-            "SELECT count(*) FROM conduit_projection_state WHERE target_table = $1",
+            "SELECT count(*) FROM kulyrax_projection_state WHERE target_table = $1",
             &[&tables[0].shadow],
         )?
         .get(0);

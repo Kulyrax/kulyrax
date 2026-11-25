@@ -1,6 +1,6 @@
 //! Phase 11.4: the pre-existing Phase 4 guarantee — replaying the exact same
 //! `event_id` twice is deduplicated — re-verified against the Phase 11.2/11.3
-//! entity-aware guard (`conduit_projection_state`, `.conduit/entities/...`)
+//! entity-aware guard (`kulyrax_projection_state`, `.kulyrax/entities/...`)
 //! that replaced the Phase 4 event_id-only guard.
 
 mod common;

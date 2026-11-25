@@ -190,7 +190,7 @@ fn neo4j_node_lifecycle() -> R {
         &rt,
         &graph,
         neo4rs::Query::new(
-            "MATCH (g:__ConduitGuard {kind:'node', target:$label, entity_key:'n1', facet:''}) \
+            "MATCH (g:__KulyraxGuard {kind:'node', target:$label, entity_key:'n1', facet:''}) \
              RETURN g.last_sequence AS seq, g.deleted AS deleted"
                 .to_string(),
         )
@@ -342,7 +342,7 @@ fn neo4j_detach_delete() -> R {
         &rt,
         &graph,
         neo4rs::Query::new(format!(
-            "MATCH (g:__ConduitGuard {{kind:'edge', target:'{etype}', deleted:true}}) RETURN count(g) AS c"
+            "MATCH (g:__KulyraxGuard {{kind:'edge', target:'{etype}', deleted:true}}) RETURN count(g) AS c"
         )),
     )
     .expect("count query must return a row");
@@ -602,7 +602,7 @@ fn neo4j_prepare_twice_is_idempotent() -> R {
         &rt,
         &graph,
         neo4rs::Query::new(
-            "SHOW CONSTRAINTS YIELD labelsOrTypes WHERE '__ConduitGuard' IN labelsOrTypes RETURN count(*) AS c"
+            "SHOW CONSTRAINTS YIELD labelsOrTypes WHERE '__KulyraxGuard' IN labelsOrTypes RETURN count(*) AS c"
                 .to_string(),
         ),
     )
@@ -769,7 +769,7 @@ fn neo4j_batch_rollback_leaves_nothing() -> R {
         &rt,
         &graph,
         neo4rs::Query::new(format!(
-            "MATCH (g:__ConduitGuard) WHERE g.target IN ['{label}', '{etype}'] RETURN count(g) AS c"
+            "MATCH (g:__KulyraxGuard) WHERE g.target IN ['{label}', '{etype}'] RETURN count(g) AS c"
         )),
     )
     .expect("count query must return a row");
@@ -899,7 +899,7 @@ fn neo4j_subgraph_projects_every_record_in_one_transaction() -> R {
             &rt,
             &graph,
             format!(
-                "MATCH (g:__ConduitGuard) WHERE g.entity_key IN ['{o2}', '{c2}'] RETURN count(g) AS c"
+                "MATCH (g:__KulyraxGuard) WHERE g.entity_key IN ['{o2}', '{c2}'] RETURN count(g) AS c"
             )
         )?,
         0,

@@ -87,7 +87,7 @@ fn read_user(db: &Path, id: &str) -> Option<(String, i64)> {
     let c = rusqlite::Connection::open(db).ok()?;
     c.query_row(
         "SELECT u.name, s.last_sequence FROM users u
-         JOIN conduit_projection_state s
+         JOIN kulyrax_projection_state s
            ON s.target_table = 'users' AND s.entity_key = json_array(u.id)
          WHERE u.id = ?1",
         [id],
@@ -415,7 +415,7 @@ fn grpc_dlq_count_reflects_a_real_cross_backend_failure() {
         c.batch_execute(&format!(
             "DROP TABLE IF EXISTS {table}; \
              CREATE TABLE {table} (id text primary key, name text); \
-             DELETE FROM conduit_projection_state WHERE target_table = '{table}'"
+             DELETE FROM kulyrax_projection_state WHERE target_table = '{table}'"
         ))
         .unwrap();
     }

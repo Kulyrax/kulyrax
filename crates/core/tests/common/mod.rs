@@ -105,7 +105,7 @@ pub fn read_user(db_path: &Path, id: &str) -> Option<(String, i64)> {
     conn.query_row(
         "SELECT u.name, s.last_sequence
          FROM users u
-         JOIN conduit_projection_state s
+         JOIN kulyrax_projection_state s
            ON s.target_table = 'users' AND s.entity_key = json_array(u.id)
          WHERE u.id = ?1",
         [id],

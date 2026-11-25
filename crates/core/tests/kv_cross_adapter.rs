@@ -196,7 +196,7 @@ value: {}
     let conn = Connection::open(&db_path)?;
     let sql_count: i64 = conn.query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))?;
     let sql_last_sequence: i64 = conn.query_row(
-        "SELECT last_sequence FROM conduit_projection_state WHERE target_table = 'users'",
+        "SELECT last_sequence FROM kulyrax_projection_state WHERE target_table = 'users'",
         [],
         |r| r.get(0),
     )?;
@@ -213,14 +213,14 @@ value: {}
 
     let doc_guard: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
         doc_root
-            .join(".conduit")
+            .join(".kulyrax")
             .join("entities")
             .join("users")
             .join("u1.done"),
     )?)?;
     let kv_guard: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
         kv_root
-            .join(".conduit")
+            .join(".kulyrax")
             .join("kv")
             .join("users")
             .join("u1.guard.json"),

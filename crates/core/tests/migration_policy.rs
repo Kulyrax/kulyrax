@@ -53,7 +53,7 @@ fn setup_db(db_path: &Path) {
     let conn = Connection::open(db_path).unwrap();
     conn.execute("CREATE TABLE users (id TEXT PRIMARY KEY, tier TEXT)", [])
         .unwrap();
-    // conduit_projection_state (Phase 11.2 guard) is self-managed by the
+    // kulyrax_projection_state (Phase 11.2 guard) is self-managed by the
     // adapter via CREATE TABLE IF NOT EXISTS; nothing to set up here.
 }
 
@@ -180,7 +180,7 @@ fn matching_versions_skip_upcasting_entirely() {
     let conn = Connection::open(&db_path).unwrap();
     conn.execute("CREATE TABLE users (id TEXT PRIMARY KEY, tier TEXT)", [])
         .unwrap();
-    // conduit_projection_state (Phase 11.2 guard) is self-managed by the
+    // kulyrax_projection_state (Phase 11.2 guard) is self-managed by the
     // adapter via CREATE TABLE IF NOT EXISTS; nothing to set up here.
     drop(conn);
 

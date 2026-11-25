@@ -82,7 +82,7 @@ fn discriminator_distinguishes_parallel_edges() -> Result<(), Box<dyn std::error
 
     // u1's incident index lists both parallel edges.
     let idx: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
-        dir.path().join(".conduit").join("incident").join("u1.json"),
+        dir.path().join(".kulyrax").join("incident").join("u1.json"),
     )?)?;
     assert_eq!(idx["edges"].as_array().unwrap().len(), 2);
 

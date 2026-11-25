@@ -166,7 +166,7 @@ fn dump(db: &Path) -> (Users, Guards) {
     let guards = conn
         .prepare(
             "SELECT target_table, entity_key, facet, last_sequence, last_event_id, deleted, permanent
-             FROM conduit_projection_state ORDER BY target_table, entity_key, facet",
+             FROM kulyrax_projection_state ORDER BY target_table, entity_key, facet",
         )
         .unwrap()
         .query_map([], |r| {

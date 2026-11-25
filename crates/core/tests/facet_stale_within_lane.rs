@@ -121,7 +121,7 @@ fn stale_event_within_a_facet_lane_is_skipped() -> Result<(), Box<dyn std::error
     assert_eq!(email, "new@x.com");
 
     let (last_sequence, deleted): (i64, i64) = conn.query_row(
-        "SELECT last_sequence, deleted FROM conduit_projection_state
+        "SELECT last_sequence, deleted FROM kulyrax_projection_state
          WHERE target_table = 'users' AND facet = 'contact'",
         [],
         |r| Ok((r.get(0)?, r.get(1)?)),

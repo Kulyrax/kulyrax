@@ -124,7 +124,7 @@ your store's own concurrency control needs:
   read/write is natural for those stores and a single document/key can hold
   arbitrary nested structure.
 - **Flat** — one row/node per `(target, entity_key, facet)` lane, all in a
-  `conduit_projection_state`-shaped table (or a `__ConduitGuard`-shaped node
+  `kulyrax_projection_state`-shaped table (or a `__KulyraxGuard`-shaped node
   label). SQL uses this because a relational table naturally has one row per
   key. Neo4j uses this too, but for a different, load-bearing reason: Cypher
   cannot compare a value *inside* a nested/blob property for a CAS check —

@@ -1,8 +1,11 @@
 pub mod adapter;
 pub mod batch;
+#[doc(hidden)]
+pub mod crash;
 pub mod dispatch;
 pub mod event;
 pub mod execution;
+pub mod kulyrax_dir;
 pub mod pipeline;
 pub mod rebuild;
 pub mod redact;

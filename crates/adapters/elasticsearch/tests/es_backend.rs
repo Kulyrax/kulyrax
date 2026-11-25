@@ -350,7 +350,7 @@ fn doc_cross_backend_elasticsearch() -> R {
 
     let file_guard: Value = serde_json::from_str(&std::fs::read_to_string(
         dir.path()
-            .join(".conduit")
+            .join(".kulyrax")
             .join("entities")
             .join(&idx)
             .join("u1.done"),

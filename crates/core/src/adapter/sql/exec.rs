@@ -111,7 +111,10 @@ impl SqlWrite {
     }
 }
 
-/// The guard row `conduit_projection_state` — one lane for `(table, entity_key, facet)`.
+/// The guard table every SQL backend keeps its lanes in.
+pub const GUARD_TABLE: &str = "kulyrax_projection_state";
+
+/// The guard row `kulyrax_projection_state` — one lane for `(table, entity_key, facet)`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GuardRow {
     pub table: String,
@@ -162,7 +165,7 @@ pub struct GuardRow {
 /// around its own `handle()` — the pattern `KvBackend`'s Redis
 /// implementation and `GraphBackend`'s Neo4j implementation both use.
 pub trait SqlTxn: Sized {
-    /// `CREATE TABLE IF NOT EXISTS conduit_projection_state (…)` — Phase 11.2 /
+    /// `CREATE TABLE IF NOT EXISTS kulyrax_projection_state (…)` — Phase 11.2 /
     /// 13.2 / 15.2 shape, in the backend's own DDL. Only ever called through
     /// [`ensure_schema`], from the adapter's `StorageAdapter::prepare`, in a
     /// transaction of its own; never by [`project`].

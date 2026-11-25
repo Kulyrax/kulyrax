@@ -26,7 +26,7 @@ pub struct SqlProjection {
     /// with `key_values` to build the Phase 13.2 `DELETE` statement.
     pub primary_key_columns: Vec<String>,
     /// Target table name, carried alongside `entity_key` as the other half of
-    /// the Phase 11.2 guard key (`conduit_projection_state` is keyed per table).
+    /// the Phase 11.2 guard key (`kulyrax_projection_state` is keyed per table).
     pub table: String,
     /// The mapping's write mode (Phase 12.2) — governs the gated
     /// insert/update/skip decision in the adapter. Read only when `operation:

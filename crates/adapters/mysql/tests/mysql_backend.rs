@@ -43,7 +43,7 @@ macro_rules! require_mysql {
 static TABLE_SEQ: AtomicU32 = AtomicU32::new(0);
 
 /// A unique table name per test invocation, so the shared
-/// `conduit_projection_state` (keyed by target_table) stays isolated.
+/// `kulyrax_projection_state` (keyed by target_table) stays isolated.
 fn fresh_table() -> String {
     format!("t_{}", TABLE_SEQ.fetch_add(1, Ordering::Relaxed))
 }
@@ -105,7 +105,7 @@ fn mysql_upsert_out_of_order() -> R {
     )?;
     my_exec(
         &url,
-        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+        &format!("DELETE FROM kulyrax_projection_state WHERE target_table = '{t}'"),
     )
     .ok();
 
@@ -153,7 +153,7 @@ fn mysql_delete_lifecycle() -> R {
     )?;
     my_exec(
         &url,
-        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+        &format!("DELETE FROM kulyrax_projection_state WHERE target_table = '{t}'"),
     )
     .ok();
 
@@ -188,7 +188,7 @@ fn mysql_delete_lifecycle() -> R {
     assert_eq!(n, 0);
     let (seq, deleted): (i64, bool) = conn
         .exec_first(
-            "SELECT last_sequence, deleted FROM conduit_projection_state WHERE target_table = ? AND facet = ''",
+            "SELECT last_sequence, deleted FROM kulyrax_projection_state WHERE target_table = ? AND facet = ''",
             (t.clone(),),
         )?
         .unwrap();
@@ -209,7 +209,7 @@ fn mysql_facet_disjoint() -> R {
     )?;
     my_exec(
         &url,
-        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+        &format!("DELETE FROM kulyrax_projection_state WHERE target_table = '{t}'"),
     )
     .ok();
 
@@ -290,7 +290,7 @@ fn mysql_type_coercion() -> R {
     )?;
     my_exec(
         &url,
-        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+        &format!("DELETE FROM kulyrax_projection_state WHERE target_table = '{t}'"),
     )
     .ok();
     let mut m = HashMap::new();
@@ -341,7 +341,7 @@ fn sql_cross_backend_mysql() -> R {
     )?;
     my_exec(
         &url,
-        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+        &format!("DELETE FROM kulyrax_projection_state WHERE target_table = '{t}'"),
     )
     .ok();
 
@@ -407,7 +407,7 @@ fn mysql_concurrent_writers() -> R {
     )?;
     my_exec(
         &url,
-        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+        &format!("DELETE FROM kulyrax_projection_state WHERE target_table = '{t}'"),
     )
     .ok();
 
@@ -479,7 +479,7 @@ fn mysql_prepare_twice_is_idempotent() -> R {
     let pool = mysql::Pool::new(url.as_str())?;
     let mut conn = pool.get_conn()?;
     let tables: Option<i64> = conn.exec_first(
-        "SELECT count(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'conduit_projection_state'",
+        "SELECT count(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'kulyrax_projection_state'",
         (),
     )?;
     assert_eq!(tables, Some(1));
@@ -488,7 +488,7 @@ fn mysql_prepare_twice_is_idempotent() -> R {
 
 /// The adapter's guard read takes no gap lock, so a new entity's guard row
 /// cannot deadlock with another writer inserting into the same gap of the
-/// shared `conduit_projection_state` (ERROR 1213). Under `REPEATABLE READ`,
+/// shared `kulyrax_projection_state` (ERROR 1213). Under `REPEATABLE READ`,
 /// `SELECT … FOR UPDATE` on a guard row that did not exist yet locked the gap
 /// where it would go; two writers doing that for neighbouring keys, then
 /// inserting, deadlocked even on different target tables.
@@ -515,7 +515,7 @@ fn mysql_new_guard_rows_take_no_gap_lock() -> R {
     let a = my_adapter(&url, m); // prepared: the guard table exists
     my_exec(
         &url,
-        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+        &format!("DELETE FROM kulyrax_projection_state WHERE target_table = '{t}'"),
     )?;
 
     let pool = mysql::Pool::new(url.as_str())?;
@@ -523,7 +523,7 @@ fn mysql_new_guard_rows_take_no_gap_lock() -> R {
     other.query_drop("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")?;
     other.query_drop("START TRANSACTION")?;
     other.query_drop(format!(
-        "SELECT * FROM conduit_projection_state
+        "SELECT * FROM kulyrax_projection_state
          WHERE target_table = '{t}' AND entity_key = '[\"k1\"]' AND facet = '' FOR UPDATE"
     ))?;
 
@@ -538,7 +538,7 @@ fn mysql_new_guard_rows_take_no_gap_lock() -> R {
     // Let the adapter reach its guard insert, which waits for `other`.
     std::thread::sleep(std::time::Duration::from_millis(500));
     let inserted = other.query_drop(format!(
-        "INSERT INTO conduit_projection_state
+        "INSERT INTO kulyrax_projection_state
             (target_table, entity_key, facet, last_sequence, last_event_id, deleted, permanent, processed_at)
          VALUES ('{t}', '[\"k1\"]', '', 1, 'other', 0, 0, NOW())"
     ));
@@ -625,7 +625,7 @@ fn my_state(url: &str, table: &str) -> Result<MyState, Box<dyn std::error::Error
     ))?;
     let guards = c.exec(
         "SELECT entity_key, facet, last_sequence, deleted, permanent
-         FROM conduit_projection_state WHERE target_table = ? ORDER BY 1, 2",
+         FROM kulyrax_projection_state WHERE target_table = ? ORDER BY 1, 2",
         (table,),
     )?;
     Ok((rows, guards))
@@ -643,7 +643,7 @@ fn fresh_batch_table(url: &str) -> Result<String, Box<dyn std::error::Error>> {
     )?;
     my_exec(
         url,
-        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+        &format!("DELETE FROM kulyrax_projection_state WHERE target_table = '{t}'"),
     )
     .ok();
     Ok(t)

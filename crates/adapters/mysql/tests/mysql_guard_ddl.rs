@@ -3,7 +3,7 @@
 //!
 //! **Gated on `KULYRAX_MYSQL_URL`**, like `mysql_backend.rs`. Its own test
 //! file, so its own process: it adds a `CHECK` constraint to the shared
-//! `conduit_projection_state`, and that `ALTER TABLE` rebuilds the table
+//! `kulyrax_projection_state`, and that `ALTER TABLE` rebuilds the table
 //! while waiting on every open transaction on it. Run alongside the batch
 //! tests, whose transactions span many events, the rebuild made them fail
 //! with ERROR 1213.
@@ -88,7 +88,7 @@ fn mysql_failed_guard_write_leaves_neither_row() -> R {
     )?;
     my_exec(
         &url,
-        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+        &format!("DELETE FROM kulyrax_projection_state WHERE target_table = '{t}'"),
     )
     .ok();
 
@@ -116,14 +116,14 @@ fn mysql_failed_guard_write_leaves_neither_row() -> R {
     my_exec(
         &url,
         &format!(
-            "ALTER TABLE conduit_projection_state ADD CONSTRAINT {check} CHECK (last_event_id <> '{}')",
+            "ALTER TABLE kulyrax_projection_state ADD CONSTRAINT {check} CHECK (last_event_id <> '{}')",
             fail.event_id
         ),
     )?;
     let r = a.handle(&fail);
     let dropped = my_exec(
         &url,
-        &format!("ALTER TABLE conduit_projection_state DROP CHECK {check}"),
+        &format!("ALTER TABLE kulyrax_projection_state DROP CHECK {check}"),
     );
 
     assert!(
@@ -137,7 +137,7 @@ fn mysql_failed_guard_write_leaves_neither_row() -> R {
         conn.exec_first(format!("SELECT name FROM {t} WHERE id = 'u2'"), ())?;
     let guards: Option<i64> = conn.exec_first(
         format!(
-            "SELECT count(*) FROM conduit_projection_state WHERE target_table = '{t}' AND entity_key = '[\"u2\"]'"
+            "SELECT count(*) FROM kulyrax_projection_state WHERE target_table = '{t}' AND entity_key = '[\"u2\"]'"
         ),
         (),
     )?;

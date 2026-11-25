@@ -6,7 +6,7 @@
 //! unlike MongoDB (a separate guard collection, tied together with a
 //! client-session transaction) this adapter keeps the guard and the
 //! projected document in **one** Elasticsearch document, under a reserved
-//! top-level key (`__kulyrax_guard`, matching the `__ConduitGuard` /
+//! top-level key (`__kulyrax_guard`, matching the `__KulyraxGuard` /
 //! `__KulyraxGuard` naming convention the Neo4j adapter already uses for the
 //! same purpose). A single index/update call is then atomic by construction
 //! — there is no second document to keep in sync. The cost: a "delete" can't
@@ -67,7 +67,7 @@ const MAX_ATTEMPTS: u32 = 5;
 
 /// The reserved top-level field every document in an index this adapter
 /// writes carries alongside the projected content fields. Double-underscore
-/// prefixed, matching the Neo4j adapter's `__ConduitGuard`/`__KulyraxGuard`
+/// prefixed, matching the Neo4j adapter's `__KulyraxGuard`/`__KulyraxGuard`
 /// label convention for the same "this is ours, not the user's mapped data"
 /// signal.
 const GUARD_FIELD: &str = "__kulyrax_guard";

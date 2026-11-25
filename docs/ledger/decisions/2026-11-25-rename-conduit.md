@@ -1,8 +1,12 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Rename every persisted `conduit` name to `kulyrax`, migrated in place at start-up
+
+Accepted by the owner on 2026-11-25 with three changes, recorded under each heading below:
+tombstones as proposed, each proven against a real 0.12.1 binary; the grep scope enforced in CI;
+`.kulyrax/` shared, made safe by construction.
 
 Task: [2026-11-25-rename-conduit](../tasks/2026-11-25-rename-conduit.md)
 
@@ -85,7 +89,7 @@ Read in source (branch `security/file-names`, 0.12.1):
 Unknown, checked by the tests before anything relies on it: whether SQLite renames
 `sqlite_autoindex_conduit_projection_state_1` with the table.
 
-## Decision (proposed)
+## Decision
 
 ### New names
 
@@ -184,6 +188,44 @@ process cannot use:
 
 The migration recognises a tombstone as "already migrated", not as "old exists".
 
+Owner (accepted): a test per backend runs a real 0.12.1 `kulyrax` binary, built
+in a worktree, against a migrated store and shows that it fails loudly. The
+release notes give the manual reverse rename per backend.
+
+Every tombstone is created before its rename becomes visible, or under a
+temporary name and then renamed into place, so a kill cannot leave a migrated
+store without its tombstone:
+
+- SQLite and Postgres: same transaction as the rename.
+- MySQL: one atomic multi-table `RENAME TABLE`.
+- MongoDB: the tombstone is created as `kulyrax_tombstone_tmp` first, then the
+  renames run. A leftover temporary is finished on the next start.
+- File stores: `.conduit/` is renamed to `.kulyrax-tmp-conduit`, then the
+  `.conduit` file is written. A leftover temporary is finished on the next start.
+
+### Sharing `.kulyrax/` (owner's change 3)
+
+One module, `kulyrax_core::kulyrax_dir`, lists every owner's entries:
+
+- the file stores: `wal`, `lock`, `layout`, `kv`, `entities`, `guard`, `incident`;
+- `kulyrax reload`: `control`;
+- the scaffolded checkpoints: `state`.
+
+`control` and `state` are reserved. A file store refuses to commit a batch that
+writes any path under `.kulyrax/` outside its own entries. No store check
+tests "is `.kulyrax/` empty": emptiness is judged by the store's own guard
+entries. A test runs with store root = config folder = the parent of `state_dir`,
+running reload, a store and a checkpoint together, then a restart.
+
+### Stores last opened by 0.12.0
+
+A 0.12.0 key-value store keeps guards in `.conduit/<namespace>/`. Those names are
+not store entries; a namespace could even be `state` or `control`. Moving them
+into `.kulyrax/` could therefore land in another owner's entry. The migration
+refuses any entry it does not own and asks the operator to open the store once
+with 0.12.1, which moves those guards into `.conduit/kv/`. 0.12.0 is affected by
+GHSA-6chh-gx4c-448g anyway.
+
 ### Code and docs
 
 `CONDUIT_DIR` → `KULYRAX_DIR` and the other identifiers, comments, docs, examples
@@ -194,6 +236,10 @@ and test names. Afterwards, `grep -ri conduit` (excluding `target/`) hits only:
 - `docs/ledger/` and older `RELEASES/` notes. These are history: completed
   records are edited only to correct errors, and old release notes describe old
   versions.
+
+Owner (accepted): CI enforces this. A step runs `grep -ri conduit` outside
+`target/` and fails on any hit outside an allowlist: the migration code, its
+tests, the new release notes, `docs/ledger/` and older `RELEASES/`.
 
 ### Tests
 

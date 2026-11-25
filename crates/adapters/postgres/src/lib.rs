@@ -38,6 +38,7 @@ use kulyrax_core::runtime::config::{ConfigError, CustomAdapterConfig, MigrationP
 use kulyrax_core::upcast::UpcasterRegistry;
 
 mod bulk;
+mod legacy;
 
 use bulk::Pending;
 
@@ -659,11 +660,12 @@ impl SqlTxn for PostgresTxn<'_> {
         // aborting the caller's whole transaction, and swallow exactly that
         // one error code — by definition the winner already created the
         // table, so there is nothing left to do.
+        legacy::migrate_guard_table(self.client)?;
         self.client
             .batch_execute("SAVEPOINT kulyrax_guard_table")
             .map_err(pg_err)?;
         let result = self.client.batch_execute(
-            "CREATE TABLE IF NOT EXISTS conduit_projection_state (
+            "CREATE TABLE IF NOT EXISTS kulyrax_projection_state (
                     target_table  text        NOT NULL,
                     entity_key    text        NOT NULL,
                     facet         text        NOT NULL DEFAULT '',
@@ -690,7 +692,7 @@ impl SqlTxn for PostgresTxn<'_> {
 
     fn has_guard_rows(&mut self, table: &str) -> Result<bool, SqlError> {
         let rows = self.query(
-            "SELECT EXISTS (SELECT 1 FROM conduit_projection_state WHERE target_table = $1)",
+            "SELECT EXISTS (SELECT 1 FROM kulyrax_projection_state WHERE target_table = $1)",
             &[&table],
         )?;
         Ok(rows.first().is_none_or(|r| r.get::<_, bool>(0)))
@@ -705,10 +707,10 @@ impl SqlTxn for PostgresTxn<'_> {
     ) -> Result<Option<GuardState>, SqlError> {
         // Phase 19.4: FOR UPDATE serializes concurrent writers on this row.
         let sql = if lock {
-            "SELECT last_sequence, deleted, permanent FROM conduit_projection_state
+            "SELECT last_sequence, deleted, permanent FROM kulyrax_projection_state
              WHERE target_table = $1 AND entity_key = $2 AND facet = $3 FOR UPDATE"
         } else {
-            "SELECT last_sequence, deleted, permanent FROM conduit_projection_state
+            "SELECT last_sequence, deleted, permanent FROM kulyrax_projection_state
              WHERE target_table = $1 AND entity_key = $2 AND facet = $3"
         };
         let rows = self.query(sql, &[&table, &entity_key, &facet])?;
@@ -728,12 +730,12 @@ impl SqlTxn for PostgresTxn<'_> {
         keys.dedup();
         let sql = if lock {
             "SELECT entity_key, facet, last_sequence, deleted, permanent
-             FROM conduit_projection_state
+             FROM kulyrax_projection_state
              WHERE target_table = $1 AND entity_key = ANY($2)
              ORDER BY entity_key, facet FOR UPDATE"
         } else {
             "SELECT entity_key, facet, last_sequence, deleted, permanent
-             FROM conduit_projection_state
+             FROM kulyrax_projection_state
              WHERE target_table = $1 AND entity_key = ANY($2)"
         };
         let rows = self.query(sql, &[&table, &keys])?;
@@ -792,7 +794,7 @@ impl SqlTxn for PostgresTxn<'_> {
             return Ok(());
         }
         self.execute(
-            "INSERT INTO conduit_projection_state
+            "INSERT INTO kulyrax_projection_state
                 (target_table, entity_key, facet, last_sequence, last_event_id, deleted, permanent, processed_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, now())
              ON CONFLICT (target_table, entity_key, facet) DO UPDATE SET
@@ -826,7 +828,7 @@ impl SqlTxn for PostgresTxn<'_> {
             return Ok(());
         }
         self.execute(
-            "UPDATE conduit_projection_state
+            "UPDATE kulyrax_projection_state
                 SET last_sequence = $4, last_event_id = $5, processed_at = now()
              WHERE target_table = $1 AND entity_key = $2 AND facet = $3",
             &[&table, &entity_key, &facet, &(seq as i64), &event_id],
@@ -852,7 +854,7 @@ impl SqlTxn for PostgresTxn<'_> {
         }
         if deleted {
             self.execute(
-                "UPDATE conduit_projection_state
+                "UPDATE kulyrax_projection_state
                     SET deleted = true, permanent = $4, last_sequence = $3,
                         last_event_id = $5, processed_at = now()
                  WHERE target_table = $1 AND entity_key = $2 AND facet <> ''",
@@ -860,7 +862,7 @@ impl SqlTxn for PostgresTxn<'_> {
             )
         } else {
             self.execute(
-                "UPDATE conduit_projection_state
+                "UPDATE kulyrax_projection_state
                     SET deleted = false, permanent = false
                  WHERE target_table = $1 AND entity_key = $2 AND facet <> ''",
                 &[&table, &entity_key],
@@ -932,7 +934,7 @@ impl SqlTxn for PostgresTxn<'_> {
             ))
             .map_err(pg_err)?;
         self.execute(
-            "DELETE FROM conduit_projection_state WHERE target_table = $1",
+            "DELETE FROM kulyrax_projection_state WHERE target_table = $1",
             &[&t.shadow],
         )
     }
@@ -944,7 +946,7 @@ impl SqlTxn for PostgresTxn<'_> {
     ) -> Result<GuardFingerprint, SqlError> {
         let sql = format!(
             "SELECT count(*)::bigint, coalesce(sum(last_sequence), 0)::text FROM (
-                 SELECT last_sequence FROM conduit_projection_state
+                 SELECT last_sequence FROM kulyrax_projection_state
                  WHERE target_table = ANY($1){}
              ) lanes",
             if lock { " FOR UPDATE" } else { "" }
@@ -975,11 +977,11 @@ impl SqlTxn for PostgresTxn<'_> {
 
     fn swap_in_shadow(&mut self, t: &ShadowTable) -> Result<(), SqlError> {
         self.execute(
-            "DELETE FROM conduit_projection_state WHERE target_table = $1",
+            "DELETE FROM kulyrax_projection_state WHERE target_table = $1",
             &[&t.table],
         )?;
         self.execute(
-            "UPDATE conduit_projection_state SET target_table = $1 WHERE target_table = $2",
+            "UPDATE kulyrax_projection_state SET target_table = $1 WHERE target_table = $2",
             &[&t.table, &t.shadow],
         )?;
         self.client

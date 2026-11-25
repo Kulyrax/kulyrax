@@ -398,7 +398,7 @@ fn write_guards(
     }
     if !full_seq.is_empty() {
         execute(
-            "INSERT INTO conduit_projection_state
+            "INSERT INTO kulyrax_projection_state
                 (target_table, entity_key, facet, last_sequence, last_event_id, deleted, permanent, processed_at)
              SELECT t, k, f, s, e, d, p, now()
              FROM unnest($1::text[], $2::text[], $3::text[], $4::int8[], $5::text[], $6::bool[], $7::bool[])
@@ -422,7 +422,7 @@ fn write_guards(
     }
     if !bump_seq.is_empty() {
         execute(
-            "UPDATE conduit_projection_state AS g
+            "UPDATE kulyrax_projection_state AS g
                 SET last_sequence = b.s, last_event_id = b.e, processed_at = now()
              FROM unnest($1::text[], $2::text[], $3::text[], $4::int8[], $5::text[]) AS b(t, k, f, s, e)
              WHERE g.target_table = b.t AND g.entity_key = b.k AND g.facet = b.f",

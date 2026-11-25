@@ -109,18 +109,18 @@ struct GuardState {
 ```
 
 - **SQL** (SQLite, Postgres, MySQL): one row per lane in a table Kulyrax
-  owns, `conduit_projection_state (target_table, entity_key, facet,
+  owns, `kulyrax_projection_state (target_table, entity_key, facet,
   last_sequence, last_event_id, deleted, permanent, processed_at)`,
   primary-keyed on the first three columns — a *flat* guard, one row per
   lane, because a relational table naturally works that way.
 - **Document / key-value** (file-backed, MongoDB / Redis): a *nested* guard —
   one record per entity, with named-facet lanes nested inside it (a JSON
   sidecar per entity for the file adapters, e.g.
-  `.conduit/entities/<collection>/<entity_id>.done`; a guard document/key of
+  `.kulyrax/entities/<collection>/<entity_id>.done`; a guard document/key of
   the same shape for MongoDB/Redis).
 - **Graph** (file-backed, Neo4j): nodes use the same nested shape as
   documents; edges and the file adapter's guard sidecars are flat, one guard
-  record per lane. Neo4j's own guard is a dedicated `__ConduitGuard` node —
+  record per lane. Neo4j's own guard is a dedicated `__KulyraxGuard` node —
   flat, and for a structural reason, not a preference: Cypher can only
   compare-and-set a *direct* node property, not a value nested inside one, so
   the guard has to live as its own node to make the atomicity contract work.
@@ -204,14 +204,14 @@ resurrect a deleted one.
 mappings write into (`users`, `orders`, ...) — Kulyrax never issues `CREATE
 TABLE`. You own that schema.
 
-**Kulyrax creates:** the guard state alongside it — `conduit_projection_state`
+**Kulyrax creates:** the guard state alongside it — `kulyrax_projection_state`
 in the same SQL database (created when `run`, `ingest` or `replay` prepares
 the adapter, before anything is written; `dry-run` never creates it), or the
-`.conduit/` sidecar tree next to file-backed document/KV/graph output. Both
+`.kulyrax/` sidecar tree next to file-backed document/KV/graph output. Both
 are Kulyrax's own bookkeeping, safe to inspect, unsafe to hand-edit — treat
 them the way you'd treat a database's own internal indexes.
 
-For the file-backed stores, `.conduit/` also holds the batch logs (`wal/`) and
+For the file-backed stores, `.kulyrax/` also holds the batch logs (`wal/`) and
 the single-writer lock (`lock`) that make them crash-safe; see
 [`file-store-durability.md`](file-store-durability.md).
 

@@ -65,7 +65,7 @@ value:
     let value_path = dir.path().join("user-view").join("u1.json");
     let guard_path = dir
         .path()
-        .join(".conduit")
+        .join(".kulyrax")
         .join("kv")
         .join("user-view")
         .join("u1.guard.json");

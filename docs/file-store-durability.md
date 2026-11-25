@@ -1,7 +1,7 @@
 # File stores: durability model
 
 The file-backed adapters (`type: file` documents, `type: keyvalue`, `type: graph`)
-keep one JSON file per entity, plus guard sidecars under `.conduit/`. Since v0.11 they
+keep one JSON file per entity, plus guard sidecars under `.kulyrax/`. Since v0.11 they
 are **crash-safe**. After a process crash, an OS crash or a power loss, a restart
 leaves exactly the files a run without the crash would have left: no projection
 missing, none applied twice, every guard consistent with its data file.
@@ -29,7 +29,7 @@ redelivery.
    kept in memory, one entry per file with its final content. A key written five
    times in a batch is written once.
 2. **Log.** The whole batch, data files and guard files, is written to
-   `.conduit/wal/<n>.log` (via a temp file and a rename), with a length and a CRC-32
+   `.kulyrax/wal/<n>.log` (via a temp file and a rename), with a length and a CRC-32
    checksum. **One fsync per batch.**
 3. **Apply.** The batch is written to the per-key files, **without fsync**, on up to
    8 threads.
@@ -60,11 +60,11 @@ At start-up (`run`, `ingest`, `replay`, `run --event`), each file store:
 
 ## One writer per store
 
-Each store takes an exclusive OS lock on `.conduit/lock` when it starts. A second
+Each store takes an exclusive OS lock on `.kulyrax/lock` when it starts. A second
 Kulyrax process pointed at the same store directory fails at start-up:
 
 ```
-file store ./store is in use by another process (lock ./store/.conduit/lock is held);
+file store ./store is in use by another process (lock ./store/.kulyrax/lock is held);
 only one Kulyrax process may write to a file store
 ```
 
@@ -75,6 +75,24 @@ changes the files underneath it.
 
 Two different file adapters (say a document store and a key-value store) can share a
 root directory, as before: their files never overlap.
+
+## What lives in `.kulyrax/`
+
+A store keeps its own files in `<root>/.kulyrax/`, in these entries and no others:
+`wal/` (batch logs), `lock`, `layout/` (one marker per adapter kind, holding the
+layout version), `kv/`, `entities/`, `guard/` (guard sidecars) and `incident/`
+(the graph store's incidence index).
+
+The config folder has a `.kulyrax/` too: `kulyrax reload` uses `control/`, and the
+scaffolded `state_dir: ./.kulyrax/state` keeps the source checkpoints in `state/`.
+A store whose `root` is the config folder shares that directory with them. Their
+entry names never overlap, `control` and `state` are reserved, and a store refuses
+to commit a batch that would write under `.kulyrax/` outside its own entries. The
+full list of entries and their owners is `kulyrax_core::kulyrax_dir`.
+
+A store last written by Kulyrax 0.12 keeps these files under the project's old
+name. The first start moves them and leaves a tombstone file in place of the old
+directory. See the upgrade section of `RELEASES/v1.0.0-rc.1.md`.
 
 ## Platform notes
 

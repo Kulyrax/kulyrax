@@ -246,7 +246,7 @@ struct FileGraphBackend<'a, 't> {
 }
 
 /// Where node guards live; one directory per label.
-const NODE_GUARD_DIR: &str = ".conduit/guard/nodes";
+const NODE_GUARD_DIR: &str = ".kulyrax/guard/nodes";
 
 /// Node ids come from events, so they are encoded ([`file_names::stem`]);
 /// labels and edge types were checked when the store was prepared.
@@ -277,10 +277,10 @@ fn edge_value_path(edge_type: &str, key: &str) -> String {
 }
 
 fn edge_guard_path(edge_type: &str, key: &str) -> String {
-    format!(".conduit/guard/edges/{edge_type}/{}.json", edge_stem(key))
+    format!(".kulyrax/guard/edges/{edge_type}/{}.json", edge_stem(key))
 }
 
-const INCIDENT_DIR: &str = ".conduit/incident";
+const INCIDENT_DIR: &str = ".kulyrax/incident";
 
 fn incident_path(node_id: &str) -> String {
     format!("{INCIDENT_DIR}/{}.json", file_names::stem(node_id))
@@ -294,7 +294,7 @@ fn invalid(e: serde_json::Error) -> GraphError {
     ge_err(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
-/// Which record a `.conduit/` file belongs to: the file name stem it was
+/// Which record a `.kulyrax/` file belongs to: the file name stem it was
 /// written under and the full id it stands for, so a hashed name can carry
 /// the id (see [`file_names::with_id`]).
 #[derive(Clone, Copy)]
@@ -346,7 +346,7 @@ impl FileGraphBackend<'_, '_> {
         Ok(())
     }
 
-    /// A `.conduit/` file: under a hashed name it carries the owner's id.
+    /// A `.kulyrax/` file: under a hashed name it carries the owner's id.
     fn commit_owned<T: Serialize>(
         &mut self,
         path: &str,
@@ -412,7 +412,7 @@ impl GraphBackend for FileGraphBackend<'_, '_> {
     }
 
     /// Checks every label a node with this id could have been projected
-    /// under: each directory under `.conduit/guard/nodes/`, on disk or still
+    /// under: each directory under `.kulyrax/guard/nodes/`, on disk or still
     /// pending in the batch. Small in practice.
     fn node_is_tombstoned(&mut self, node_id: &str) -> Result<bool, GraphError> {
         for label in self.txn.child_dirs(NODE_GUARD_DIR).map_err(ge_err)? {

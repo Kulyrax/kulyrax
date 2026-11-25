@@ -4,7 +4,7 @@
 //!
 //! **Gated on `KULYRAX_MYSQL_URL`**, like `mysql_backend.rs`. Its own test
 //! file, so its own process: it drops and recreates the shared
-//! `conduit_projection_state`, which would break other tests running
+//! `kulyrax_projection_state`, which would break other tests running
 //! alongside it.
 
 use kulyrax_adapter_mysql::MySqlAdapter;
@@ -38,9 +38,9 @@ fn prepare_makes_old_case_insensitive_guard_keys_binary() -> R {
     ))?;
     // The guard table as 0.10 created it on a MySQL 8 default server, with
     // one existing lane.
-    c.query_drop("DROP TABLE IF EXISTS conduit_projection_state")?;
+    c.query_drop("DROP TABLE IF EXISTS kulyrax_projection_state")?;
     c.query_drop(
-        "CREATE TABLE conduit_projection_state (
+        "CREATE TABLE kulyrax_projection_state (
             target_table  VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
             entity_key    VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
             facet         VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '',
@@ -53,7 +53,7 @@ fn prepare_makes_old_case_insensitive_guard_keys_binary() -> R {
         )",
     )?;
     c.exec_drop(
-        "INSERT INTO conduit_projection_state (target_table, entity_key, last_sequence, last_event_id)
+        "INSERT INTO kulyrax_projection_state (target_table, entity_key, last_sequence, last_event_id)
          VALUES (?, 'A', 7, 'evt-old')",
         (table,),
     )?;
@@ -74,7 +74,7 @@ fn prepare_makes_old_case_insensitive_guard_keys_binary() -> R {
 
     let collations: Vec<(String, String)> = c.query(
         "SELECT COLUMN_NAME, COLLATION_NAME FROM information_schema.COLUMNS
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conduit_projection_state'
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'kulyrax_projection_state'
            AND COLUMN_NAME IN ('target_table', 'entity_key', 'facet') ORDER BY 1",
     )?;
     assert_eq!(collations.len(), 3, "{collations:?}");
@@ -83,7 +83,7 @@ fn prepare_makes_old_case_insensitive_guard_keys_binary() -> R {
         "{collations:?}"
     );
     let kept: Option<i64> = c.exec_first(
-        "SELECT last_sequence FROM conduit_projection_state
+        "SELECT last_sequence FROM kulyrax_projection_state
          WHERE target_table = ? AND entity_key = 'A'",
         (table,),
     )?;

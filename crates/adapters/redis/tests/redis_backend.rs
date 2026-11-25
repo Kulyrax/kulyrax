@@ -328,7 +328,7 @@ fn kv_cross_backend() -> R {
 
     let file_guard: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
         dir.path()
-            .join(".conduit")
+            .join(".kulyrax")
             .join("kv")
             .join(&ns)
             .join("u1.guard.json"),

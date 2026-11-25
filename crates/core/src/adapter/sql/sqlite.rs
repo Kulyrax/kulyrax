@@ -312,9 +312,10 @@ fn guard_state(row: &rusqlite::Row<'_>, from: usize) -> rusqlite::Result<GuardSt
 
 impl SqlTxn for SqliteTxn<'_> {
     fn ensure_guard_table(&mut self) -> Result<(), SqlError> {
+        crate::adapter::legacy::migrate_sqlite_guard_table(self.conn)?;
         self.conn
             .execute(
-                "CREATE TABLE IF NOT EXISTS conduit_projection_state (
+                "CREATE TABLE IF NOT EXISTS kulyrax_projection_state (
                     target_table TEXT NOT NULL,
                     entity_key TEXT NOT NULL,
                     facet TEXT NOT NULL DEFAULT '',
@@ -334,7 +335,7 @@ impl SqlTxn for SqliteTxn<'_> {
     fn has_guard_rows(&mut self, table: &str) -> Result<bool, SqlError> {
         self.conn
             .prepare_cached(
-                "SELECT EXISTS (SELECT 1 FROM conduit_projection_state WHERE target_table = ?1)",
+                "SELECT EXISTS (SELECT 1 FROM kulyrax_projection_state WHERE target_table = ?1)",
             )
             .and_then(|mut stmt| stmt.query_row(params![table], |row| row.get::<_, i64>(0)))
             .map(|n| n != 0)
@@ -351,7 +352,7 @@ impl SqlTxn for SqliteTxn<'_> {
         let mut stmt = self
             .conn
             .prepare_cached(
-                "SELECT last_sequence, deleted, permanent FROM conduit_projection_state
+                "SELECT last_sequence, deleted, permanent FROM kulyrax_projection_state
                  WHERE target_table = ?1 AND entity_key = ?2 AND facet = ?3",
             )
             .map_err(sql_err)?;
@@ -381,7 +382,7 @@ impl SqlTxn for SqliteTxn<'_> {
                 .join(", ");
             let sql = format!(
                 "SELECT entity_key, facet, last_sequence, deleted, permanent
-                 FROM conduit_projection_state
+                 FROM kulyrax_projection_state
                  WHERE target_table = ?1 AND entity_key IN ({list})"
             );
             let mut stmt = self.conn.prepare_cached(&sql).map_err(sql_err)?;
@@ -430,7 +431,7 @@ impl SqlTxn for SqliteTxn<'_> {
 
     fn upsert_guard_row(&mut self, row: &GuardRow) -> Result<(), SqlError> {
         self.execute(
-            "INSERT INTO conduit_projection_state
+            "INSERT INTO kulyrax_projection_state
                 (target_table, entity_key, facet, last_sequence, last_event_id, deleted, permanent, processed_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))
              ON CONFLICT (target_table, entity_key, facet) DO UPDATE SET
@@ -460,7 +461,7 @@ impl SqlTxn for SqliteTxn<'_> {
         event_id: &str,
     ) -> Result<(), SqlError> {
         self.execute(
-            "UPDATE conduit_projection_state
+            "UPDATE kulyrax_projection_state
                 SET last_sequence = ?4, last_event_id = ?5, processed_at = datetime('now')
              WHERE target_table = ?1 AND entity_key = ?2 AND facet = ?3",
             params![table, entity_key, facet, seq as i64, event_id],
@@ -478,7 +479,7 @@ impl SqlTxn for SqliteTxn<'_> {
     ) -> Result<(), SqlError> {
         if deleted {
             self.execute(
-                "UPDATE conduit_projection_state
+                "UPDATE kulyrax_projection_state
                     SET deleted = 1, permanent = ?4, last_sequence = ?3,
                         last_event_id = ?5, processed_at = datetime('now')
                  WHERE target_table = ?1 AND entity_key = ?2 AND facet <> ''",
@@ -486,7 +487,7 @@ impl SqlTxn for SqliteTxn<'_> {
             )
         } else {
             self.execute(
-                "UPDATE conduit_projection_state
+                "UPDATE kulyrax_projection_state
                     SET deleted = 0, permanent = 0
                  WHERE target_table = ?1 AND entity_key = ?2 AND facet <> ''",
                 params![table, entity_key],
@@ -600,7 +601,7 @@ impl SqlTxn for SqliteTxn<'_> {
                 .map_err(sql_err)?;
         }
         self.execute(
-            "DELETE FROM conduit_projection_state WHERE target_table = ?1",
+            "DELETE FROM kulyrax_projection_state WHERE target_table = ?1",
             params![t.shadow],
         )
     }
@@ -618,7 +619,7 @@ impl SqlTxn for SqliteTxn<'_> {
             .query_row(
                 &format!(
                     "SELECT count(*), coalesce(sum(last_sequence), 0)
-                     FROM conduit_projection_state WHERE target_table IN ({list})"
+                     FROM kulyrax_projection_state WHERE target_table IN ({list})"
                 ),
                 params_from_iter(tables.iter()),
                 |row| {
@@ -633,11 +634,11 @@ impl SqlTxn for SqliteTxn<'_> {
 
     fn swap_in_shadow(&mut self, t: &ShadowTable) -> Result<(), SqlError> {
         self.execute(
-            "DELETE FROM conduit_projection_state WHERE target_table = ?1",
+            "DELETE FROM kulyrax_projection_state WHERE target_table = ?1",
             params![t.table],
         )?;
         self.execute(
-            "UPDATE conduit_projection_state SET target_table = ?1 WHERE target_table = ?2",
+            "UPDATE kulyrax_projection_state SET target_table = ?1 WHERE target_table = ?2",
             params![t.table, t.shadow],
         )?;
         self.conn

@@ -10,7 +10,7 @@
 //! `SELECT … FOR UPDATE` on the guard row. Not `REPEATABLE READ`: there, a
 //! locking read of a guard row that does not exist yet locks the *gap* where
 //! it would go, and every projection in the database shares
-//! `conduit_projection_state`, so two writers adding new entities — even to
+//! `kulyrax_projection_state`, so two writers adding new entities — even to
 //! different target tables — deadlocked on neighbouring gaps (ERROR 1213).
 //! `READ COMMITTED` takes no gap locks for these reads, as on Postgres.
 //! Requires row-based binary logging (`binlog_format=ROW`, the MySQL 8
@@ -28,6 +28,8 @@ use std::sync::{Arc, Mutex};
 
 use mysql::prelude::Queryable;
 use mysql::{Opts, OptsBuilder, Pool, PoolConstraints, PoolOpts, PooledConn};
+
+mod legacy;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -365,7 +367,7 @@ fn ensure_binary_keys(conn: &mut PooledConn) -> Result<(), SqlError> {
     let collations: Vec<(String, Option<String>)> = conn
         .query(
             "SELECT COLUMN_NAME, COLLATION_NAME FROM information_schema.COLUMNS
-             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'conduit_projection_state'",
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'kulyrax_projection_state'",
         )
         .map_err(my_err)?;
     let binary = GUARD_KEY_COLUMNS.iter().all(|col| {
@@ -378,7 +380,7 @@ fn ensure_binary_keys(conn: &mut PooledConn) -> Result<(), SqlError> {
         return Ok(());
     }
     conn.query_drop(
-        "ALTER TABLE conduit_projection_state
+        "ALTER TABLE kulyrax_projection_state
             MODIFY target_table VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
             MODIFY entity_key   VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
             MODIFY facet        VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT ''",
@@ -428,9 +430,10 @@ fn json_to_value(v: &Value) -> mysql::Value {
 
 impl SqlTxn for MySqlTxn<'_> {
     fn ensure_guard_table(&mut self) -> Result<(), SqlError> {
+        legacy::migrate_guard_table(self.conn)?;
         self.conn
             .query_drop(
-                "CREATE TABLE IF NOT EXISTS conduit_projection_state (
+                "CREATE TABLE IF NOT EXISTS kulyrax_projection_state (
                     target_table  VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
                     entity_key    VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
                     facet         VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
@@ -454,10 +457,10 @@ impl SqlTxn for MySqlTxn<'_> {
     ) -> Result<Option<GuardState>, SqlError> {
         // FOR UPDATE serializes concurrent writers on this guard row.
         let sql = if lock {
-            "SELECT last_sequence, deleted, permanent FROM conduit_projection_state
+            "SELECT last_sequence, deleted, permanent FROM kulyrax_projection_state
              WHERE target_table = ? AND entity_key = ? AND facet = ? FOR UPDATE"
         } else {
-            "SELECT last_sequence, deleted, permanent FROM conduit_projection_state
+            "SELECT last_sequence, deleted, permanent FROM kulyrax_projection_state
              WHERE target_table = ? AND entity_key = ? AND facet = ?"
         };
         let row: Option<(i64, bool, bool)> = self
@@ -478,7 +481,7 @@ impl SqlTxn for MySqlTxn<'_> {
         let exists: Option<i64> = self
             .conn
             .exec_first(
-                "SELECT EXISTS (SELECT 1 FROM conduit_projection_state WHERE target_table = ?)",
+                "SELECT EXISTS (SELECT 1 FROM kulyrax_projection_state WHERE target_table = ?)",
                 (table.to_string(),),
             )
             .map_err(my_err)?;
@@ -509,7 +512,7 @@ impl SqlTxn for MySqlTxn<'_> {
             let list = vec!["(?, ?)"; chunk.len()].join(", ");
             let sql = format!(
                 "SELECT entity_key, facet, last_sequence, deleted, permanent
-                 FROM conduit_projection_state
+                 FROM kulyrax_projection_state
                  WHERE target_table = ? AND (entity_key, facet) IN ({list}){}",
                 if lock { " FOR UPDATE" } else { "" }
             );
@@ -560,7 +563,7 @@ impl SqlTxn for MySqlTxn<'_> {
     fn upsert_guard_row(&mut self, row: &GuardRow) -> Result<(), SqlError> {
         self.conn
             .exec_drop(
-                "INSERT INTO conduit_projection_state
+                "INSERT INTO kulyrax_projection_state
                     (target_table, entity_key, facet, last_sequence, last_event_id, deleted, permanent, processed_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
                  ON DUPLICATE KEY UPDATE
@@ -592,7 +595,7 @@ impl SqlTxn for MySqlTxn<'_> {
     ) -> Result<(), SqlError> {
         self.conn
             .exec_drop(
-                "UPDATE conduit_projection_state
+                "UPDATE kulyrax_projection_state
                     SET last_sequence = ?, last_event_id = ?, processed_at = NOW()
                  WHERE target_table = ? AND entity_key = ? AND facet = ?",
                 (
@@ -617,7 +620,7 @@ impl SqlTxn for MySqlTxn<'_> {
     ) -> Result<(), SqlError> {
         if deleted {
             self.conn.exec_drop(
-                "UPDATE conduit_projection_state
+                "UPDATE kulyrax_projection_state
                     SET deleted = TRUE, permanent = ?, last_sequence = ?,
                         last_event_id = ?, processed_at = NOW()
                  WHERE target_table = ? AND entity_key = ? AND facet <> ''",
@@ -631,7 +634,7 @@ impl SqlTxn for MySqlTxn<'_> {
             )
         } else {
             self.conn.exec_drop(
-                "UPDATE conduit_projection_state
+                "UPDATE kulyrax_projection_state
                     SET deleted = FALSE, permanent = FALSE
                  WHERE target_table = ? AND entity_key = ? AND facet <> ''",
                 (table.to_string(), entity_key.to_string()),

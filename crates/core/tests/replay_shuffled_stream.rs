@@ -89,7 +89,7 @@ fn apply_order(order: &[u64]) -> (String, i64) {
         .unwrap();
     let last_sequence: i64 = conn
         .query_row(
-            "SELECT last_sequence FROM conduit_projection_state WHERE target_table = 'users'",
+            "SELECT last_sequence FROM kulyrax_projection_state WHERE target_table = 'users'",
             [],
             |r| r.get(0),
         )

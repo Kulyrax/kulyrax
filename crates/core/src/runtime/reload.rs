@@ -30,8 +30,8 @@ pub fn control_dir(config_path: &Path) -> PathBuf {
     config_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
-        .join(".kulyrax")
-        .join("control")
+        .join(crate::kulyrax_dir::DIR)
+        .join(crate::kulyrax_dir::CONTROL)
 }
 
 /// What the running process did with a reload request.

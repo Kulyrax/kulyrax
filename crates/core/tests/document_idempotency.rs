@@ -82,7 +82,7 @@ document:
 
     // Verify idempotency guard exists, keyed by (collection, entity_id)
     let guard_path = root
-        .join(".conduit")
+        .join(".kulyrax")
         .join("entities")
         .join("users")
         .join("u1.done");

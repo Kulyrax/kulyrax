@@ -48,7 +48,7 @@ fn sql_adapter_is_idempotent() -> Result<(), Box<dyn std::error::Error>> {
             )",
             [],
         )?;
-        // conduit_projection_state (Phase 11.2 guard) is self-managed by the
+        // kulyrax_projection_state (Phase 11.2 guard) is self-managed by the
         // adapter via CREATE TABLE IF NOT EXISTS; nothing to set up here.
     }
 

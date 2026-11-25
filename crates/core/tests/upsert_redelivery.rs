@@ -103,7 +103,7 @@ fn row_state(db_path: &std::path::Path) -> rusqlite::Result<(String, i64)> {
     let state: String =
         conn.query_row("SELECT state FROM users WHERE id = 'u1'", [], |r| r.get(0))?;
     let last_sequence: i64 = conn.query_row(
-        "SELECT last_sequence FROM conduit_projection_state WHERE target_table = 'users'",
+        "SELECT last_sequence FROM kulyrax_projection_state WHERE target_table = 'users'",
         [],
         |r| r.get(0),
     )?;
@@ -153,7 +153,7 @@ document:
     let doc_path = root.join("users").join("u1.json");
     let content_before = std::fs::read_to_string(&doc_path)?;
     let guard_path = root
-        .join(".conduit")
+        .join(".kulyrax")
         .join("entities")
         .join("users")
         .join("u1.done");

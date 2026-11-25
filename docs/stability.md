@@ -164,17 +164,19 @@ None of these carries a format version today except the batch log's magic
 
 | Format | Where | Shape | Proposal |
 |---|---|---|---|
-| SQL guard table | SQLite, Postgres, MySQL: `conduit_projection_state` | `target_table`, `entity_key` (JSON array text, e.g. `["u1"]`), `facet`, `last_sequence`, `last_event_id`, `deleted`, `permanent`, `processed_at`; PK `(target_table, entity_key, facet)`; MySQL key columns `utf8mb4_bin` | **CHANGE** (step 2): rename; then FREEZE |
+| SQL guard table | SQLite, Postgres, MySQL: `kulyrax_projection_state` (renamed in step 2) | `target_table`, `entity_key` (JSON array text, e.g. `["u1"]`), `facet`, `last_sequence`, `last_event_id`, `deleted`, `permanent`, `processed_at`; PK `(target_table, entity_key, facet)`; MySQL key columns `utf8mb4_bin` | FREEZE |
 | Rebuild shadow suffix | SQL | `<table>__kulyrax_rebuild` | FREEZE |
-| MongoDB guards | collection `conduit_projection_state`, unique index `(target, entity_key)` | `ProjectionGuard` BSON + `target`, `entity_key` | **CHANGE** (step 2) |
-| Neo4j guards | label `__ConduitGuard`, uniqueness constraint | `kind`, `target`, `entity_key`, `facet`, `last_sequence`, `last_event_id`, `deleted`, `permanent` | **CHANGE** (step 2) |
+| MongoDB guards | collection `kulyrax_projection_state`, unique index `(target, entity_key)` | `ProjectionGuard` BSON + `target`, `entity_key` | FREEZE (renamed in step 2) |
+| Neo4j guards | label `__KulyraxGuard`, uniqueness constraint `kulyrax_guard_key` | `kind`, `target`, `entity_key`, `facet`, `last_sequence`, `last_event_id`, `deleted`, `permanent` | FREEZE (renamed in step 2) |
 | Redis | values `<ns>:<key>`, guards `__kulyrax:guard:<ns>:<key>` (JSON `KvGuard`) | already Kulyrax-named | FREEZE |
 | Elasticsearch | guard inside each document, field `__kulyrax_guard` | already Kulyrax-named | FREEZE |
-| File document store | `<root>/<collection>/<id>.json`; guard `.conduit/entities/<collection>/<id>.done` | JSON | **CHANGE** (step 2) |
-| File key-value store | `<root>/<ns>/<key>.json`; guard `.conduit/<ns>/<key>.guard.json` | JSON | **CHANGE** (step 2; F1) |
-| File graph store | `nodes/<label>/<id>.json`, `edges/<type>/<hex key>.json`; guards `.conduit/guard/{nodes,edges}/…`; `.conduit/incident/<id>.json` | JSON | **CHANGE** (step 2) |
-| Batch log | `.conduit/wal/<seq>.log` (+ `.log.tmp`) | `KLXWAL01`, body length u64 LE, CRC-32, entries (tag, path, content) | **CHANGE** (step 2: directory; step 5: version byte) |
-| File-store lock | `.conduit/lock` | empty file, OS lock | **CHANGE** (step 2) |
+| File document store | `<root>/<collection>/<id>.json`; guard `.kulyrax/entities/<collection>/<id>.done` | JSON | FREEZE |
+| File key-value store | `<root>/<ns>/<key>.json`; guard `.kulyrax/kv/<ns>/<key>.guard.json` | JSON | FREEZE |
+| File graph store | `nodes/<label>/<id>.json`, `edges/<type>/<hex key>.json`; guards `.kulyrax/guard/{nodes,edges}/…`; `.kulyrax/incident/<id>.json` | JSON | FREEZE |
+| Batch log | `.kulyrax/wal/<seq>.log` (+ `.log.tmp`) | `KLXWAL01`, body length u64 LE, CRC-32, entries (tag, path, content) | **CHANGE** (step 5: version byte) |
+| File-store lock | `.kulyrax/lock` | empty file, OS lock | FREEZE |
+| Layout marker | `.kulyrax/layout/<kind>` (`kv`, `document`, `graph`) | text, the layout version (`2`) | **CHANGE** (step 5): versioned format |
+| Shared `.kulyrax/` | store root and config folder | entries owned by `kulyrax_core::kulyrax_dir`: stores `wal`, `lock`, `layout`, `kv`, `entities`, `guard`, `incident`; reserved `control`, `state` | FREEZE |
 | Source checkpoint | `<state_dir>/<id>.json` | `{position, committed_at}`; positions: directory `<file>#<index:012>`, stdin zero-padded line, outbox `<after:020>.<late:010>`, each ordered only by its own source ([producer contract §9](producer-contract.md#9-positions)) | FREEZE after step 5 adds a version |
 | Outbox state | inside the checkpoint's `position` string | JSON `{after, watch[{seq, skipped_at_ms}], late_seq, late_rows, late_skipped}` | **CHANGE** (step 5): version it; consider storing it beside `position` instead of inside it |
 | Source lock | `<state_dir>/<id>.lock` | OS lock | FREEZE |
@@ -183,29 +185,18 @@ None of these carries a format version today except the batch log's magic
 
 ---
 
-## 6. Every "conduit"
+## 6. The old name
 
-193 occurrences in `crates/` (the plan said 188; 193 at `d80b3cd`), plus docs.
-
-| Group | Token | Count (src / tests) | Where |
-|---|---|---|---|
-| **Persisted name** | `conduit_projection_state` | 45 / 76 | SQL guard table (SQLite `sql/sqlite.rs`, Postgres `lib.rs` + `bulk.rs`, MySQL), MongoDB guard collection |
-| Persisted name | `.conduit` (and `./.conduit`) | 15+2 / 32 | file stores' guard tree, batch log dir, lock (`file_store.rs`, `document/file.rs`, `keyvalue/store.rs`, `graph/store.rs`); a config-parse test (`runtime/config.rs`, `state_dir: ./.conduit/sources`) |
-| Persisted name | `__ConduitGuard` | 11 / 5 | Neo4j guard label and constraint |
-| **Code identifier** | `CONDUIT_DIR`, `conduit` (a local) | 4 + 3 | `file_store.rs` |
-| **User-visible name** | in error messages | (part of the above) | the file-store lock error names `.conduit/lock` |
-| Docs | `conduit_projection_state`, `.conduit`, `__ConduitGuard` | — | `README.md`, `architecture.md`, `docs/concepts.md`, `docs/file-store-durability.md`, `docs/writing-a-backend.md`, `examples/sqlite-quickstart/README.md`, `examples/postgres/dbtool`, `CLAUDE.md` |
-| **Legal** | `Conduit Contributors` | — | copyright line in `LICENSE-MIT` and `LICENSE-APACHE`; `Cargo.toml` says `Kulyrax Contributors`. Owner's call (§9) |
-
-Redis (`__kulyrax:guard:`) and Elasticsearch (`__kulyrax_guard`) already use the new
-name. Proposal for step 2: `kulyrax_projection_state`, `__KulyraxGuard`, `.kulyrax/`
-(file stores), with the per-backend migration in its decision record.
+Step 2 renamed every persisted, user-visible and code name to `kulyrax`, with an
+in-place migration at start-up and a tombstone under each old name: see
+`RELEASES/v1.0.0-rc.1.md` and the step 2 decision record in `docs/ledger/`. CI fails on the old name
+outside the migration code, its tests, the release notes and the ledger.
 
 ---
 
 ## 7. Findings
 
-- **F1**: the file stores' layout under `.conduit/` is restructured before 1.0 so
+- **F1**: the file stores' internal layout is restructured before 1.0 so
   that Kulyrax's own files and the directories named by mappings never share a
   path, and mapping names that could reach them are refused at validation.
 - **F2**: the config file already has a required `version: 1` (§2).
@@ -219,7 +210,7 @@ name. Proposal for step 2: `kulyrax_projection_state`, `__KulyraxGuard`, `.kulyr
 
 | Step | Changes from this page |
 |---|---|
-| 2 | rename `conduit` → `kulyrax` (§5, §6) |
+| 2 | rename to `kulyrax` (§5, §6); done |
 | 3 | `serde_yaml` replacement (§2) |
 | 4 | `#[non_exhaustive]` (including `Event`), one path per item, UNSTABLE items hidden, adapter constructors from config, `pb` hidden, errors (`Error` on all, `source()`, `AdapterReportError` renamed), `deny_unknown_fields` everywhere built in, `missing_docs`, `cargo-semver-checks` and `buf breaking` in CI, the exit codes of §3 |
 | 5 | format versions (§5) |

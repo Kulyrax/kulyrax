@@ -147,7 +147,7 @@ fn default_facet_delete_cascades_to_facet_lanes() -> Result<(), Box<dyn std::err
     assert_eq!(count, 0);
 
     let contact_deleted: i64 = conn.query_row(
-        "SELECT deleted FROM conduit_projection_state
+        "SELECT deleted FROM kulyrax_projection_state
          WHERE target_table = 'users' AND facet = 'contact'",
         [],
         |r| r.get(0),

@@ -17,7 +17,7 @@ fn main() {
             client
                 .batch_execute(
                     "DROP TABLE IF EXISTS users;
-                     DROP TABLE IF EXISTS conduit_projection_state;
+                     DROP TABLE IF EXISTS kulyrax_projection_state;
                      CREATE TABLE users (
                          id        text PRIMARY KEY,
                          name      text,

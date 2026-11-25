@@ -109,9 +109,9 @@ fn one_event_projects_every_record() {
     );
     assert_eq!(count(root.join("edges/PLACED")), 1);
     // A guard lane per record.
-    assert!(root.join(".conduit/guard/nodes/Order/o1.json").exists());
-    assert!(root.join(".conduit/guard/nodes/Customer/c1.json").exists());
-    assert_eq!(count(root.join(".conduit/guard/edges/PLACED")), 1);
+    assert!(root.join(".kulyrax/guard/nodes/Order/o1.json").exists());
+    assert!(root.join(".kulyrax/guard/nodes/Customer/c1.json").exists());
+    assert_eq!(count(root.join(".kulyrax/guard/edges/PLACED")), 1);
 
     // Redelivered: every record is stale.
     let again = g.handle(&placed(1, "o1", "c1"));
@@ -170,7 +170,7 @@ fn a_failing_record_writes_nothing_of_the_event() {
         r.outcome
     );
     assert!(!root.join("nodes").exists(), "no node written");
-    assert!(!root.join(".conduit/guard").exists(), "no guard written");
+    assert!(!root.join(".kulyrax/guard").exists(), "no guard written");
 }
 
 #[test]

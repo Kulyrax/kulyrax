@@ -26,4 +26,6 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 url = "2"
 
 [dev-dependencies]
+# The migration tests shrink the relabel batch through a crash-points knob.
+kulyrax-core = { workspace = true, features = ["crash-points"] }
 tempfile = "3"
