@@ -43,19 +43,14 @@ Release follow-up (b), before 0.12.1 and the rename land: CI fully green.
 | Before the change | `cargo test -p kulyrax-adapter-mysql --test mysql_backend` at `cda1862` against a long-lived database | `mysql_column_missing_rejected` fails with `Skipped(StaleSequence)` (recorded in `2026-11-24-file-store-names`, and again on 2026-11-25) |
 | MySQL, 3 runs | `cargo test -p kulyrax-adapter-mysql` ×3 against the long-lived `kx-mysql` container | runs 1–3: `mysql_backend` 12/12 (with `mysql_column_missing_rejected`), `mysql_binlog` 1/1, `mysql_guard_collation` 1/1, `mysql_guard_ddl` 1/1. Green on the first run |
 | Elasticsearch, 3 runs | `cargo test -p kulyrax-adapter-elasticsearch --test es_backend -- --test-threads=1` ×3 | runs 1–3: 8/8 each (run 3 took 229 s while another build ran on the same machine) |
-
-## Risks and open questions
-
-- The 3× CI proof needs the branch on GitHub, after PR #12.
-
-## Gates (local, 2026-11-25)
-
-| Check | Command | Result |
-|---|---|---|
 | Format | `cargo fmt --check` | first run: rustfmt reflowed the new MySQL test code (`tests/common/mod.rs`, two `let … else` lines). Ran `cargo fmt`; then clean |
 | Lint | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
 | Build | `cargo build --workspace` | clean |
 | Tests | `cargo test --workspace --no-fail-fast` | 420 passed, 0 failed (backend suites skip without their URLs; they ran above) |
+
+## Risks and open questions
+
+- The 3× CI proof needs the branch on GitHub, after PR #12.
 
 ## Outcome
 
