@@ -46,7 +46,13 @@ static TABLE_SEQ: AtomicU32 = AtomicU32::new(0);
 /// A unique table name per test invocation, so the shared
 /// `conduit_projection_state` (keyed by target_table) stays isolated.
 fn fresh_table() -> String {
-    format!("t_{}", TABLE_SEQ.fetch_add(1, Ordering::Relaxed))
+    // The process id keeps a rerun against the same server off an earlier
+    // run's tables and guard lanes.
+    format!(
+        "t_{}_{}",
+        std::process::id(),
+        TABLE_SEQ.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 fn pg_exec(url: &str, sql: &str) -> R {
@@ -849,5 +855,210 @@ fn pg_bulk_failure_fails_the_commit_and_per_event_isolates_it() -> R {
     let outcomes: Vec<bool> = events.iter().map(|e| a.handle(e).is_success()).collect();
     assert_eq!(outcomes, [true, false, true]);
     assert_eq!(pg_state(&url, &t)?.0.len(), 2);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Rebuild into a shadow table
+// ---------------------------------------------------------------------------
+
+/// `t`'s shadow table, and the guard lanes a rebuild of `t` would swap.
+fn shadow_of(t: &str) -> [kulyrax_core::adapter::sql::exec::ShadowTable; 1] {
+    [kulyrax_core::adapter::sql::exec::ShadowTable {
+        table: t.to_string(),
+        shadow: format!("{t}__kulyrax_rebuild"),
+    }]
+}
+
+fn pg_exists(url: &str, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    let mut c = postgres::Client::connect(url, postgres::NoTls)?;
+    let row = c.query_one("SELECT to_regclass($1) IS NOT NULL", &[&table])?;
+    Ok(row.get(0))
+}
+
+/// The history projected again into the shadow table (here with the same
+/// mappings, so the rebuilt projection must equal the live one) is swapped
+/// in: the stray row is gone, the guard lanes are the rebuild's under the
+/// table's own name, the index came along, and the shadow table is gone.
+#[test]
+fn pg_rebuild_swaps_the_shadow_table_in() -> R {
+    require_pg!(url);
+    let t = fresh_batch_table(&url)?;
+    pg_exec(&url, &format!("CREATE INDEX {t}_name ON {t} (name)"))?;
+    let live = pg_adapter(&url, batch_mappings("Q", &t));
+    for e in batch_stream("Q") {
+        assert!(live.handle(&e).is_success());
+    }
+    let projected = pg_state(&url, &t)?;
+    pg_exec(
+        &url,
+        &format!("INSERT INTO {t} (id, name) VALUES ('ghost', 'boo')"),
+    )?;
+
+    let tables = shadow_of(&t);
+    let rebuilder = live.shadow_rebuild().expect("Postgres supports rebuilds");
+    let before = rebuilder
+        .start_rebuild(&tables)
+        .map_err(|e| e.to_string())?;
+    let shadow = pg_adapter(&url, batch_mappings("Q", &tables[0].shadow));
+    let events = batch_stream("Q");
+    let refs: Vec<&Event> = events.iter().collect();
+    shadow.begin_batch(&refs).map_err(|e| e.to_string())?;
+    for e in &events {
+        assert!(shadow.handle(e).is_success());
+    }
+    shadow.commit_batch().map_err(|e| e.to_string())?;
+    rebuilder
+        .finish_rebuild(&tables, before)
+        .map_err(|e| e.to_string())?;
+
+    assert_eq!(
+        pg_state(&url, &t)?,
+        projected,
+        "the rebuild, without the ghost"
+    );
+    assert!(
+        !pg_exists(&url, &tables[0].shadow)?,
+        "no shadow table is left"
+    );
+    let mut c = postgres::Client::connect(&url, postgres::NoTls)?;
+    let indexes: i64 = c
+        .query_one(
+            "SELECT count(*) FROM pg_indexes WHERE tablename = $1",
+            &[&t],
+        )?
+        .get(0);
+    assert_eq!(indexes, 2, "primary key and name index");
+    let shadow_lanes: i64 = c
+        .query_one(
+            "SELECT count(*) FROM conduit_projection_state WHERE target_table = $1",
+            &[&tables[0].shadow],
+        )?
+        .get(0);
+    assert_eq!(shadow_lanes, 0);
+    Ok(())
+}
+
+#[test]
+fn pg_rebuild_refuses_to_swap_when_another_writer_projected() -> R {
+    require_pg!(url);
+    let t = fresh_batch_table(&url)?;
+    let live = pg_adapter(&url, batch_mappings("W", &t));
+    for e in batch_stream("W") {
+        assert!(live.handle(&e).is_success());
+    }
+    let tables = shadow_of(&t);
+    let rebuilder = live.shadow_rebuild().expect("Postgres supports rebuilds");
+    let before = rebuilder
+        .start_rebuild(&tables)
+        .map_err(|e| e.to_string())?;
+
+    let r = live.handle(&ev(
+        "WUp",
+        99,
+        serde_json::json!({ "id": "u1", "name": "during" }),
+    ));
+    assert!(
+        matches!(r.outcome, AdapterOutcome::Updated),
+        "{:?}",
+        r.outcome
+    );
+    let during = pg_state(&url, &t)?;
+
+    let err = rebuilder
+        .finish_rebuild(&tables, before)
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default();
+    assert!(err.contains("another writer projected into"), "{err}");
+    assert_eq!(pg_state(&url, &t)?, during, "the table is untouched");
+    assert!(pg_exists(&url, &tables[0].shadow)?, "the shadow is left");
+    Ok(())
+}
+
+/// Add `ddl` (with `{t}` for the table) to a projected table, start a
+/// rebuild, and return its error, after checking that it created no shadow
+/// table and no guard lane.
+fn pg_rebuild_refused_with(url: &str, ddl: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let t = fresh_batch_table(url)?;
+    let live = pg_adapter(url, batch_mappings("P", &t));
+    for e in batch_stream("P") {
+        assert!(live.handle(&e).is_success());
+    }
+    pg_exec(url, &ddl.replace("{t}", &t))?;
+    let tables = shadow_of(&t);
+    let err = live
+        .shadow_rebuild()
+        .ok_or("Postgres supports rebuilds")?
+        .start_rebuild(&tables)
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default();
+    assert!(!pg_exists(url, &tables[0].shadow)?, "no shadow table");
+    let mut c = postgres::Client::connect(url, postgres::NoTls)?;
+    let lanes: i64 = c
+        .query_one(
+            "SELECT count(*) FROM conduit_projection_state WHERE target_table = $1",
+            &[&tables[0].shadow],
+        )?
+        .get(0);
+    assert_eq!(lanes, 0, "no shadow guard lanes");
+    assert!(err.contains(&format!("{t}: ")), "names the table: {err}");
+    Ok(err)
+}
+
+#[test]
+fn pg_rebuild_refuses_a_table_a_view_reads() -> R {
+    require_pg!(url);
+    let err = pg_rebuild_refused_with(&url, "CREATE VIEW {t}_v AS SELECT id FROM {t}")?;
+    assert!(err.contains("view ") && err.contains("_v"), "{err}");
+    Ok(())
+}
+
+#[test]
+fn pg_rebuild_refuses_a_foreign_key_into_the_table() -> R {
+    require_pg!(url);
+    let err = pg_rebuild_refused_with(
+        &url,
+        "CREATE TABLE {t}_child (id text PRIMARY KEY, parent text REFERENCES {t} (id))",
+    )?;
+    assert!(
+        err.contains("foreign key ") && err.contains("_child ->"),
+        "{err}"
+    );
+    Ok(())
+}
+
+#[test]
+fn pg_rebuild_refuses_a_foreign_key_out_of_the_table() -> R {
+    require_pg!(url);
+    let err = pg_rebuild_refused_with(
+        &url,
+        "CREATE TABLE {t}_parent (id text PRIMARY KEY);
+         ALTER TABLE {t} ADD COLUMN parent text REFERENCES {t}_parent (id)",
+    )?;
+    assert!(
+        err.contains("foreign key ") && err.contains("_parent)"),
+        "{err}"
+    );
+    Ok(())
+}
+
+#[test]
+fn pg_rebuild_refuses_a_serial_column() -> R {
+    require_pg!(url);
+    let err = pg_rebuild_refused_with(&url, "ALTER TABLE {t} ADD COLUMN n serial")?;
+    assert!(err.contains("column n owning sequence"), "{err}");
+    Ok(())
+}
+
+#[test]
+fn pg_rebuild_refuses_an_identity_column() -> R {
+    require_pg!(url);
+    let err = pg_rebuild_refused_with(
+        &url,
+        "ALTER TABLE {t} ADD COLUMN n bigint GENERATED ALWAYS AS IDENTITY",
+    )?;
+    assert!(err.contains("column n owning sequence"), "{err}");
     Ok(())
 }

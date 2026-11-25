@@ -950,52 +950,73 @@ pub fn validate_projection_config(
                 kind: "graph",
             });
         }
-        let mut push = |reason: &str| {
+        if let GraphMapping::Subgraph(s) = m
+            && s.records.is_empty()
+        {
             report.push(ValidationIssue::InvalidGraphMapping {
                 event: key.clone(),
-                reason: reason.to_string(),
+                reason: "a subgraph needs at least one record".to_string(),
             });
-        };
-        match m {
-            GraphMapping::Node(n) => {
-                if n.label.trim().is_empty() {
-                    push("empty label");
-                } else if !is_scalar_path(&n.key) {
-                    push("key must be a 'payload.' or 'metadata.' path");
-                } else if n.operation == Operation::Upsert && document_template_empty(&n.properties)
-                {
-                    push("node properties must not be empty for an upsert mapping");
-                } else if n.operation == Operation::Delete
-                    && !document_template_empty(&n.properties)
-                {
-                    push("delete mapping's properties must be empty");
-                } else if n.operation == Operation::Delete && n.facet.is_some() {
-                    push("operation: delete is only valid on the default facet");
-                } else if n.version < 1 {
-                    push("version must be >= 1");
+        }
+        // A subgraph's records are checked like node and edge mappings, each
+        // reason naming its record.
+        let records = m.records();
+        let subgraph = matches!(m, GraphMapping::Subgraph(_));
+        for (i, record) in records.into_iter().enumerate() {
+            let mut push = |reason: &str| {
+                report.push(ValidationIssue::InvalidGraphMapping {
+                    event: key.clone(),
+                    reason: if subgraph {
+                        format!("records[{i}]: {reason}")
+                    } else {
+                        reason.to_string()
+                    },
+                });
+            };
+            match record {
+                // `records` holds no subgraph (rejected when parsed).
+                GraphMapping::Subgraph(_) => {}
+                GraphMapping::Node(n) => {
+                    if n.label.trim().is_empty() {
+                        push("empty label");
+                    } else if !is_scalar_path(&n.key) {
+                        push("key must be a 'payload.' or 'metadata.' path");
+                    } else if n.operation == Operation::Upsert
+                        && document_template_empty(&n.properties)
+                    {
+                        push("node properties must not be empty for an upsert mapping");
+                    } else if n.operation == Operation::Delete
+                        && !document_template_empty(&n.properties)
+                    {
+                        push("delete mapping's properties must be empty");
+                    } else if n.operation == Operation::Delete && n.facet.is_some() {
+                        push("operation: delete is only valid on the default facet");
+                    } else if n.version < 1 {
+                        push("version must be >= 1");
+                    }
                 }
-            }
-            GraphMapping::Edge(e) => {
-                if e.edge_type.trim().is_empty() {
-                    push("empty edge_type");
-                } else if !is_scalar_path(&e.from) {
-                    push("from must be a 'payload.' or 'metadata.' path");
-                } else if !is_scalar_path(&e.to) {
-                    push("to must be a 'payload.' or 'metadata.' path");
-                } else if e
-                    .discriminator
-                    .as_deref()
-                    .is_some_and(|d| !is_scalar_path(d))
-                {
-                    push("discriminator must be a 'payload.' or 'metadata.' path");
-                } else if e.operation == Operation::Delete
-                    && !document_template_empty(&e.properties)
-                {
-                    // An edge with no properties is a valid bare relationship;
-                    // only a delete mapping is required to carry none.
-                    push("delete mapping's properties must be empty");
-                } else if e.version < 1 {
-                    push("version must be >= 1");
+                GraphMapping::Edge(e) => {
+                    if e.edge_type.trim().is_empty() {
+                        push("empty edge_type");
+                    } else if !is_scalar_path(&e.from) {
+                        push("from must be a 'payload.' or 'metadata.' path");
+                    } else if !is_scalar_path(&e.to) {
+                        push("to must be a 'payload.' or 'metadata.' path");
+                    } else if e
+                        .discriminator
+                        .as_deref()
+                        .is_some_and(|d| !is_scalar_path(d))
+                    {
+                        push("discriminator must be a 'payload.' or 'metadata.' path");
+                    } else if e.operation == Operation::Delete
+                        && !document_template_empty(&e.properties)
+                    {
+                        // An edge with no properties is a valid bare relationship;
+                        // only a delete mapping is required to carry none.
+                        push("delete mapping's properties must be empty");
+                    } else if e.version < 1 {
+                        push("version must be >= 1");
+                    }
                 }
             }
         }
@@ -1053,7 +1074,7 @@ pub fn validate_projection_config(
                 kind: "key-value",
             });
         }
-        for m in graph.values() {
+        for m in graph.values().flat_map(GraphMapping::records) {
             // Only nodes are faceted (Phase 16.1); an edge contributes no view.
             if let GraphMapping::Node(n) = m {
                 let identity = vec![n.key.clone()];
@@ -1157,12 +1178,19 @@ pub fn validate_projection_config(
                     continue;
                 };
                 let eff = effective_capabilities(ac);
-                let required = required_capabilities(
-                    graph_map.requires_capabilities(),
-                    graph_map.on_existing(),
-                    graph_map.operation(),
-                );
-                let missing: Vec<_> = required.into_iter().filter(|c| !eff.contains(c)).collect();
+                // Every record of a subgraph needs what it does on its own.
+                let mut missing: Vec<_> = Vec::new();
+                for record in graph_map.records() {
+                    for c in required_capabilities(
+                        record.requires_capabilities(),
+                        record.on_existing(),
+                        record.operation(),
+                    ) {
+                        if !eff.contains(&c) && !missing.contains(&c) {
+                            missing.push(c);
+                        }
+                    }
+                }
                 if !missing.is_empty() {
                     report.push(ValidationIssue::CapabilityMismatch {
                         event_type: event_type.clone(),

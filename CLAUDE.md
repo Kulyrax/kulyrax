@@ -23,7 +23,7 @@ kulyrax/
 ├── RELEASES/                       — per-version release notes
 ├── examples/                       — runnable examples (excluded from the workspace)
 └── crates/
-    ├── cli/                        — kulyrax-cli: thin CLI (main.rs only): init, run, sources, ingest, reload, explain, dry-run, replay
+    ├── cli/                        — kulyrax-cli: thin CLI (main.rs only): init, run, sources, ingest, reload, explain, dry-run, replay, rebuild
     ├── ingest/                     — kulyrax-ingest: tonic gRPC server + GrpcSource (keeps tonic out of core)
     ├── client/                     — kulyrax-client: reference Rust producer client
     ├── backends/                   — kulyrax-backends: registers every networked backend, one Cargo feature each
@@ -39,6 +39,7 @@ kulyrax/
         │   ├── routing.rs          — event_type → Vec<AdapterId> via the routing table
         │   ├── dispatch.rs         — synchronous dependency-ordered dispatcher
         │   ├── replay.rs           — catch-up replay (sequence-ordered)
+        │   ├── rebuild.rs          — SQL rebuild into shadow tables, swapped in atomically
         │   ├── pipeline.rs         — high-level orchestration for front ends
         │   ├── upcast.rs           — payload upcasters
         │   ├── adapter/

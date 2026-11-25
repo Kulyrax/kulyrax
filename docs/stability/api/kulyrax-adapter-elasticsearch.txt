@@ -1,0 +1,42 @@
+pub mod kulyrax_adapter_elasticsearch
+pub struct kulyrax_adapter_elasticsearch::ElasticsearchAdapter
+impl kulyrax_adapter_elasticsearch::ElasticsearchAdapter
+pub fn kulyrax_adapter_elasticsearch::ElasticsearchAdapter::new(alloc::string::String, &str, core::option::Option<(alloc::string::String, alloc::string::String)>, u64, u32, kulyrax_core::adapter::document::runtime::DocumentRuntimeBuilder, alloc::rcs::arc::Arc<kulyrax_core::upcast::UpcasterRegistry>, kulyrax_core::runtime::config::MigrationPolicy) -> Self
+impl kulyrax_core::adapter::StorageAdapter for kulyrax_adapter_elasticsearch::ElasticsearchAdapter
+pub fn kulyrax_adapter_elasticsearch::ElasticsearchAdapter::begin_batch(&self, &[&kulyrax_core::event::Event]) -> core::result::Result<(), kulyrax_core::adapter::AdapterError>
+pub fn kulyrax_adapter_elasticsearch::ElasticsearchAdapter::commit_batch(&self) -> core::result::Result<(), kulyrax_core::adapter::AdapterError>
+pub fn kulyrax_adapter_elasticsearch::ElasticsearchAdapter::handle(&self, &kulyrax_core::event::Event) -> kulyrax_core::adapter::AdapterResult
+pub fn kulyrax_adapter_elasticsearch::ElasticsearchAdapter::id(&self) -> &str
+pub fn kulyrax_adapter_elasticsearch::ElasticsearchAdapter::kind(&self) -> kulyrax_core::routing::StorageKind
+pub fn kulyrax_adapter_elasticsearch::ElasticsearchAdapter::priority(&self) -> u32
+pub fn kulyrax_adapter_elasticsearch::ElasticsearchAdapter::rollback_batch(&self)
+impl core::marker::Forget for kulyrax_adapter_elasticsearch::ElasticsearchAdapter
+impl !core::marker::Freeze for kulyrax_adapter_elasticsearch::ElasticsearchAdapter
+impl core::marker::Move for kulyrax_adapter_elasticsearch::ElasticsearchAdapter
+impl core::marker::Send for kulyrax_adapter_elasticsearch::ElasticsearchAdapter
+impl core::marker::Sync for kulyrax_adapter_elasticsearch::ElasticsearchAdapter
+impl core::marker::Unpin for kulyrax_adapter_elasticsearch::ElasticsearchAdapter
+impl core::marker::UnsafeUnpin for kulyrax_adapter_elasticsearch::ElasticsearchAdapter
+impl !core::panic::unwind_safe::RefUnwindSafe for kulyrax_adapter_elasticsearch::ElasticsearchAdapter
+impl !core::panic::unwind_safe::UnwindSafe for kulyrax_adapter_elasticsearch::ElasticsearchAdapter
+pub struct kulyrax_adapter_elasticsearch::ElasticsearchConfig
+pub kulyrax_adapter_elasticsearch::ElasticsearchConfig::password: core::option::Option<alloc::string::String>
+pub kulyrax_adapter_elasticsearch::ElasticsearchConfig::timeout_ms: core::option::Option<u64>
+pub kulyrax_adapter_elasticsearch::ElasticsearchConfig::url: alloc::string::String
+pub kulyrax_adapter_elasticsearch::ElasticsearchConfig::username: core::option::Option<alloc::string::String>
+impl core::clone::Clone for kulyrax_adapter_elasticsearch::ElasticsearchConfig
+pub fn kulyrax_adapter_elasticsearch::ElasticsearchConfig::clone(&self) -> Self
+impl core::fmt::Debug for kulyrax_adapter_elasticsearch::ElasticsearchConfig
+pub fn kulyrax_adapter_elasticsearch::ElasticsearchConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'de> serde_core::de::Deserialize<'de> for kulyrax_adapter_elasticsearch::ElasticsearchConfig
+pub fn kulyrax_adapter_elasticsearch::ElasticsearchConfig::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Forget for kulyrax_adapter_elasticsearch::ElasticsearchConfig
+impl core::marker::Freeze for kulyrax_adapter_elasticsearch::ElasticsearchConfig
+impl core::marker::Move for kulyrax_adapter_elasticsearch::ElasticsearchConfig
+impl core::marker::Send for kulyrax_adapter_elasticsearch::ElasticsearchConfig
+impl core::marker::Sync for kulyrax_adapter_elasticsearch::ElasticsearchConfig
+impl core::marker::Unpin for kulyrax_adapter_elasticsearch::ElasticsearchConfig
+impl core::marker::UnsafeUnpin for kulyrax_adapter_elasticsearch::ElasticsearchConfig
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_adapter_elasticsearch::ElasticsearchConfig
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_adapter_elasticsearch::ElasticsearchConfig
+pub fn kulyrax_adapter_elasticsearch::factory(&kulyrax_core::runtime::config::CustomAdapterConfig, &kulyrax_core::runtime::registry::AdapterBuildContext) -> core::result::Result<alloc::boxed::Box<dyn kulyrax_core::adapter::StorageAdapter>, kulyrax_core::runtime::config::ConfigError>

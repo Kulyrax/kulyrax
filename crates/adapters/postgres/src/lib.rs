@@ -24,12 +24,14 @@ use serde_json::Value;
 
 use kulyrax_core::adapter::sql::adapter::SqlError;
 use kulyrax_core::adapter::sql::exec::{
-    self, GuardCache, GuardRow, KnownGuards, Placeholders, SqlTxn, SqlWrite,
+    self, GuardCache, GuardFingerprint, GuardRow, KnownGuards, Placeholders, ShadowTable, SqlTxn,
+    SqlWrite,
 };
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use kulyrax_core::adapter::{AdapterError, AdapterResult, GuardState, Prepared, StorageAdapter};
 use kulyrax_core::event::Event;
 use kulyrax_core::execution::stages::{Stage, timed};
+use kulyrax_core::rebuild::ShadowRebuild;
 use kulyrax_core::routing::StorageKind;
 use kulyrax_core::runtime::AdapterBuildContext;
 use kulyrax_core::runtime::config::{ConfigError, CustomAdapterConfig, MigrationPolicy};
@@ -180,6 +182,16 @@ impl PostgresAdapter {
 
     fn failure(&self, error: AdapterError) -> AdapterResult {
         AdapterResult::failure(self.id.clone(), StorageKind::Sql, error)
+    }
+
+    fn client(
+        &self,
+    ) -> Result<r2d2::PooledConnection<PostgresConnectionManager<NoTls>>, AdapterError> {
+        self.pool
+            .as_ref()
+            .map_err(|e| AdapterError::WriteFailed(e.clone()))?
+            .get()
+            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
     }
 
     /// Column types for `table`, introspected + cached on first use.
@@ -334,6 +346,10 @@ impl StorageAdapter for PostgresAdapter {
             b.statements.clear();
             let _ = b.client.batch_execute("ROLLBACK");
         }
+    }
+
+    fn shadow_rebuild(&self) -> Option<&dyn ShadowRebuild> {
+        Some(self)
     }
 
     fn handle(&self, event: &Event) -> AdapterResult {
@@ -850,6 +866,138 @@ impl SqlTxn for PostgresTxn<'_> {
         self.client.batch_execute("COMMIT").map_err(pg_err)?;
         self.owns = false;
         Ok(())
+    }
+
+    /// Views over the table (its `DROP` would fail), foreign keys into or
+    /// out of it (`LIKE` copies none, and an incoming one blocks the `DROP`),
+    /// and columns owning a sequence, `serial` or identity (the table and its
+    /// shadow would share it, and the `DROP` takes it along).
+    fn rebuild_blockers(&mut self, table: &str) -> Result<Vec<String>, SqlError> {
+        let mut found = Vec::new();
+        for row in self.query(
+            "SELECT DISTINCT v.oid::regclass::text FROM pg_depend d
+             JOIN pg_rewrite r ON r.oid = d.objid
+             JOIN pg_class v ON v.oid = r.ev_class
+             WHERE d.classid = 'pg_rewrite'::regclass AND d.refobjid = $1::text::regclass
+               AND v.oid <> $1::text::regclass
+             ORDER BY 1",
+            &[&table],
+        )? {
+            found.push(format!("view {}", row.get::<_, String>(0)));
+        }
+        for row in self.query(
+            "SELECT conname::text, conrelid::regclass::text, confrelid::regclass::text
+             FROM pg_constraint
+             WHERE contype = 'f'
+               AND (conrelid = $1::text::regclass OR confrelid = $1::text::regclass)
+             ORDER BY 1",
+            &[&table],
+        )? {
+            let (name, from, to): (String, String, String) = (row.get(0), row.get(1), row.get(2));
+            found.push(format!("foreign key {name} ({from} -> {to})"));
+        }
+        for row in self.query(
+            "SELECT a.attname::text, pg_get_serial_sequence($1, a.attname)
+             FROM pg_attribute a
+             WHERE a.attrelid = $1::text::regclass AND a.attnum > 0 AND NOT a.attisdropped
+               AND pg_get_serial_sequence($1, a.attname) IS NOT NULL
+             ORDER BY a.attnum",
+            &[&table],
+        )? {
+            let (column, sequence): (String, String) = (row.get(0), row.get(1));
+            found.push(format!("column {column} owning sequence {sequence}"));
+        }
+        Ok(found)
+    }
+
+    /// `LIKE … INCLUDING ALL` copies columns, defaults, constraints and
+    /// indexes.
+    fn create_shadow_table(&mut self, t: &ShadowTable) -> Result<(), SqlError> {
+        self.client
+            .batch_execute(&format!(
+                "DROP TABLE IF EXISTS {shadow}; CREATE TABLE {shadow} (LIKE {table} INCLUDING ALL)",
+                shadow = t.shadow,
+                table = t.table
+            ))
+            .map_err(pg_err)?;
+        self.execute(
+            "DELETE FROM conduit_projection_state WHERE target_table = $1",
+            &[&t.shadow],
+        )
+    }
+
+    fn guard_fingerprint(
+        &mut self,
+        tables: &[String],
+        lock: bool,
+    ) -> Result<GuardFingerprint, SqlError> {
+        let sql = format!(
+            "SELECT count(*)::bigint, coalesce(sum(last_sequence), 0)::text FROM (
+                 SELECT last_sequence FROM conduit_projection_state
+                 WHERE target_table = ANY($1){}
+             ) lanes",
+            if lock { " FOR UPDATE" } else { "" }
+        );
+        let rows = self.query(&sql, &[&tables])?;
+        let row = rows
+            .first()
+            .ok_or_else(|| SqlError::ExecutionFailed("guard fingerprint returned no row".into()))?;
+        let sum: String = row.get(1);
+        Ok(GuardFingerprint {
+            lanes: row.get(0),
+            sequence_sum: sum.parse().map_err(|e| {
+                SqlError::ExecutionFailed(format!("guard sequence sum {sum:?}: {e}"))
+            })?,
+        })
+    }
+
+    /// Blocks every other writer, and reader, of `tables` until the swap
+    /// commits.
+    fn lock_tables(&mut self, tables: &[String]) -> Result<(), SqlError> {
+        self.client
+            .batch_execute(&format!(
+                "LOCK TABLE {} IN ACCESS EXCLUSIVE MODE",
+                tables.join(", ")
+            ))
+            .map_err(pg_err)
+    }
+
+    fn swap_in_shadow(&mut self, t: &ShadowTable) -> Result<(), SqlError> {
+        self.execute(
+            "DELETE FROM conduit_projection_state WHERE target_table = $1",
+            &[&t.table],
+        )?;
+        self.execute(
+            "UPDATE conduit_projection_state SET target_table = $1 WHERE target_table = $2",
+            &[&t.table, &t.shadow],
+        )?;
+        self.client
+            .batch_execute(&format!(
+                "DROP TABLE {table}; ALTER TABLE {shadow} RENAME TO {table}",
+                table = t.table,
+                shadow = t.shadow
+            ))
+            .map_err(pg_err)
+    }
+}
+
+impl ShadowRebuild for PostgresAdapter {
+    fn start_rebuild(&self, tables: &[ShadowTable]) -> Result<GuardFingerprint, AdapterError> {
+        let mut client = self.client()?;
+        PostgresTxn::begin(&mut client, Arc::default(), None)
+            .and_then(|txn| exec::start_shadow_rebuild(txn, tables))
+            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+    }
+
+    fn finish_rebuild(
+        &self,
+        tables: &[ShadowTable],
+        before: GuardFingerprint,
+    ) -> Result<(), AdapterError> {
+        let mut client = self.client()?;
+        PostgresTxn::begin(&mut client, Arc::default(), None)
+            .and_then(|txn| exec::swap_shadow_rebuild(txn, tables, before))
+            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
     }
 }
 

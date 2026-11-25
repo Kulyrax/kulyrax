@@ -22,7 +22,10 @@ pub use error::RuntimeError;
 pub use factory::{
     AdapterBuildFailure, build_adapters_from_config, build_adapters_reporting_failures,
 };
-pub use registry::{AdapterBuildContext, AdapterFactory, AdapterRegistry, MappingSet};
+pub use registry::{
+    AdapterBuildContext, AdapterFactory, AdapterRegistry, MappingSet, SourceBuildContext,
+    SourceFactory, SourceRegistry,
+};
 pub use reload::{FileReloader, ReloadOutcome, request_reload};
 pub use validation::{
     ValidationIssue, ValidationReport, validate_projection_config, validate_routing_adapter_ids,

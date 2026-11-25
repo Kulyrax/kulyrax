@@ -1,0 +1,64 @@
+pub mod kulyrax_adapter_mysql
+pub struct kulyrax_adapter_mysql::MySqlAdapter
+impl kulyrax_adapter_mysql::MySqlAdapter
+pub fn kulyrax_adapter_mysql::MySqlAdapter::new(alloc::string::String, &str, u32, u32, kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder, alloc::rcs::arc::Arc<kulyrax_core::upcast::UpcasterRegistry>, kulyrax_core::runtime::config::MigrationPolicy) -> Self
+impl kulyrax_core::adapter::StorageAdapter for kulyrax_adapter_mysql::MySqlAdapter
+pub fn kulyrax_adapter_mysql::MySqlAdapter::begin_batch(&self, &[&kulyrax_core::event::Event]) -> core::result::Result<(), kulyrax_core::adapter::AdapterError>
+pub fn kulyrax_adapter_mysql::MySqlAdapter::commit_batch(&self) -> core::result::Result<(), kulyrax_core::adapter::AdapterError>
+pub fn kulyrax_adapter_mysql::MySqlAdapter::handle(&self, &kulyrax_core::event::Event) -> kulyrax_core::adapter::AdapterResult
+pub fn kulyrax_adapter_mysql::MySqlAdapter::id(&self) -> &str
+pub fn kulyrax_adapter_mysql::MySqlAdapter::kind(&self) -> kulyrax_core::routing::StorageKind
+pub fn kulyrax_adapter_mysql::MySqlAdapter::prepare(&self) -> core::result::Result<(), kulyrax_core::adapter::AdapterError>
+pub fn kulyrax_adapter_mysql::MySqlAdapter::priority(&self) -> u32
+pub fn kulyrax_adapter_mysql::MySqlAdapter::rollback_batch(&self)
+impl core::marker::Forget for kulyrax_adapter_mysql::MySqlAdapter
+impl !core::marker::Freeze for kulyrax_adapter_mysql::MySqlAdapter
+impl core::marker::Move for kulyrax_adapter_mysql::MySqlAdapter
+impl core::marker::Send for kulyrax_adapter_mysql::MySqlAdapter
+impl core::marker::Sync for kulyrax_adapter_mysql::MySqlAdapter
+impl core::marker::Unpin for kulyrax_adapter_mysql::MySqlAdapter
+impl core::marker::UnsafeUnpin for kulyrax_adapter_mysql::MySqlAdapter
+impl !core::panic::unwind_safe::RefUnwindSafe for kulyrax_adapter_mysql::MySqlAdapter
+impl !core::panic::unwind_safe::UnwindSafe for kulyrax_adapter_mysql::MySqlAdapter
+pub struct kulyrax_adapter_mysql::MySqlConfig
+pub kulyrax_adapter_mysql::MySqlConfig::pool_size: core::option::Option<u32>
+pub kulyrax_adapter_mysql::MySqlConfig::url: alloc::string::String
+impl core::clone::Clone for kulyrax_adapter_mysql::MySqlConfig
+pub fn kulyrax_adapter_mysql::MySqlConfig::clone(&self) -> Self
+impl core::fmt::Debug for kulyrax_adapter_mysql::MySqlConfig
+pub fn kulyrax_adapter_mysql::MySqlConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'de> serde_core::de::Deserialize<'de> for kulyrax_adapter_mysql::MySqlConfig
+pub fn kulyrax_adapter_mysql::MySqlConfig::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Forget for kulyrax_adapter_mysql::MySqlConfig
+impl core::marker::Freeze for kulyrax_adapter_mysql::MySqlConfig
+impl core::marker::Move for kulyrax_adapter_mysql::MySqlConfig
+impl core::marker::Send for kulyrax_adapter_mysql::MySqlConfig
+impl core::marker::Sync for kulyrax_adapter_mysql::MySqlConfig
+impl core::marker::Unpin for kulyrax_adapter_mysql::MySqlConfig
+impl core::marker::UnsafeUnpin for kulyrax_adapter_mysql::MySqlConfig
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_adapter_mysql::MySqlConfig
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_adapter_mysql::MySqlConfig
+pub struct kulyrax_adapter_mysql::MySqlTxn<'a>
+impl core::ops::drop::Drop for kulyrax_adapter_mysql::MySqlTxn<'_>
+pub fn kulyrax_adapter_mysql::MySqlTxn<'_>::drop(&mut self)
+impl kulyrax_core::adapter::sql::exec::SqlTxn for kulyrax_adapter_mysql::MySqlTxn<'_>
+pub fn kulyrax_adapter_mysql::MySqlTxn<'_>::bump_guard_lane(&mut self, &str, &str, &str, u64, &str) -> core::result::Result<(), kulyrax_core::adapter::sql::adapter::SqlError>
+pub fn kulyrax_adapter_mysql::MySqlTxn<'_>::cascade_facets(&mut self, &str, &str, bool, bool, u64, &str) -> core::result::Result<(), kulyrax_core::adapter::sql::adapter::SqlError>
+pub fn kulyrax_adapter_mysql::MySqlTxn<'_>::commit(self) -> core::result::Result<(), kulyrax_core::adapter::sql::adapter::SqlError>
+pub fn kulyrax_adapter_mysql::MySqlTxn<'_>::delete_row(&mut self, &str, &[alloc::string::String], &[serde_json::value::Value]) -> core::result::Result<(), kulyrax_core::adapter::sql::adapter::SqlError>
+pub fn kulyrax_adapter_mysql::MySqlTxn<'_>::ensure_guard_table(&mut self) -> core::result::Result<(), kulyrax_core::adapter::sql::adapter::SqlError>
+pub fn kulyrax_adapter_mysql::MySqlTxn<'_>::execute_write(&mut self, &kulyrax_core::adapter::sql::exec::SqlWrite) -> core::result::Result<(), kulyrax_core::adapter::sql::adapter::SqlError>
+pub fn kulyrax_adapter_mysql::MySqlTxn<'_>::has_guard_rows(&mut self, &str) -> core::result::Result<bool, kulyrax_core::adapter::sql::adapter::SqlError>
+pub fn kulyrax_adapter_mysql::MySqlTxn<'_>::read_guard_lane(&mut self, &str, &str, &str, bool) -> core::result::Result<core::option::Option<kulyrax_core::adapter::GuardState>, kulyrax_core::adapter::sql::adapter::SqlError>
+pub fn kulyrax_adapter_mysql::MySqlTxn<'_>::read_guard_lanes(&mut self, &str, &[(alloc::string::String, alloc::string::String)], bool) -> core::result::Result<alloc::vec::Vec<core::option::Option<kulyrax_core::adapter::GuardState>>, kulyrax_core::adapter::sql::adapter::SqlError>
+pub fn kulyrax_adapter_mysql::MySqlTxn<'_>::upsert_guard_row(&mut self, &kulyrax_core::adapter::sql::exec::GuardRow) -> core::result::Result<(), kulyrax_core::adapter::sql::adapter::SqlError>
+impl<'a> core::marker::Forget for kulyrax_adapter_mysql::MySqlTxn<'a>
+impl<'a> core::marker::Freeze for kulyrax_adapter_mysql::MySqlTxn<'a>
+impl<'a> core::marker::Move for kulyrax_adapter_mysql::MySqlTxn<'a>
+impl<'a> core::marker::Send for kulyrax_adapter_mysql::MySqlTxn<'a>
+impl<'a> core::marker::Sync for kulyrax_adapter_mysql::MySqlTxn<'a>
+impl<'a> core::marker::Unpin for kulyrax_adapter_mysql::MySqlTxn<'a>
+impl<'a> core::marker::UnsafeUnpin for kulyrax_adapter_mysql::MySqlTxn<'a>
+impl<'a> !core::panic::unwind_safe::RefUnwindSafe for kulyrax_adapter_mysql::MySqlTxn<'a>
+impl<'a> !core::panic::unwind_safe::UnwindSafe for kulyrax_adapter_mysql::MySqlTxn<'a>
+pub fn kulyrax_adapter_mysql::factory(&kulyrax_core::runtime::config::CustomAdapterConfig, &kulyrax_core::runtime::registry::AdapterBuildContext) -> core::result::Result<alloc::boxed::Box<dyn kulyrax_core::adapter::StorageAdapter>, kulyrax_core::runtime::config::ConfigError>

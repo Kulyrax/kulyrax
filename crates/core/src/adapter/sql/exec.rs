@@ -236,6 +236,130 @@ pub trait SqlTxn: Sized {
     ) -> Result<(), SqlError>;
 
     fn commit(self) -> Result<(), SqlError>;
+
+    /// For a rebuild ([`crate::rebuild`]): the objects that would make
+    /// swapping `table` out fail or lose something (a dependent view, a
+    /// foreign key, an owned sequence…), each named with its kind, for
+    /// example `view users_active`. Checked before anything is created. The
+    /// default finds none.
+    fn rebuild_blockers(&mut self, _table: &str) -> Result<Vec<String>, SqlError> {
+        Ok(Vec::new())
+    }
+
+    /// For a rebuild ([`crate::rebuild`]): drop `t.shadow` if a failed
+    /// rebuild left it, create it empty with `t.table`'s columns, keys and
+    /// indexes, and delete any guard lanes recorded under its name. The
+    /// default refuses: the backend does not support rebuilds.
+    fn create_shadow_table(&mut self, t: &ShadowTable) -> Result<(), SqlError> {
+        Err(rebuild_unsupported(&t.table))
+    }
+
+    /// The [`GuardFingerprint`] of `tables`' guard lanes, locking them
+    /// (`FOR UPDATE`) when `lock` is set.
+    fn guard_fingerprint(
+        &mut self,
+        tables: &[String],
+        _lock: bool,
+    ) -> Result<GuardFingerprint, SqlError> {
+        Err(rebuild_unsupported(&tables.join(", ")))
+    }
+
+    /// Lock `tables` against every other writer until this transaction ends.
+    /// The default does nothing, for a backend whose writers already
+    /// serialize on the whole database (SQLite).
+    fn lock_tables(&mut self, _tables: &[String]) -> Result<(), SqlError> {
+        Ok(())
+    }
+
+    /// Replace `t.table` with `t.shadow`: its guard lanes by the shadow's
+    /// (renamed to `t.table`), then the table itself (dropped, and the
+    /// shadow renamed in its place).
+    fn swap_in_shadow(&mut self, t: &ShadowTable) -> Result<(), SqlError> {
+        Err(rebuild_unsupported(&t.table))
+    }
+}
+
+fn rebuild_unsupported(tables: &str) -> SqlError {
+    SqlError::ExecutionFailed(format!(
+        "this SQL backend cannot rebuild {tables} into a shadow table"
+    ))
+}
+
+/// A table a rebuild replaces, and the shadow table it builds the new
+/// content in (see [`crate::rebuild`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShadowTable {
+    pub table: String,
+    pub shadow: String,
+}
+
+/// What a rebuild checks is unchanged before it swaps the shadow tables in:
+/// how many guard lanes the rebuilt tables have, and the sum of their
+/// sequences. Every write a projection makes adds a lane or raises a lane's
+/// sequence, so any writer that projected into these tables during the
+/// rebuild changes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuardFingerprint {
+    pub lanes: i64,
+    pub sequence_sum: i128,
+}
+
+/// Start a rebuild of `tables` in `txn`: refuse if any table has a
+/// [`SqlTxn::rebuild_blockers`] (before anything is created), else create
+/// every shadow table, take the target tables' [`GuardFingerprint`], and
+/// commit.
+pub fn start_shadow_rebuild<T: SqlTxn>(
+    mut txn: T,
+    tables: &[ShadowTable],
+) -> Result<GuardFingerprint, SqlError> {
+    let mut blockers = Vec::new();
+    for t in tables {
+        for object in txn.rebuild_blockers(&t.table)? {
+            blockers.push(format!("{}: {object}", t.table));
+        }
+    }
+    if !blockers.is_empty() {
+        return Err(SqlError::ExecutionFailed(format!(
+            "cannot rebuild into shadow tables, the swap would fail or drop these: {}. Remove \
+             them, or rebuild another way",
+            blockers.join("; ")
+        )));
+    }
+    for t in tables {
+        txn.create_shadow_table(t)?;
+    }
+    let names: Vec<String> = tables.iter().map(|t| t.table.clone()).collect();
+    let before = txn.guard_fingerprint(&names, false)?;
+    txn.commit()?;
+    Ok(before)
+}
+
+/// Finish a rebuild in one transaction: lock the target tables, check that
+/// their guard lanes are as `before` found them, swap every shadow table in,
+/// and commit. A changed fingerprint means another writer projected into the
+/// tables during the rebuild; the swap is refused and nothing changes.
+pub fn swap_shadow_rebuild<T: SqlTxn>(
+    mut txn: T,
+    tables: &[ShadowTable],
+    before: GuardFingerprint,
+) -> Result<(), SqlError> {
+    let names: Vec<String> = tables.iter().map(|t| t.table.clone()).collect();
+    txn.lock_tables(&names)?;
+    let now = txn.guard_fingerprint(&names, true)?;
+    if now != before {
+        return Err(SqlError::ExecutionFailed(format!(
+            "another writer projected into {} during the rebuild ({} guard lanes before, {} \
+             now); the rebuilt tables were not swapped in. Stop every other writer to these \
+             tables and run the rebuild again",
+            names.join(", "),
+            before.lanes,
+            now.lanes
+        )));
+    }
+    for t in tables {
+        txn.swap_in_shadow(t)?;
+    }
+    txn.commit()
 }
 
 /// What [`project`] resolved to — the adapter maps this onto an `AdapterResult`

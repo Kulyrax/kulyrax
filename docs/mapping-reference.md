@@ -167,8 +167,8 @@ value:
 
 ## Graph (`mappings/graph/`)
 
-A graph mapping is a `kind`-tagged union: exactly one of `node` or `edge`
-per mapping file. The identical mapping file routes to either graph backend
+A graph mapping is a `kind`-tagged union: one of `node`, `edge` or
+`subgraph` per mapping file. The identical mapping file routes to either graph backend
 — `graph` (file-backed) or `neo4j` — chosen by which adapter
 `routing.yaml` points the event type at. On Neo4j, `label`/`edge_type`
 become the node label / relationship type directly, `properties` become the
@@ -214,6 +214,49 @@ version: 1
 properties:
   since: payload.followed_at
 ```
+
+**`kind: subgraph`** — several records from one event, such as a node and its
+edges. `records` lists `kind: node` and `kind: edge` mappings with every field above
+except `event` and `version`, which they take from the subgraph. Each record keeps
+its own guard lane and is decided on its own at the event's sequence, so a record
+that is already up to date is skipped while the others are written. They are
+applied in order, in one transaction: if one fails, none of the event's records is
+written. The event's outcome is `created` if any record was created, else
+`updated`, else `deleted`, else the first record's skip.
+
+| field | required | meaning |
+|---|---|---|
+| `records` | yes | node and edge mappings, at least one, applied in this order. |
+
+```yaml
+kind: subgraph
+event: OrderPlaced
+version: 1
+records:
+  - kind: node
+    label: Order
+    key: payload.order_id
+    on_existing: replace
+    properties:
+      total: payload.total
+  - kind: node
+    label: Customer
+    key: payload.customer_id
+    properties:
+      name: payload.customer_name
+  - kind: edge
+    edge_type: PLACED
+    from: payload.customer_id
+    to: payload.order_id
+```
+
+The adapter needs the capabilities of every record (here `upsert`, for the
+`on_existing: replace` order). `dry-run` lists each record's write.
+
+Two records that resolve to the same lane (the same node twice, say, because two
+`key` paths hold the same id) are decided in order at the one event sequence: the
+first is written, and the second is skipped as stale. Validation can't detect this,
+since keys are resolved from the payload.
 
 ## Next
 

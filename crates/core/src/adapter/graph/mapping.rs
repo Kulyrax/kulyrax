@@ -6,16 +6,74 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 /// A graph mapping (Phase 16) — the fourth storage kind. A tagged enum on
-/// `kind`: a mapping emits **exactly one** record, a node or an edge, keyed
-/// and sequence-gated identically to every prior adapter. `operation` /
-/// `on_existing` / `permanent` / `version` / `facet` keep their Phase 11–15
-/// meanings; the only graph-specific vocabulary is `kind`, `label` /
-/// `edge_type`, and `from` / `to` / `discriminator`.
+/// `kind`: a node or an edge mapping emits **exactly one** record, keyed and
+/// sequence-gated identically to every prior adapter; a subgraph mapping
+/// emits several, applied together. `operation` / `on_existing` /
+/// `permanent` / `version` / `facet` keep their Phase 11–15 meanings; the
+/// only graph-specific vocabulary is `kind`, `label` / `edge_type`, `from` /
+/// `to` / `discriminator`, and `records`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum GraphMapping {
     Node(GraphNodeMapping),
     Edge(GraphEdgeMapping),
+    Subgraph(GraphSubgraphMapping),
+}
+
+/// `kind: subgraph` — several records from one event: a node and its edges,
+/// say. Each entry of `records` is a `kind: node` or `kind: edge` mapping
+/// without `event` and `version`, which it takes from the subgraph. Every
+/// record keeps its own guard lane and is decided on its own, at the event's
+/// sequence; the adapter applies all of them in one transaction, so a record
+/// that fails leaves nothing of the event behind.
+#[derive(Debug, Clone)]
+pub struct GraphSubgraphMapping {
+    pub event: String,
+    pub version: u32,
+    /// Node and edge mappings, applied in this order.
+    pub records: Vec<GraphMapping>,
+}
+
+impl<'de> Deserialize<'de> for GraphSubgraphMapping {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+
+        #[derive(Deserialize)]
+        struct Raw {
+            event: String,
+            version: u32,
+            records: Vec<Value>,
+        }
+        let raw = Raw::deserialize(d)?;
+        let mut records = Vec::with_capacity(raw.records.len());
+        for (i, mut record) in raw.records.into_iter().enumerate() {
+            let fields = record
+                .as_object_mut()
+                .ok_or_else(|| D::Error::custom(format!("records[{i}] must be a mapping")))?;
+            for field in ["event", "version"] {
+                if fields.contains_key(field) {
+                    return Err(D::Error::custom(format!(
+                        "records[{i}]: `{field}` belongs to the subgraph, not to its records"
+                    )));
+                }
+            }
+            fields.insert("event".into(), Value::from(raw.event.clone()));
+            fields.insert("version".into(), Value::from(raw.version));
+            let mapping: GraphMapping = serde_json::from_value(record)
+                .map_err(|e| D::Error::custom(format!("records[{i}]: {e}")))?;
+            if matches!(mapping, GraphMapping::Subgraph(_)) {
+                return Err(D::Error::custom(format!(
+                    "records[{i}]: a subgraph's records are nodes and edges, not subgraphs"
+                )));
+            }
+            records.push(mapping);
+        }
+        Ok(Self {
+            event: raw.event,
+            version: raw.version,
+            records,
+        })
+    }
 }
 
 /// `kind: node` — a node *is* an entity, so facets (Phase 15) apply verbatim.
@@ -87,11 +145,16 @@ pub enum ResolvedRecord {
     },
 }
 
+/// What the single-record accessors below answer for a subgraph, which has
+/// no single operation, mode or template: see [`GraphMapping::records`].
+static NO_PROPERTIES: Value = Value::Null;
+
 impl GraphMapping {
     pub fn event(&self) -> &str {
         match self {
             GraphMapping::Node(m) => &m.event,
             GraphMapping::Edge(m) => &m.event,
+            GraphMapping::Subgraph(m) => &m.event,
         }
     }
 
@@ -99,6 +162,17 @@ impl GraphMapping {
         match self {
             GraphMapping::Node(m) => m.version,
             GraphMapping::Edge(m) => m.version,
+            GraphMapping::Subgraph(m) => m.version,
+        }
+    }
+
+    /// The node and edge mappings this mapping applies for one event: itself
+    /// for a node or an edge, its `records` for a subgraph. The accessors
+    /// below describe one record; ask each of these.
+    pub fn records(&self) -> Vec<&GraphMapping> {
+        match self {
+            GraphMapping::Subgraph(m) => m.records.iter().collect(),
+            single => vec![single],
         }
     }
 
@@ -106,6 +180,7 @@ impl GraphMapping {
         match self {
             GraphMapping::Node(m) => m.operation,
             GraphMapping::Edge(m) => m.operation,
+            GraphMapping::Subgraph(_) => Operation::default(),
         }
     }
 
@@ -113,6 +188,7 @@ impl GraphMapping {
         match self {
             GraphMapping::Node(m) => m.on_existing,
             GraphMapping::Edge(m) => m.on_existing,
+            GraphMapping::Subgraph(_) => OnExisting::default(),
         }
     }
 
@@ -120,6 +196,7 @@ impl GraphMapping {
         match self {
             GraphMapping::Node(m) => m.permanent,
             GraphMapping::Edge(m) => m.permanent,
+            GraphMapping::Subgraph(_) => false,
         }
     }
 
@@ -127,6 +204,7 @@ impl GraphMapping {
         match self {
             GraphMapping::Node(m) => &m.requires_capabilities,
             GraphMapping::Edge(m) => &m.requires_capabilities,
+            GraphMapping::Subgraph(_) => &[],
         }
     }
 
@@ -135,7 +213,7 @@ impl GraphMapping {
     pub fn facet_key(&self) -> &str {
         match self {
             GraphMapping::Node(m) => m.facet.as_deref().unwrap_or(""),
-            GraphMapping::Edge(_) => "",
+            GraphMapping::Edge(_) | GraphMapping::Subgraph(_) => "",
         }
     }
 
@@ -144,10 +222,12 @@ impl GraphMapping {
         match self {
             GraphMapping::Node(m) => &m.properties,
             GraphMapping::Edge(m) => &m.properties,
+            GraphMapping::Subgraph(_) => &NO_PROPERTIES,
         }
     }
 
-    /// Resolve the single record this mapping emits for `event`.
+    /// Resolve the single record a node or edge mapping emits for `event`.
+    /// A subgraph has several: resolve each of its [`Self::records`].
     pub fn resolve(&self, event: &Event) -> Result<ResolvedRecord, GraphError> {
         let payload: Value = serde_json::from_str(&event.payload)
             .map_err(|e| GraphError::BuildFailed(format!("invalid payload JSON: {}", e)))?;
@@ -186,6 +266,9 @@ impl GraphMapping {
                     properties,
                 })
             }
+            GraphMapping::Subgraph(_) => Err(GraphError::BuildFailed(
+                "a subgraph mapping resolves one record per entry of `records`".into(),
+            )),
         }
     }
 }

@@ -54,9 +54,15 @@ macro_rules! require_mongo {
 static COLL_SEQ: AtomicU32 = AtomicU32::new(0);
 
 /// A unique collection per test invocation, so the shared database stays
-/// isolated (the Mongo analog of `pg_backend.rs`'s `fresh_table`).
+/// isolated (the Mongo analog of `pg_backend.rs`'s `fresh_table`). The
+/// process id keeps a rerun against the same server off an earlier run's
+/// guards.
 fn fresh_collection() -> String {
-    format!("t{}", COLL_SEQ.fetch_add(1, Ordering::Relaxed))
+    format!(
+        "t{}-{}",
+        std::process::id(),
+        COLL_SEQ.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 fn mongo_client(url: &str) -> Result<mongodb::sync::Client, mongodb::error::Error> {
@@ -472,5 +478,262 @@ fn mongo_prepare_twice_is_idempotent() -> R {
         .filter(|ix| ix.keys == doc! { "target": 1, "entity_key": 1 })
         .count();
     assert_eq!(guard_indexes, 1);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// One transaction per batch
+// ---------------------------------------------------------------------------
+
+/// Upsert, delete and facet mappings on `coll`, under event types `Up` /
+/// `Del` / `Mail`.
+fn batch_mappings(coll: &str) -> HashMap<String, DocumentMapping> {
+    HashMap::from([
+        (
+            "Up".to_string(),
+            doc_mapping(&format!(
+                "event: Up\ncollection: {coll}\nversion: 1\nid: payload.id\non_existing: replace\ndocument:\n  name: payload.name\n"
+            )),
+        ),
+        (
+            "Del".to_string(),
+            doc_mapping(&format!(
+                "event: Del\ncollection: {coll}\nversion: 1\nid: payload.id\noperation: delete\ndocument: {{}}\n"
+            )),
+        ),
+        (
+            "Mail".to_string(),
+            doc_mapping(&format!(
+                "event: Mail\ncollection: {coll}\nversion: 1\nid: payload.id\nfacet: contact\ndocument:\n  email: payload.email\n"
+            )),
+        ),
+    ])
+}
+
+fn bev(kind: &str, seq: u64, payload: serde_json::Value) -> Event {
+    Event {
+        event_id: format!("evt-{kind}-{}-{seq}", payload["id"].as_str().unwrap_or("")),
+        ..ev(kind, seq, payload)
+    }
+}
+
+/// Written before the batch: `pre` and `u3` exist when it starts.
+fn seed_stream() -> Vec<Event> {
+    use serde_json::json;
+    vec![
+        bev("Up", 1, json!({ "id": "pre", "name": "stored" })),
+        bev("Up", 1, json!({ "id": "u3", "name": "old" })),
+    ]
+}
+
+/// The ways an entity's writes collapse in a batch: a replace with facets on
+/// top, a delete, a facet on a document stored before the batch, a facet
+/// after a delete (skipped), and one key written many times.
+fn batch_stream() -> Vec<Event> {
+    use serde_json::json;
+    let mut events = vec![
+        bev("Up", 1, json!({ "id": "u1", "name": "a" })),
+        bev("Mail", 2, json!({ "id": "u1", "email": "a@x" })),
+        bev("Up", 3, json!({ "id": "u1", "name": "b" })),
+        bev("Del", 4, json!({ "id": "u1" })),
+        bev("Mail", 5, json!({ "id": "u1", "email": "gone@x" })),
+        bev("Up", 6, json!({ "id": "u1", "name": "c" })),
+        bev("Mail", 7, json!({ "id": "u1", "email": "c@x" })),
+        bev("Up", 3, json!({ "id": "u1", "name": "b" })),
+        bev("Del", 1, json!({ "id": "u2" })),
+        bev("Up", 1, json!({ "id": "u2", "name": "stale" })),
+        bev("Up", 2, json!({ "id": "u2", "name": "g" })),
+        bev("Mail", 2, json!({ "id": "pre", "email": "pre@x" })),
+        bev("Del", 2, json!({ "id": "u3" })),
+        bev("Mail", 3, json!({ "id": "u3", "email": "back@x" })),
+    ];
+    for seq in 1..=20 {
+        events.push(bev(
+            "Up",
+            seq,
+            json!({ "id": "hot", "name": format!("h{seq}") }),
+        ));
+    }
+    events
+}
+
+type MongoState = Vec<(
+    String,
+    Option<mongodb::bson::Document>,
+    Option<mongodb::bson::Document>,
+)>;
+
+/// Target document and guard (without its `_id` and `target`, which differ
+/// by collection) of every entity the batch stream touches.
+fn coll_state(url: &str, db: &str, coll: &str) -> Result<MongoState, Box<dyn std::error::Error>> {
+    let db = mongo_client(url)?.database(db);
+    let mut state = Vec::new();
+    for id in ["hot", "pre", "u1", "u2", "u3"] {
+        let target = db
+            .collection::<mongodb::bson::Document>(coll)
+            .find_one(doc! { "_id": id })
+            .run()?;
+        let guard = db
+            .collection::<mongodb::bson::Document>("conduit_projection_state")
+            .find_one(doc! { "target": coll, "entity_key": id })
+            .run()?
+            .map(|mut g| {
+                g.remove("_id");
+                g.remove("target");
+                g
+            });
+        state.push((id.to_string(), target, guard));
+    }
+    Ok(state)
+}
+
+#[test]
+fn mongo_batch_matches_one_event_at_a_time() -> R {
+    require_mongo!(url);
+    let db = mongo_db();
+    let (cb, cs) = (fresh_collection(), fresh_collection());
+    let events = batch_stream();
+    let refs: Vec<&Event> = events.iter().collect();
+
+    let batched = mongo_adapter(&url, &db, batch_mappings(&cb));
+    for e in seed_stream() {
+        assert!(batched.handle(&e).is_success());
+    }
+    let before = coll_state(&url, &db, &cb)?;
+    stages::take();
+    batched.begin_batch(&refs).map_err(|e| e.to_string())?;
+    let batch_outcomes: Vec<String> = events
+        .iter()
+        .map(|e| format!("{:?}", batched.handle(e).outcome))
+        .collect();
+    assert_eq!(
+        coll_state(&url, &db, &cb)?,
+        before,
+        "nothing is visible before the commit"
+    );
+    batched.commit_batch().map_err(|e| e.to_string())?;
+    let t = stages::take();
+    assert_eq!(t.commit.calls, 1, "one transaction for the batch");
+
+    let single = mongo_adapter(&url, &db, batch_mappings(&cs));
+    for e in seed_stream() {
+        assert!(single.handle(&e).is_success());
+    }
+    let single_outcomes: Vec<String> = events
+        .iter()
+        .map(|e| format!("{:?}", single.handle(e).outcome))
+        .collect();
+
+    assert_eq!(batch_outcomes, single_outcomes);
+    assert!(
+        !batch_outcomes.iter().any(|o| o.starts_with("Failed")),
+        "{batch_outcomes:?}"
+    );
+    let state = coll_state(&url, &db, &cb)?;
+    assert_eq!(state, coll_state(&url, &db, &cs)?);
+    let doc_of = |id: &str| {
+        state
+            .iter()
+            .find(|(k, _, _)| k == id)
+            .and_then(|(_, d, _)| d.clone())
+    };
+    assert_eq!(
+        doc_of("pre"),
+        Some(doc! { "_id": "pre", "name": "stored", "email": "pre@x" }),
+        "a facet keeps the stored fields"
+    );
+    assert_eq!(
+        doc_of("u3"),
+        None,
+        "a facet does not re-create a deleted entity"
+    );
+    assert_eq!(doc_of("hot"), Some(doc! { "_id": "hot", "name": "h20" }));
+    Ok(())
+}
+
+#[test]
+fn mongo_batch_rollback_leaves_nothing() -> R {
+    require_mongo!(url);
+    let db = mongo_db();
+    let coll = fresh_collection();
+    let a = mongo_adapter(&url, &db, batch_mappings(&coll));
+    let events = batch_stream();
+    let refs: Vec<&Event> = events.iter().collect();
+
+    a.begin_batch(&refs).map_err(|e| e.to_string())?;
+    for e in &events {
+        assert!(a.handle(e).is_success());
+    }
+    a.rollback_batch();
+    assert!(
+        coll_state(&url, &db, &coll)?
+            .iter()
+            .all(|(_, d, g)| d.is_none() && g.is_none()),
+        "nothing written"
+    );
+
+    // Outside a batch, each event commits on its own again.
+    let r = a.handle(&events[0]);
+    assert!(
+        matches!(r.outcome, AdapterOutcome::Created),
+        "{:?}",
+        r.outcome
+    );
+    Ok(())
+}
+
+/// Another writer changes a guard the batch read: the batch's commit fails
+/// with a write conflict, nothing of it lands, and the per-event fallback
+/// applies it on top.
+#[test]
+fn mongo_batch_conflict_fails_the_commit() -> R {
+    require_mongo!(url);
+    use serde_json::json;
+    let db = mongo_db();
+    let coll = fresh_collection();
+    let a = mongo_adapter(&url, &db, batch_mappings(&coll));
+    let other = mongo_adapter(&url, &db, batch_mappings(&coll));
+    assert!(
+        other
+            .handle(&ev("Up", 1, json!({ "id": "u1", "name": "seed" })))
+            .is_success()
+    );
+
+    let events = vec![
+        bev("Up", 1, json!({ "id": "new", "name": "n" })),
+        bev("Up", 5, json!({ "id": "u1", "name": "batch" })),
+    ];
+    let refs: Vec<&Event> = events.iter().collect();
+    a.begin_batch(&refs).map_err(|e| e.to_string())?;
+    for e in &events {
+        assert!(a.handle(e).is_success());
+    }
+    assert!(
+        other
+            .handle(&ev("Up", 3, json!({ "id": "u1", "name": "other" })))
+            .is_success()
+    );
+    assert!(a.commit_batch().is_err(), "the commit must not overwrite");
+    let target = mongo_client(&url)?
+        .database(&db)
+        .collection::<mongodb::bson::Document>(&coll);
+    assert_eq!(
+        target.find_one(doc! { "_id": "new" }).run()?,
+        None,
+        "nothing of the batch lands"
+    );
+
+    let outcomes: Vec<String> = events
+        .iter()
+        .map(|e| format!("{:?}", a.handle(e).outcome))
+        .collect();
+    assert_eq!(outcomes, vec!["Created", "Updated"]);
+    assert_eq!(
+        target
+            .find_one(doc! { "_id": "u1" })
+            .run()?
+            .and_then(|d| d.get_str("name").ok().map(str::to_string)),
+        Some("batch".to_string())
+    );
     Ok(())
 }

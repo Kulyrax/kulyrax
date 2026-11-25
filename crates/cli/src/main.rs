@@ -193,6 +193,38 @@ enum Commands {
         #[arg(long)]
         max_batch: Option<usize>,
     },
+
+    /// Rebuild a SQL adapter's tables from the full event history: project it
+    /// into shadow tables, then swap them in with one transaction. Readers
+    /// keep the old tables until the swap. Stop every other writer to these
+    /// tables first; the swap is refused if one wrote meanwhile. SQLite and
+    /// Postgres.
+    Rebuild {
+        #[arg(long)]
+        config: PathBuf,
+
+        #[arg(long)]
+        mappings: PathBuf,
+
+        /// The full history: an event file or a directory of event JSON files
+        #[arg(long)]
+        events: PathBuf,
+
+        /// The id of the SQL adapter whose tables are rebuilt
+        #[arg(long)]
+        adapter: String,
+
+        #[arg(long, value_enum, default_value_t)]
+        output: OutputFormat,
+
+        /// Print progress to stderr every N events
+        #[arg(long)]
+        progress_every: Option<usize>,
+
+        /// Events per batch. Default 5,000.
+        #[arg(long)]
+        max_batch: Option<usize>,
+    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -277,6 +309,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             max_per_event,
             progress_every,
             validate_routing,
+            max_batch,
+        )?,
+
+        Commands::Rebuild {
+            config,
+            mappings,
+            events,
+            adapter,
+            output,
+            progress_every,
+            max_batch,
+        } => rebuild_cmd(
+            config,
+            mappings,
+            events,
+            adapter,
+            output,
+            progress_every,
             max_batch,
         )?,
     };
@@ -407,22 +457,40 @@ fn ingest_cmd(
 // --------------------------------------------------
 
 fn sources_cmd(config: PathBuf, output: OutputFormat) -> Result<i32, Box<dyn std::error::Error>> {
-    let sources = pipeline::list_sources(&config)?;
+    let sources = pipeline::list_sources(&config, kulyrax_backends::register_default_backends)?;
     match output {
         OutputFormat::Text => {
             println!("--- Sources ---");
             if sources.is_empty() {
                 println!("(none configured)");
             }
-            for (id, pos) in &sources {
-                println!("{}  committed: {}", id, pos.as_deref().unwrap_or("(never)"));
+            for s in &sources {
+                println!(
+                    "{}  committed: {}",
+                    s.id,
+                    s.committed.as_deref().unwrap_or("(never)")
+                );
+                for (name, value) in &s.details {
+                    println!("  {name}: {value}");
+                }
             }
             println!("---------------");
         }
         OutputFormat::Json => {
             let json: Vec<_> = sources
                 .iter()
-                .map(|(id, pos)| serde_json::json!({ "id": id, "committed_position": pos }))
+                .map(|s| {
+                    let details: serde_json::Map<String, serde_json::Value> = s
+                        .details
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone().into()))
+                        .collect();
+                    serde_json::json!({
+                        "id": s.id,
+                        "committed_position": s.committed,
+                        "details": details,
+                    })
+                })
                 .collect();
             println!("{}", serde_json::to_string_pretty(&json)?);
         }
@@ -482,7 +550,7 @@ fn render_source_run_report(
 
 fn render_stage_timings(t: &StageTimings) {
     println!(
-        "Time per stage (dispatch contains adapter and batch, which contain read/write/commit; schema runs once, before ingesting):"
+        "Time per stage (dispatch contains adapter and batch, which contain read/write/commit/log/apply; schema runs once, before ingesting; sync runs in the background):"
     );
     for (name, s) in [
         ("source read", t.source_read),
@@ -494,6 +562,9 @@ fn render_stage_timings(t: &StageTimings) {
         ("write", t.write),
         ("commit", t.commit),
         ("checkpoint", t.checkpoint),
+        ("log", t.log),
+        ("apply", t.apply),
+        ("sync", t.sync),
     ] {
         if s.calls == 0 {
             continue;
@@ -506,10 +577,14 @@ fn render_stage_timings(t: &StageTimings) {
         );
     }
     if t.adapter.calls > 0 {
-        let inner = t.read.total_us + t.write.total_us + t.commit.total_us;
+        let inner = t.read.total_us
+            + t.write.total_us
+            + t.commit.total_us
+            + t.log.total_us
+            + t.apply.total_us;
         let other = (t.adapter.total_us + t.batch.total_us).saturating_sub(inner);
         println!(
-            "  adapter and batch time outside read/write/commit (mapping, connection, begin): {:.1} ms, {:.1} µs/event",
+            "  adapter and batch time outside read/write/commit/log/apply (mapping, connection, begin): {:.1} ms, {:.1} µs/event",
             other as f64 / 1000.0,
             other as f64 / t.adapter.calls as f64
         );
@@ -558,6 +633,52 @@ fn replay_cmd(
 
     let exit = if report.events_failed > 0 { 1 } else { 0 };
     Ok(exit)
+}
+
+// --------------------------------------------------
+// Rebuild
+// --------------------------------------------------
+
+fn rebuild_cmd(
+    config: PathBuf,
+    mappings: PathBuf,
+    events: PathBuf,
+    adapter: String,
+    output: OutputFormat,
+    progress_every: Option<usize>,
+    max_batch: Option<usize>,
+) -> Result<i32, Box<dyn std::error::Error>> {
+    let opts = ReplayRunOptions {
+        // A rebuild replays the whole history: list failures only.
+        max_per_event_summaries: Some(0),
+        progress_interval: progress_every,
+        validate_routing: false,
+        max_batch,
+    };
+    let report = pipeline::rebuild(
+        &config,
+        &mappings,
+        &events,
+        &adapter,
+        &opts,
+        kulyrax_backends::register_default_backends,
+    )?;
+    match output {
+        OutputFormat::Text => println!(
+            "Rebuilt {} from {} events in {} ms and swapped them in.",
+            report.tables.join(", "),
+            report.replay.events_processed,
+            report.replay.duration_ms.unwrap_or(0)
+        ),
+        OutputFormat::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "tables": report.tables,
+                "replay": report.replay,
+            }))?
+        ),
+    }
+    Ok(0)
 }
 
 fn render_replay_report(
@@ -781,22 +902,12 @@ fn print_dry_run_report(report: &DryRunReport) {
         println!();
         println!("{}. {} ({kind})", i + 1, adapter.adapter_id);
         match &adapter.outcome {
-            DryRunOutcome::Planned(w) => {
-                let facet = if w.facet.is_empty() {
-                    String::new()
-                } else {
-                    format!(", facet {}", w.facet)
-                };
-                println!(
-                    "   would {:?} {} key {}{facet} (on_existing: {:?}, v{} -> v{})",
-                    w.operation,
-                    w.target,
-                    w.entity_key,
-                    w.on_existing,
-                    w.source_version,
-                    w.projected_version
-                );
-                println!("   values: {}", w.values);
+            DryRunOutcome::Planned(w) => render_planned_write(w),
+            DryRunOutcome::PlannedSubgraph { writes } => {
+                println!("   {} writes, in one transaction:", writes.len());
+                for w in writes {
+                    render_planned_write(w);
+                }
             }
             DryRunOutcome::Failed { error } => println!("   would fail: {error}"),
             DryRunOutcome::NotPreviewable { reason } => println!("   not previewable: {reason}"),
@@ -807,6 +918,19 @@ fn print_dry_run_report(report: &DryRunReport) {
         "Guard state was not read, so a live run may still skip these writes as \
          already projected or stale."
     );
+}
+
+fn render_planned_write(w: &kulyrax_core::runtime::PlannedWrite) {
+    let facet = if w.facet.is_empty() {
+        String::new()
+    } else {
+        format!(", facet {}", w.facet)
+    };
+    println!(
+        "   would {:?} {} key {}{facet} (on_existing: {:?}, v{} -> v{})",
+        w.operation, w.target, w.entity_key, w.on_existing, w.source_version, w.projected_version
+    );
+    println!("   values: {}", w.values);
 }
 
 // --------------------------------------------------

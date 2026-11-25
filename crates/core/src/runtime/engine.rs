@@ -22,11 +22,14 @@ use crate::execution::ExecutionReport;
 use crate::pipeline::{PipelineError, load_project};
 use crate::replay::{ReplayContext, ReplayLoadError, ReplayReport, ReplayRunOptions};
 use crate::routing::AdapterId;
+use crate::runtime::config::CustomSourceConfig;
 use crate::runtime::config::{ConfigError, CustomAdapterConfig, KulyraxConfig};
 use crate::runtime::dependency_graph::{AdapterExecutionMeta, adapter_metadata_map};
 use crate::runtime::dry_run::{DryRunReport, dry_run_event};
 use crate::runtime::factory::build_adapters_reporting_failures;
-use crate::runtime::registry::{AdapterBuildContext, AdapterRegistry, MappingSet};
+use crate::runtime::registry::{
+    AdapterBuildContext, AdapterRegistry, MappingSet, SourceBuildContext, SourceRegistry,
+};
 use crate::source::runner::{
     Reloaded, Reloader, SourceRunOptions, SourceRunReport, run_sources_with_adapters,
     run_sources_with_reload,
@@ -43,6 +46,7 @@ pub struct KulyraxRuntime {
     routing_rules: HashMap<String, Vec<AdapterId>>,
     adapter_meta: HashMap<AdapterId, AdapterExecutionMeta>,
     registry: AdapterRegistry,
+    sources: SourceRegistry,
     upcasters: Arc<UpcasterRegistry>,
     adapters: Option<Vec<Box<dyn StorageAdapter>>>,
 }
@@ -99,6 +103,7 @@ impl KulyraxRuntime {
             mappings,
             routing_rules,
             registry: AdapterRegistry::new(),
+            sources: SourceRegistry::new(),
             upcasters: Arc::new(UpcasterRegistry::new()),
             adapters: None,
         }
@@ -142,6 +147,28 @@ impl KulyraxRuntime {
         self.registry.register(type_name, factory);
     }
 
+    /// Register a factory for source `type: <type_name>` (the source-side
+    /// twin of [`Self::register_adapter_factory`]). Must happen before
+    /// sources are built.
+    pub fn register_source_factory(
+        &mut self,
+        type_name: &str,
+        factory: impl Fn(
+            &CustomSourceConfig,
+            &SourceBuildContext,
+        ) -> Result<Box<dyn EventSource>, SourceError>
+        + Send
+        + Sync
+        + 'static,
+    ) {
+        self.sources.register(type_name, factory);
+    }
+
+    /// The source factories registered so far.
+    pub fn source_registry(&self) -> &SourceRegistry {
+        &self.sources
+    }
+
     /// Use these upcasters instead of the empty default. Must happen before
     /// adapters are built.
     pub fn with_upcasters(mut self, upcasters: Arc<UpcasterRegistry>) -> Self {
@@ -182,6 +209,11 @@ impl KulyraxRuntime {
         } else {
             Err(PipelineError::AdapterPrepare(failures))
         }
+    }
+
+    /// The adapters built so far; empty before [`Self::build_adapters`].
+    pub(crate) fn built_adapters(&self) -> &[Box<dyn StorageAdapter>] {
+        self.adapters.as_deref().unwrap_or_default()
     }
 
     // Returns `()` rather than a borrow so callers can then use

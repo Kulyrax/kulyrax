@@ -34,13 +34,33 @@ impl GraphRuntimeBuilder {
         Self { mappings }
     }
 
-    /// Build the graph projection for `event`, upcasting its payload to the
-    /// mapping's target version first when the versions differ.
+    /// Build the graph projection for `event` from a node or edge mapping,
+    /// upcasting its payload to the mapping's target version first when the
+    /// versions differ. A subgraph mapping has several; see [`Self::build_all`].
     pub fn build(
         &self,
         event: &Event,
         upcasters: &UpcasterRegistry,
     ) -> Result<GraphProjection, GraphError> {
+        let mut all = self.build_all(event, upcasters)?;
+        if all.len() != 1 {
+            return Err(GraphError::BuildFailed(format!(
+                "the mapping for {} projects {} records; use build_all",
+                event.event_type,
+                all.len()
+            )));
+        }
+        all.pop()
+            .ok_or_else(|| GraphError::MappingNotFound(event.event_type.clone()))
+    }
+
+    /// Build every record `event` projects, in mapping order: one for a node
+    /// or edge mapping, one per entry of `records` for a subgraph.
+    pub fn build_all(
+        &self,
+        event: &Event,
+        upcasters: &UpcasterRegistry,
+    ) -> Result<Vec<GraphProjection>, GraphError> {
         let mapping = self
             .mappings
             .get(&event.event_type)
@@ -49,8 +69,9 @@ impl GraphRuntimeBuilder {
         let source_version = event.version();
         let projected_version = mapping.version();
 
-        let record = if source_version == projected_version {
-            mapping.resolve(event)?
+        let upcasted;
+        let at_version = if source_version == projected_version {
+            event
         } else {
             let payload: serde_json::Value = serde_json::from_str(&event.payload)
                 .map_err(|e| GraphError::BuildFailed(format!("invalid payload JSON: {}", e)))?;
@@ -67,24 +88,30 @@ impl GraphRuntimeBuilder {
                     to_version: projected_version,
                     reason: e.to_string(),
                 })?;
-            let upcasted_event = Event {
+            upcasted = Event {
                 payload: serde_json::to_string(&upcasted_payload).map_err(|e| {
                     GraphError::BuildFailed(format!("failed to serialize upcasted payload: {}", e))
                 })?,
                 version: projected_version,
                 ..event.clone()
             };
-            mapping.resolve(&upcasted_event)?
+            &upcasted
         };
 
-        Ok(GraphProjection {
-            record,
-            source_version,
-            projected_version,
-            on_existing: mapping.on_existing(),
-            operation: mapping.operation(),
-            permanent: mapping.permanent(),
-            facet: mapping.facet_key().to_string(),
-        })
+        mapping
+            .records()
+            .into_iter()
+            .map(|record| {
+                Ok(GraphProjection {
+                    record: record.resolve(at_version)?,
+                    source_version,
+                    projected_version,
+                    on_existing: record.on_existing(),
+                    operation: record.operation(),
+                    permanent: record.permanent(),
+                    facet: record.facet_key().to_string(),
+                })
+            })
+            .collect()
     }
 }

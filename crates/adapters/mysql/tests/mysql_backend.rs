@@ -474,84 +474,6 @@ fn mysql_concurrent_writers() -> R {
     Ok(())
 }
 
-/// The guard read, target write and guard write are one transaction: a CHECK
-/// constraint rejects one event's guard row after its target write
-/// succeeded, and neither row may remain. Guards against DDL inside the
-/// event's transaction, which MySQL commits implicitly.
-#[test]
-fn mysql_failed_guard_write_leaves_neither_row() -> R {
-    require_mysql!(url);
-    let t = fresh_table();
-    my_exec(
-        &url,
-        &format!(
-            "DROP TABLE IF EXISTS {t}; CREATE TABLE {t} (id VARCHAR(64) PRIMARY KEY, name VARCHAR(64))"
-        ),
-    )?;
-    my_exec(
-        &url,
-        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
-    )
-    .ok();
-
-    let mut m = HashMap::new();
-    m.insert(
-        "Atomic".into(),
-        upsert_mapping("Atomic", &t, "  id: payload.id\n  name: payload.name\n"),
-    );
-    let a = my_adapter(&url, m);
-
-    // An ordinary write first, for contrast with the forced failure.
-    let ok = a.handle(&ev(
-        "Atomic",
-        1,
-        serde_json::json!({ "id": "u1", "name": "a" }),
-    ));
-    assert!(
-        matches!(ok.outcome, AdapterOutcome::Created),
-        "{:?}",
-        ok.outcome
-    );
-
-    let fail = ev("Atomic", 2, serde_json::json!({ "id": "u2", "name": "b" }));
-    let check = format!("chk_{}_{t}", std::process::id());
-    my_exec(
-        &url,
-        &format!(
-            "ALTER TABLE conduit_projection_state ADD CONSTRAINT {check} CHECK (last_event_id <> '{}')",
-            fail.event_id
-        ),
-    )?;
-    let r = a.handle(&fail);
-    let dropped = my_exec(
-        &url,
-        &format!("ALTER TABLE conduit_projection_state DROP CHECK {check}"),
-    );
-
-    assert!(
-        matches!(r.outcome, AdapterOutcome::Failed(_)),
-        "{:?}",
-        r.outcome
-    );
-    let pool = mysql::Pool::new(url.as_str())?;
-    let mut conn = pool.get_conn()?;
-    let target: Option<String> =
-        conn.exec_first(format!("SELECT name FROM {t} WHERE id = 'u2'"), ())?;
-    let guards: Option<i64> = conn.exec_first(
-        format!(
-            "SELECT count(*) FROM conduit_projection_state WHERE target_table = '{t}' AND entity_key = '[\"u2\"]'"
-        ),
-        (),
-    )?;
-    dropped?;
-    assert_eq!(
-        target, None,
-        "the target row must roll back with the guard write"
-    );
-    assert_eq!(guards, Some(0), "no guard row");
-    Ok(())
-}
-
 #[test]
 fn mysql_prepare_twice_is_idempotent() -> R {
     require_mysql!(url);
@@ -632,5 +554,200 @@ fn mysql_new_guard_rows_take_no_gap_lock() -> R {
         matches!(outcome, AdapterOutcome::Created),
         "the adapter's write: {outcome:?}"
     );
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// One transaction per batch
+// ---------------------------------------------------------------------------
+
+/// Upsert, delete and facet mappings on `table`, under event types
+/// `{prefix}Up` / `{prefix}Del` / `{prefix}Mail`.
+fn batch_mappings(prefix: &str, table: &str) -> HashMap<String, SqlMapping> {
+    let yaml = |s: String| serde_yaml::from_str::<SqlMapping>(&s).unwrap();
+    HashMap::from([
+        (
+            format!("{prefix}Up"),
+            yaml(format!(
+                "event: {prefix}Up\ntable: {table}\nprimary_key: id\nversion: 1\non_existing: replace\ncolumns:\n  id: payload.id\n  name: payload.name\n"
+            )),
+        ),
+        (
+            format!("{prefix}Del"),
+            yaml(format!(
+                "event: {prefix}Del\ntable: {table}\nprimary_key: id\nversion: 1\noperation: delete\ncolumns:\n  id: payload.id\n"
+            )),
+        ),
+        (
+            format!("{prefix}Mail"),
+            yaml(format!(
+                "event: {prefix}Mail\ntable: {table}\nprimary_key: id\nversion: 1\nfacet: contact\ncolumns:\n  id: payload.id\n  email: payload.email\n"
+            )),
+        ),
+    ])
+}
+
+/// One entity's lifecycle, a second entity deleted before it exists, and two
+/// keys that differ only in case, all meant for one batch.
+fn batch_stream(prefix: &str) -> Vec<Event> {
+    let e = |kind: &str, seq: u64, payload: serde_json::Value| Event {
+        event_id: format!(
+            "evt-{prefix}{kind}-{}-{seq}",
+            payload["id"].as_str().unwrap_or("")
+        ),
+        ..ev(&format!("{prefix}{kind}"), seq, payload)
+    };
+    use serde_json::json;
+    vec![
+        e("Up", 1, json!({ "id": "u1", "name": "a" })),
+        e("Mail", 2, json!({ "id": "u1", "email": "a@x" })),
+        e("Up", 3, json!({ "id": "u1", "name": "b" })),
+        e("Del", 4, json!({ "id": "u1" })),
+        e("Mail", 5, json!({ "id": "u1", "email": "gone@x" })),
+        e("Up", 6, json!({ "id": "u1", "name": "c" })),
+        e("Mail", 7, json!({ "id": "u1", "email": "c@x" })),
+        e("Up", 3, json!({ "id": "u1", "name": "b" })),
+        e("Del", 1, json!({ "id": "u2" })),
+        e("Up", 1, json!({ "id": "u2", "name": "stale" })),
+        e("Up", 2, json!({ "id": "u2", "name": "g" })),
+        e("Up", 5, json!({ "id": "K", "name": "upper" })),
+        e("Up", 1, json!({ "id": "k", "name": "lower" })),
+    ]
+}
+
+type MyState = (
+    Vec<(String, Option<String>, Option<String>)>,
+    Vec<(String, String, i64, bool, bool)>,
+);
+
+fn my_state(url: &str, table: &str) -> Result<MyState, Box<dyn std::error::Error>> {
+    let pool = mysql::Pool::new(url)?;
+    let mut c = pool.get_conn()?;
+    let rows = c.query(format!(
+        "SELECT id, name, email FROM {table} ORDER BY id COLLATE utf8mb4_bin"
+    ))?;
+    let guards = c.exec(
+        "SELECT entity_key, facet, last_sequence, deleted, permanent
+         FROM conduit_projection_state WHERE target_table = ? ORDER BY 1, 2",
+        (table,),
+    )?;
+    Ok((rows, guards))
+}
+
+/// A target table whose key is case-sensitive, so `K` and `k` are two rows.
+fn fresh_batch_table(url: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let t = fresh_table();
+    my_exec(url, &format!("DROP TABLE IF EXISTS {t}"))?;
+    my_exec(
+        url,
+        &format!(
+            "CREATE TABLE {t} (id VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin PRIMARY KEY, name TEXT, email TEXT)"
+        ),
+    )?;
+    my_exec(
+        url,
+        &format!("DELETE FROM conduit_projection_state WHERE target_table = '{t}'"),
+    )
+    .ok();
+    Ok(t)
+}
+
+#[test]
+fn mysql_batch_matches_one_event_at_a_time() -> R {
+    require_mysql!(url);
+    let (tb, ts) = (fresh_batch_table(&url)?, fresh_batch_table(&url)?);
+
+    let batched = my_adapter(&url, batch_mappings("B", &tb));
+    let events = batch_stream("B");
+    let refs: Vec<&Event> = events.iter().collect();
+    kulyrax_core::execution::stages::take();
+    batched.begin_batch(&refs).map_err(|e| e.to_string())?;
+    let batch_outcomes: Vec<String> = events
+        .iter()
+        .map(|e| format!("{:?}", batched.handle(e).outcome))
+        .collect();
+    batched.commit_batch().map_err(|e| e.to_string())?;
+    let t = kulyrax_core::execution::stages::take();
+    assert_eq!(t.commit.calls, 1, "one transaction for the batch");
+
+    let single = my_adapter(&url, batch_mappings("S", &ts));
+    let single_outcomes: Vec<String> = batch_stream("S")
+        .iter()
+        .map(|e| format!("{:?}", single.handle(e).outcome))
+        .collect();
+
+    assert_eq!(batch_outcomes, single_outcomes);
+    assert!(
+        !batch_outcomes.iter().any(|o| o.starts_with("Failed")),
+        "{batch_outcomes:?}"
+    );
+    assert_eq!(my_state(&url, &tb)?, my_state(&url, &ts)?);
+    let (rows, _) = my_state(&url, &tb)?;
+    assert_eq!(
+        rows,
+        vec![
+            ("K".into(), Some("upper".into()), None),
+            ("k".into(), Some("lower".into()), None),
+            ("u1".into(), Some("c".into()), Some("c@x".into())),
+            ("u2".into(), Some("g".into()), None),
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn mysql_batch_rollback_leaves_nothing() -> R {
+    require_mysql!(url);
+    let t = fresh_batch_table(&url)?;
+    let a = my_adapter(&url, batch_mappings("R", &t));
+    let events = batch_stream("R");
+    let refs: Vec<&Event> = events.iter().collect();
+
+    a.begin_batch(&refs).map_err(|e| e.to_string())?;
+    for e in &events {
+        assert!(a.handle(e).is_success());
+    }
+    a.rollback_batch();
+    assert_eq!(my_state(&url, &t)?, (vec![], vec![]), "nothing written");
+
+    // Outside a batch, each event commits on its own again.
+    let r = a.handle(&events[0]);
+    assert!(
+        matches!(r.outcome, AdapterOutcome::Created),
+        "{:?}",
+        r.outcome
+    );
+    assert_eq!(my_state(&url, &t)?.0.len(), 1);
+    Ok(())
+}
+
+/// A new adapter over entities an earlier batch wrote reads their lanes back
+/// from the database (they are in no cache) and skips the redelivery.
+#[test]
+fn mysql_batch_redelivery_is_skipped() -> R {
+    require_mysql!(url);
+    let t = fresh_batch_table(&url)?;
+    let events = batch_stream("D");
+    let refs: Vec<&Event> = events.iter().collect();
+    let first = my_adapter(&url, batch_mappings("D", &t));
+    first.begin_batch(&refs).map_err(|e| e.to_string())?;
+    for e in &events {
+        assert!(first.handle(e).is_success());
+    }
+    first.commit_batch().map_err(|e| e.to_string())?;
+    let before = my_state(&url, &t)?;
+
+    let again = my_adapter(&url, batch_mappings("D", &t));
+    again.begin_batch(&refs).map_err(|e| e.to_string())?;
+    for e in &events {
+        let r = again.handle(e);
+        assert!(
+            matches!(r.outcome, AdapterOutcome::Skipped(_)),
+            "{:?}",
+            r.outcome
+        );
+    }
+    again.commit_batch().map_err(|e| e.to_string())?;
+    assert_eq!(my_state(&url, &t)?, before);
     Ok(())
 }

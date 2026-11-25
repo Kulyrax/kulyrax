@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use serde::Serialize;
 
 use crate::adapter::document::runtime::DocumentRuntimeBuilder;
-use crate::adapter::graph::mapping::ResolvedRecord;
+use crate::adapter::graph::mapping::{GraphMapping, ResolvedRecord};
 use crate::adapter::graph::runtime::GraphRuntimeBuilder;
 use crate::adapter::keyvalue::runtime::KvRuntimeBuilder;
 use crate::adapter::sql::runtime::SqlRuntimeBuilder;
@@ -48,6 +48,9 @@ pub struct DryRunAdapter {
 pub enum DryRunOutcome {
     /// The write a live run would attempt.
     Planned(PlannedWrite),
+    /// The writes a graph `kind: subgraph` mapping would attempt, in order,
+    /// in one transaction.
+    PlannedSubgraph { writes: Vec<PlannedWrite> },
     /// The projection could not be resolved (no mapping, a missing payload
     /// field, a failed upcast); a live run would fail the same way.
     Failed { error: String },
@@ -93,7 +96,17 @@ pub(crate) fn dry_run_event(
                 .iter()
                 .find(|a| a.id() == adapter_id)
                 .and_then(storage_kind);
+            let subgraph = matches!(
+                mappings.graph.get(&event.event_type),
+                Some(GraphMapping::Subgraph(_))
+            );
             let outcome = match kind {
+                Some(StorageKind::Graph) if subgraph => {
+                    match plan_graph_writes(event, mappings, upcasters) {
+                        Ok(writes) => DryRunOutcome::PlannedSubgraph { writes },
+                        Err(error) => DryRunOutcome::Failed { error },
+                    }
+                }
                 Some(kind) => match plan_write(kind, event, mappings, upcasters) {
                     Ok(plan) => DryRunOutcome::Planned(plan),
                     Err(error) => DryRunOutcome::Failed { error },
@@ -184,9 +197,36 @@ fn plan_write(
             })
         }
         StorageKind::Graph => {
-            let mapping = mappings.graph.get(&event.event_type);
-            let builder = GraphRuntimeBuilder::new(single(event, mapping));
-            let p = builder.build(event, upcasters).map_err(|e| e.to_string())?;
+            let mut writes = plan_graph_writes(event, mappings, upcasters)?;
+            if writes.len() != 1 {
+                return Err(format!(
+                    "the graph mapping for {} plans {} writes",
+                    event.event_type,
+                    writes.len()
+                ));
+            }
+            writes
+                .pop()
+                .ok_or_else(|| "no graph write planned".to_string())
+        }
+        StorageKind::Custom => Err("custom adapters have no storage kind to preview".to_string()),
+    }
+}
+
+/// Every record the event's graph mapping projects (several for a subgraph).
+fn plan_graph_writes(
+    event: &Event,
+    mappings: &MappingSet,
+    upcasters: &UpcasterRegistry,
+) -> Result<Vec<PlannedWrite>, String> {
+    let mapping = mappings.graph.get(&event.event_type);
+    let builder = GraphRuntimeBuilder::new(single(event, mapping));
+    let projections = builder
+        .build_all(event, upcasters)
+        .map_err(|e| e.to_string())?;
+    Ok(projections
+        .into_iter()
+        .map(|p| {
             let (target, entity_key, values) = match p.record {
                 ResolvedRecord::Node {
                     label,
@@ -207,7 +247,7 @@ fn plan_write(
                     (format!("edge {edge_type}"), key, properties)
                 }
             };
-            Ok(PlannedWrite {
+            PlannedWrite {
                 operation: p.operation,
                 on_existing: p.on_existing,
                 permanent: p.permanent,
@@ -217,10 +257,9 @@ fn plan_write(
                 values,
                 source_version: p.source_version,
                 projected_version: p.projected_version,
-            })
-        }
-        StorageKind::Custom => Err("custom adapters have no storage kind to preview".to_string()),
-    }
+            }
+        })
+        .collect())
 }
 
 fn single<M: Clone>(event: &Event, mapping: Option<&M>) -> HashMap<String, M> {

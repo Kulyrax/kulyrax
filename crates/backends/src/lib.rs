@@ -1,6 +1,7 @@
-//! Registers the default set of `kulyrax-adapter-*` backends on a runtime,
-//! one Cargo feature per backend. An embedder that needs only one backend can
-//! depend on its crate directly and skip this one.
+//! Registers the default set of `kulyrax-adapter-*` backends and
+//! `kulyrax-source-*` sources on a runtime, one Cargo feature each. An
+//! embedder that needs only one can depend on its crate directly and skip
+//! this one.
 
 use kulyrax_core::KulyraxRuntime;
 
@@ -26,4 +27,7 @@ pub fn register_default_backends(runtime: &mut KulyraxRuntime) {
 
     #[cfg(feature = "neo4j")]
     runtime.register_adapter_factory("neo4j", kulyrax_adapter_neo4j::factory);
+
+    #[cfg(feature = "postgres-outbox")]
+    runtime.register_source_factory("postgres_outbox", kulyrax_source_postgres::factory);
 }
