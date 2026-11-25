@@ -1,8 +1,9 @@
-//! Phase 15.6 (15.5): a replay directory whose file names would deliver the
-//! facet event before the entity's create → replay reorders by `sequence`, so
-//! the create is applied first and the final document has both the base and
-//! the facet fields. Contrast `facet_before_create_live` (no reordering in a
-//! live stream).
+//! A replay directory whose file names deliver the facet event before the
+//! entity's create. Replay follows that order (sorted file names, then lines)
+//! and does not re-sort by `sequence` (decision 2026-11-25-batch-order), so the
+//! facet arrives first and is skipped (`EntityAbsent`), exactly as in a live
+//! stream (`facet_before_create_live`). The document gets the create's fields
+//! only. A history replayed from files must be laid out in order.
 
 use kulyrax_core::adapter::document::mapping::DocumentMapping;
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
@@ -51,7 +52,7 @@ document:
 }
 
 #[test]
-fn replay_reorders_facet_after_create_by_sequence() {
+fn replay_follows_file_order_so_a_facet_before_its_create_is_skipped() {
     let tmp = tempfile::tempdir().unwrap();
     let docs = tmp.path().join("docs");
     fs::create_dir_all(&docs).unwrap();
@@ -125,13 +126,16 @@ fn replay_reorders_facet_after_create_by_sequence() {
 
     assert_eq!(report.events_processed, 2);
     assert_eq!(report.events_succeeded, 2, "{:?}", report.per_event);
-    // Reordered: create (seq 1) before facet (seq 5).
-    assert_eq!(report.per_event[0].event_id, "e-create");
-    assert_eq!(report.per_event[1].event_id, "e-email");
+    // Delivery order: the facet (seq 5) first, then the create (seq 1).
+    assert_eq!(report.per_event[0].event_id, "e-email");
+    assert_eq!(report.per_event[1].event_id, "e-create");
 
     let doc: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(docs.join("users").join("u1.json")).unwrap())
             .unwrap();
     assert_eq!(doc["display_name"], "Ada");
-    assert_eq!(doc["email"], "ada@x.com");
+    assert!(
+        doc.get("email").is_none(),
+        "the facet arrived first and was skipped: {doc}"
+    );
 }

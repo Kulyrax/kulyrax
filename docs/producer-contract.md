@@ -28,8 +28,9 @@ Kulyrax is projection-only ([`architecture.md` §1.1](../architecture.md)). It c
 
 **Assumption.** Each entity's events reach Kulyrax in sequence order.
 
-- Batch dispatch tolerates *local* reordering within a batch — it sorts by `sequence` before dispatch.
-- It does **not** tolerate: an event permanently dropped; or, under `on_existing: ignore`, a lower-sequence event arriving *after* that entity's lane has already advanced (the first-delivered event wins, so a late "create" is skipped and its data never lands).
+- Kulyrax dispatches events in the order the source delivers them, within a batch and across batches alike, and never re-sorts them by `sequence`: sequences are per entity (§1), so a sort would reorder *different* entities against each other (an edge before the nodes it points at, §7; a child row before its parent). The outcome therefore does not depend on where batches split. Replay follows the same rule: sorted file names, then line order.
+- `sequence` gates each entity's own lane (`decide()`). That absorbs redeliveries and, under `on_existing: replace`, out-of-order updates: the highest sequence wins.
+- It does **not** repair: an event permanently dropped; or, under `on_existing: ignore`, a lower-sequence event arriving *after* that entity's lane has already advanced (the first-delivered event wins, so a late "create" is skipped and its data never lands). This holds within one batch as much as across batches.
 - `on_existing: replace` and facet lanes are order-independent *within a lane* — highest sequence wins — but a facet update delivered before the entity's create is skipped (`EntityAbsent`) in a live feed.
 
 **If violated.** Lost updates (`ignore` mode) or skipped facet writes (out-of-order create).

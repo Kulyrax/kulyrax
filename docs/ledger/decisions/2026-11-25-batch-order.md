@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Dispatch events in delivery order; `sequence` only gates
@@ -64,7 +64,7 @@ Code and tests that depend on the sort:
 - replay's comment calls the global sort "equivalent for the guarantee". It is
   for each entity's own order, not across entities.
 
-## Decision (proposed)
+## Decision
 
 B.
 - Remove the sort in `source/runner.rs` and in `replay.rs`. Events dispatch in
