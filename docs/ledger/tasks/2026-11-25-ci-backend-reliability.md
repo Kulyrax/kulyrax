@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # Backend CI suites pass on a clean run, every run
@@ -24,7 +24,7 @@ Release follow-up (b), before 0.12.1 and the rename land: CI fully green.
   with `--test-threads=1`.
 - [x] Locally: each suite passes 3 runs in a row against long-lived containers
   (the case that failed).
-- [ ] In CI: each suite green 3 times (re-runs) once the branch is pushed, after
+- [x] In CI: each suite green 3 times (re-runs) once the branch is pushed, after
   PR #12 is merged.
 - [x] A `cargo audit` CI job over the workspace and every example lockfile,
   failing on vulnerabilities and on unsound, yanked or unmaintained crates.
@@ -53,12 +53,9 @@ Release follow-up (b), before 0.12.1 and the rename land: CI fully green.
 | Build | `cargo build --workspace` | clean |
 | Tests | `cargo test --workspace --no-fail-fast` | 420 passed, 0 failed (backend suites skip without their URLs; they ran above) |
 | Audit job, locally | the job's loop (`cargo audit --file <lock> --deny unsound --deny unmaintained --deny yanked` from the root, so `.cargo/audit.toml` applies) on the rusqlite branch with its updated lockfiles | the ignores apply to every lockfile, example ones included (checked: `embedded`'s unsafe-libyaml is ignored from the root, denied when run from the example's own directory). The remaining failures were exactly what the deps PR fixes |
+| CI, 3 runs | PR #14 at `48c13bb` (rebased onto main after #12, #13, #15): run 45564731759, attempts 1, 2, 3 | all 13 jobs green on every attempt: test (ubuntu, macos, windows), postgres, postgres outbox source, mysql, redis, mongodb, neo4j, elasticsearch, examples, MSRV (1.89), cargo audit |
 
-## Risks and open questions
-
-- The 3× CI proof needs the branch on GitHub, after PR #12.
 
 ## Outcome
 
-Committed on `ci/backend-reliability`, not pushed. Pushed after PR #12 merges,
-then each backend job is re-run 3 times in CI.
+Pushed after PR #12 merged; CI green 3 times in a row; merged as PR #14.
