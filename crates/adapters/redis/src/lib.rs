@@ -45,13 +45,23 @@ const MAX_ATTEMPTS: u32 = 5;
 const KEY_CHUNK: usize = 1_000;
 
 /// The `config:` block of a `type: redis` adapter entry.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct RedisConfig {
     /// `redis://[:password@]host:port[/db]`; `${ENV_VAR}` references are expanded.
     pub url: String,
     /// Connection pool size (default 4).
     #[serde(default)]
     pub pool_size: Option<u32>,
+}
+
+/// Shows the URL with its password and secret query parameters hidden.
+impl std::fmt::Debug for RedisConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RedisConfig")
+            .field("url", &kulyrax_core::redact::redact_url(&self.url))
+            .field("pool_size", &self.pool_size)
+            .finish()
+    }
 }
 
 /// Registry factory for `type: redis`.
@@ -69,7 +79,8 @@ pub fn factory(
     }
     if redis::Client::open(url.as_str()).is_err() {
         return Err(ConfigError::FactoryConfigInvalid(format!(
-            "redis adapter {id:?}: `url` does not parse: {url}"
+            "redis adapter {id:?}: `url` does not parse: {}",
+            kulyrax_core::redact::redact_url(&url)
         )));
     }
     Ok(Box::new(RedisAdapter::new(

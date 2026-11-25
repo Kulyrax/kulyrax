@@ -47,13 +47,23 @@ use kulyrax_core::runtime::config::{
 use kulyrax_core::upcast::UpcasterRegistry;
 
 /// The `config:` block of a `type: mysql` adapter entry.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct MySqlConfig {
     /// `mysql://user:pass@host:port/db`; `${ENV_VAR}` references are expanded.
     pub url: String,
     /// Connection pool size (default 4).
     #[serde(default)]
     pub pool_size: Option<u32>,
+}
+
+/// Shows the URL with its password and secret query parameters hidden.
+impl std::fmt::Debug for MySqlConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MySqlConfig")
+            .field("url", &kulyrax_core::redact::redact_url(&self.url))
+            .field("pool_size", &self.pool_size)
+            .finish()
+    }
 }
 
 /// Registry factory for `type: mysql`.
@@ -71,7 +81,8 @@ pub fn factory(
     }
     if Opts::from_url(&url).is_err() {
         return Err(ConfigError::FactoryConfigInvalid(format!(
-            "mysql adapter {id:?}: `url` does not parse: {url}"
+            "mysql adapter {id:?}: `url` does not parse: {}",
+            kulyrax_core::redact::redact_url(&url)
         )));
     }
     Ok(Box::new(MySqlAdapter::new(

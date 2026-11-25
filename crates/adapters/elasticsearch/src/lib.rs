@@ -83,7 +83,7 @@ const BULK_MAX_BYTES: usize = 8 * 1024 * 1024;
 // Config
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct ElasticsearchConfig {
     /// `http(s)://host:port`. May contain `${ENV_VAR}` references (the same
     /// pattern every other networked backend's `url` field uses).
@@ -98,6 +98,24 @@ pub struct ElasticsearchConfig {
     /// Request timeout in milliseconds (default 10_000).
     #[serde(default)]
     pub timeout_ms: Option<u64>,
+}
+
+/// Shows the URL redacted and the password as `***`.
+impl std::fmt::Debug for ElasticsearchConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ElasticsearchConfig")
+            .field("url", &kulyrax_core::redact::redact_url(&self.url))
+            .field("username", &self.username)
+            .field(
+                "password",
+                &self
+                    .password
+                    .as_deref()
+                    .map(kulyrax_core::redact::redact_secret),
+            )
+            .field("timeout_ms", &self.timeout_ms)
+            .finish()
+    }
 }
 
 fn es_err(e: reqwest::Error) -> DocumentError {
@@ -847,7 +865,8 @@ pub fn factory(
     }
     if reqwest::Url::parse(&url).is_err() {
         return Err(ConfigError::FactoryConfigInvalid(format!(
-            "elasticsearch adapter {id:?}: `url` does not parse: {url}"
+            "elasticsearch adapter {id:?}: `url` does not parse: {}",
+            kulyrax_core::redact::redact_url(&url)
         )));
     }
     let auth = match (&cfg.username, &cfg.password) {

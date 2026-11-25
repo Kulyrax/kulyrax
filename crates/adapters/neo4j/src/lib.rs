@@ -54,7 +54,7 @@ use kulyrax_core::runtime::config::{
 use kulyrax_core::upcast::UpcasterRegistry;
 
 /// The `config:` block of a `type: neo4j` adapter entry.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Neo4jConfig {
     /// Bolt URI (`bolt://host:port` or `neo4j://host:port`); `${ENV_VAR}`
     /// references are expanded.
@@ -66,6 +66,21 @@ pub struct Neo4jConfig {
     /// Neo4j's default database when omitted.
     #[serde(default)]
     pub database: Option<String>,
+}
+
+/// Shows the URI redacted and the password as `***`.
+impl std::fmt::Debug for Neo4jConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Neo4jConfig")
+            .field("uri", &kulyrax_core::redact::redact_url(&self.uri))
+            .field("user", &self.user)
+            .field(
+                "password",
+                &kulyrax_core::redact::redact_secret(&self.password),
+            )
+            .field("database", &self.database)
+            .finish()
+    }
 }
 
 /// Registry factory for `type: neo4j`.
@@ -84,7 +99,8 @@ pub fn factory(
     }
     if let Err(reason) = check_bolt_uri(&uri) {
         return Err(ConfigError::FactoryConfigInvalid(format!(
-            "neo4j adapter {id:?}: `uri` {reason}: {uri}"
+            "neo4j adapter {id:?}: `uri` {reason}: {}",
+            kulyrax_core::redact::redact_url(&uri)
         )));
     }
     Ok(Box::new(Neo4jAdapter::new(

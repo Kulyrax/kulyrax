@@ -5,6 +5,7 @@ pub mod event;
 pub mod execution;
 pub mod pipeline;
 pub mod rebuild;
+pub mod redact;
 pub mod replay;
 pub mod routing;
 pub mod runtime;
