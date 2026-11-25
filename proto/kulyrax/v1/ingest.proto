@@ -48,15 +48,19 @@ message EventEnvelope {
   string event_id = 7;
 }
 
+// An ack covers only events this stream sent. A stream is acked only for
+// batches that hold its events, never for other streams' events; a stream
+// with nothing in a committed batch receives nothing for it.
 message Ack {
-  // The highest `position` whose batch's guards are now committed. The producer
-  // resumes from here after a disconnect; anything it re-sends is absorbed by
-  // the idempotent sinks.
+  // The `position` of the last event this stream sent (in its own send order)
+  // whose batch's guards are now committed. Never compared with, or taken
+  // from, another stream's positions. The producer resumes from here after a
+  // disconnect; anything it re-sends is absorbed by the idempotent sinks.
   string position = 1;
-  // Events dispatched in the batch this ack covers (created + updated + deleted
-  // + skipped + dlq). Observability only.
+  // This stream's events in the batch this ack covers (created + updated +
+  // deleted + skipped + dlq). Observability only.
   uint32 batch_events = 2;
-  // How many of `batch_events` were dead-lettered rather than genuinely
+  // How many of this stream's `batch_events` were dead-lettered rather than genuinely
   // projected to every adapter they were routed to. The position still
   // advances past a DLQ'd event (it will not be redelivered), so this is the
   // only signal that distinguishes "every event in this batch was actually

@@ -327,7 +327,9 @@ fn grpc_vs_directory_converge() {
             env(3, "u1", "c", "p3"),
             env(2, "u1", "b", "p2"),
         ],
-        "p3",
+        // The stream's last event in its own send order, not the text-wise
+        // maximum `p3` (F-02).
+        "p2",
     ));
     h.shutdown();
     let grpc_state = read_user(&h.db, "u1");
