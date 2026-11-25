@@ -67,7 +67,7 @@ pub fn write_checkpoint(
 /// Fsync a directory so a rename in it is durable. Windows cannot open a
 /// directory as a file; NTFS journals the rename instead, so this is a no-op
 /// there.
-fn sync_dir(dir: &Path) -> std::io::Result<()> {
+pub(crate) fn sync_dir(dir: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         std::fs::File::open(dir)?.sync_all()

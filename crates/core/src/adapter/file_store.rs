@@ -406,7 +406,7 @@ fn dirs_to_sync(files: &[String]) -> BTreeSet<String> {
 /// process the n-th time it reaches `point`, simulating a crash there. Only
 /// `kulyrax-cli`'s crash tests enable the feature; without it this is empty.
 #[cfg(feature = "crash-points")]
-fn crash_point(point: &str) {
+pub(crate) fn crash_point(point: &str) {
     use std::sync::OnceLock;
     use std::sync::atomic::AtomicU32;
     static TARGET: OnceLock<Option<(String, u32)>> = OnceLock::new();
@@ -427,7 +427,7 @@ fn crash_point(point: &str) {
 
 #[cfg(not(feature = "crash-points"))]
 #[inline(always)]
-fn crash_point(_point: &str) {}
+pub(crate) fn crash_point(_point: &str) {}
 
 // ---------------------------------------------------------------------------
 // The per-root handle: lock, log sequence, sync point

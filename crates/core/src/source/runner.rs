@@ -217,28 +217,66 @@ fn dlq_write(
     report: &ExecutionReport,
 ) -> Result<(), SourceError> {
     std::fs::create_dir_all(dlq_dir)?;
-    let safe: String = se
-        .event
-        .event_id
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    // The position can come from a producer (gRPC `EventEnvelope.position`):
-    // encode it like any event value bound for a file name, so it cannot
-    // leave `dlq_dir` and two positions never share a file.
-    let position = crate::adapter::file_names::stem(&se.position.0);
-    let path = dlq_dir.join(format!("{safe}.{position}.json"));
     let body = serde_json::json!({ "event": se.event, "report": report });
     let json =
         serde_json::to_string_pretty(&body).map_err(|e| SourceError::Parse(e.to_string()))?;
-    std::fs::write(path, json)?;
+    let base = dlq_base_name(&se.event.event_id, &se.position.0);
+
+    // Claim a name no other DLQ file has (`create_new` is atomic), so a DLQ
+    // file is never overwritten: two events that would share a name, or one
+    // event dead-lettered twice, get `~2`, `~3`, … The claimed file stays
+    // empty until the content replaces it below; a crash in between leaves
+    // an empty file, and the event is read again (its batch never committed).
+    let mut n = 1u32;
+    let path = loop {
+        let name = if n == 1 {
+            format!("{base}.json")
+        } else {
+            format!("{base}~{n}.json")
+        };
+        let candidate = dlq_dir.join(name);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(_) => break candidate,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
+            Err(e) => return Err(e.into()),
+        }
+    };
+
+    // Durable before the batch commits, as checkpoints are: write a temp
+    // file, fsync it, rename it over the claimed name, fsync the directory.
+    // Otherwise the checkpoint could survive a power loss that the DLQ file
+    // did not, and the event would be skipped without a trace.
+    let tmp = dlq_dir.join(format!(".dlq.tmp-{}", std::process::id()));
+    let mut f = std::fs::File::create(&tmp)?;
+    std::io::Write::write_all(&mut f, json.as_bytes())?;
+    f.sync_all()?;
+    drop(f);
+    crate::adapter::file_store::crash_point("dlq-before-rename");
+    std::fs::rename(&tmp, &path)?;
+    crate::source::checkpoint::sync_dir(dlq_dir)?;
+    crate::adapter::file_store::crash_point("dlq-written");
     Ok(())
+}
+
+/// The DLQ file name for an event, before the `.json` and any `~n` suffix:
+/// the injective file-name stems of the event id and of the position, joined
+/// by `~`, which no stem contains, so the pair is injective too. The position
+/// can come from a producer (gRPC `EventEnvelope.position`), so it is encoded
+/// like any value bound for a file name and cannot leave `dlq_dir`. When the
+/// pair would make too long a name, it is hashed (the file holds the event).
+fn dlq_base_name(event_id: &str, position: &str) -> String {
+    use crate::adapter::file_names;
+    let id = file_names::stem(event_id);
+    let pos = file_names::stem(position);
+    if id.len() + 1 + pos.len() <= file_names::MAX_STEM {
+        format!("{id}~{pos}")
+    } else {
+        file_names::hashed(&format!("{event_id}\0{position}"))
+    }
 }
 
 /// Build adapters from config, then run the poll → sort → dispatch → commit
