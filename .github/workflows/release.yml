@@ -64,6 +64,25 @@ jobs:
       - name: Build
         run: cargo build --release --locked -p kulyrax-cli --target ${{ matrix.target }}
 
+      # The binary must report the tag's version, so a release never ships a
+      # binary that says otherwise. Skipped for x86_64-apple-darwin: it is
+      # cross-compiled on the Apple Silicon runner, which may not run it.
+      - name: Binary reports the tag's version
+        if: matrix.target != 'x86_64-apple-darwin'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          ARCHIVE: ${{ matrix.archive }}
+        run: |
+          exe=kulyrax
+          [ "$ARCHIVE" = zip ] && exe=kulyrax.exe
+          got=$("target/$TARGET/release/$exe" --version)
+          want="kulyrax ${GITHUB_REF_NAME#v}"
+          if [ "$got" != "$want" ]; then
+            echo "::error::the binary says '$got', the tag $GITHUB_REF_NAME needs '$want'"
+            exit 1
+          fi
+
       - name: Package
         shell: bash
         env:
