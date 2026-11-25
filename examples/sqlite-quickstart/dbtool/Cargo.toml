@@ -9,4 +9,4 @@ publish = false
 # checkout on any OS). `unwrap`/`panic!` are fine here; the Zero Panic Rule
 # (CLAUDE.md) applies to the `kulyrax-core` library, not example scripts.
 [dependencies]
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }

@@ -5,4 +5,4 @@ edition = "2024"
 publish = false
 
 [dependencies]
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
