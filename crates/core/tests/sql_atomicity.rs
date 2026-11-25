@@ -33,7 +33,7 @@ fn sqlite_adapter(db: &Path) -> SqliteAdapter {
 fn guard_table_exists(db: &Path) -> bool {
     let conn = rusqlite::Connection::open(db).unwrap();
     conn.query_row(
-        "SELECT count(*) FROM sqlite_master WHERE name = 'conduit_projection_state'",
+        "SELECT count(*) FROM sqlite_master WHERE name = 'kulyrax_projection_state'",
         [],
         |r| r.get::<_, i64>(0),
     )
@@ -44,7 +44,7 @@ fn guard_table_exists(db: &Path) -> bool {
 fn guard_rows(db: &Path, entity_key: &str) -> i64 {
     let conn = rusqlite::Connection::open(db).unwrap();
     conn.query_row(
-        "SELECT count(*) FROM conduit_projection_state WHERE entity_key = ?1",
+        "SELECT count(*) FROM kulyrax_projection_state WHERE entity_key = ?1",
         [entity_key],
         |r| r.get(0),
     )
@@ -66,7 +66,7 @@ fn failed_guard_write_leaves_neither_row() {
     rusqlite::Connection::open(&db)
         .unwrap()
         .execute_batch(&format!(
-            "CREATE TRIGGER fail_guard BEFORE INSERT ON conduit_projection_state
+            "CREATE TRIGGER fail_guard BEFORE INSERT ON kulyrax_projection_state
              WHEN NEW.last_event_id = '{}'
              BEGIN SELECT RAISE(ABORT, 'forced guard failure'); END;",
             fail.event_id

@@ -121,7 +121,7 @@ fn detach_delete_removes_all_incident_edges() -> Result<(), Box<dyn std::error::
     for id in ["u2", "u3", "u4"] {
         let p = dir
             .path()
-            .join(".conduit")
+            .join(".kulyrax")
             .join("incident")
             .join(format!("{id}.json"));
         assert!(!p.exists(), "{id} incident index should be empty/removed");

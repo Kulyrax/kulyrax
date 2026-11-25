@@ -25,7 +25,7 @@ use crate::execution::stages::{Stage, timed};
 /// `facets`. This in-memory shape is shared by every backend, but the
 /// *wire* shape isn't uniform the way it is for KV/Document: the file
 /// sidecar serializes this struct as-is (one JSON file per entity, facets
-/// nested), while Neo4j spreads it across one flat `__ConduitGuard` node
+/// nested), while Neo4j spreads it across one flat `__KulyraxGuard` node
 /// per facet lane instead — its CAS needs `last_sequence` to be a plain
 /// queryable property, and a nested map isn't a valid property value at
 /// all, so a single JSON blob (even as a string) couldn't be compared in a

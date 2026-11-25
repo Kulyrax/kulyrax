@@ -1,11 +1,12 @@
 //! File names in the file-backed stores: values from events (keys, document
 //! ids, node ids) never leave the store root, never meet each other on a
 //! case-insensitive file system, survive any length; names from mappings are
-//! checked; a store written by 0.12.0 opens with every guard lane, or is
-//! refused when it holds files this version would name differently.
+//! checked; a store holding files an earlier version named from ids this
+//! version names differently is refused (the store tests in
+//! `rename_migration.rs` cover the older layouts).
 
 use std::collections::{BTreeSet, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use kulyrax_core::adapter::document::file::FileDocumentAdapter;
@@ -268,7 +269,7 @@ fn long_ids_get_hashed_names_with_the_id_inside() {
     let guard = files(dir.path())
         .into_iter()
         .find(|f| {
-            f.starts_with(".conduit/kv/users/^h")
+            f.starts_with(".kulyrax/kv/users/^h")
                 && std::fs::read_to_string(dir.path().join(f))
                     .unwrap()
                     .contains(&long)
@@ -305,99 +306,8 @@ fn namespaces_cannot_reach_the_store_s_own_files() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Stores written by 0.12.0
-// ---------------------------------------------------------------------------
-
-fn write(path: PathBuf, content: &str) {
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, content).unwrap();
-}
-
-const OLD_GUARD: &str =
-    r#"{"last_sequence":5,"last_event_id":"e5","deleted":false,"permanent":false}"#;
-
-/// A 0.12.0 key-value store (guards at `.conduit/<namespace>/`, including a
-/// namespace `wal`) opens with every lane: an older redelivery is stale.
-#[test]
-fn a_0_12_key_value_store_keeps_its_guards() {
-    let dir = tempfile::tempdir().unwrap();
-    for ns in ["users", "wal"] {
-        write(dir.path().join(ns).join("u1.json"), r#"{"v":5}"#);
-        write(
-            dir.path().join(".conduit").join(ns).join("u1.guard.json"),
-            OLD_GUARD,
-        );
-    }
-    std::fs::create_dir_all(dir.path().join(".conduit/wal")).unwrap();
-    let k = kv(dir.path(), &["users", "wal"]);
-    k.prepare().unwrap();
-    let names = files(dir.path());
-    for ns in ["users", "wal"] {
-        assert!(
-            names.contains(&format!(".conduit/kv/{ns}/u1.guard.json")),
-            "{names:?}"
-        );
-        assert!(
-            !names.contains(&format!(".conduit/{ns}/u1.guard.json")),
-            "{names:?}"
-        );
-    }
-    assert!(stale(&outcome(&k, &ev("U", "u1", 3))));
-    assert!(stale(&outcome(&k, &ev("U1", "u1", 3))));
-    assert!(names.contains(".conduit/layout/kv"), "{names:?}");
-}
-
 fn refused(a: &dyn StorageAdapter) -> String {
     a.prepare().err().map(|e| e.to_string()).unwrap_or_default()
-}
-
-/// Files 0.12.0 named from ids this version encodes (here `K`, and `a/b`,
-/// which made a directory) are refused, named, never re-keyed.
-#[test]
-fn a_0_12_store_with_ids_named_differently_is_refused() {
-    let dir = tempfile::tempdir().unwrap();
-    write(dir.path().join("users/K.json"), "{}");
-    write(dir.path().join(".conduit/users/K.guard.json"), OLD_GUARD);
-    write(dir.path().join("users/a/b.json"), "{}");
-    let err = refused(&kv(dir.path(), &["users"]));
-    assert!(err.contains("Rebuild the store"), "{err}");
-    assert!(
-        err.contains("K.json") && err.contains("K.guard.json"),
-        "{err}"
-    );
-    assert!(
-        err.contains(&format!("users{}a", std::path::MAIN_SEPARATOR)),
-        "{err}"
-    );
-    // Nothing was re-keyed: the files are where they were.
-    assert!(dir.path().join("users/K.json").exists());
-
-    let dir = tempfile::tempdir().unwrap();
-    write(dir.path().join(".conduit/entities/docs/K.done"), OLD_GUARD);
-    assert!(refused(&doc(dir.path(), "docs")).contains("K.done"));
-
-    let dir = tempfile::tempdir().unwrap();
-    write(dir.path().join("nodes/User/K.json"), "{}");
-    assert!(refused(&graph(dir.path(), "User")).contains("K.json"));
-}
-
-#[test]
-fn an_old_and_a_new_guard_for_one_key_are_refused() {
-    let dir = tempfile::tempdir().unwrap();
-    write(dir.path().join(".conduit/users/u1.guard.json"), OLD_GUARD);
-    write(
-        dir.path().join(".conduit/kv/users/u1.guard.json"),
-        OLD_GUARD,
-    );
-    let err = refused(&kv(dir.path(), &["users"]));
-    let old = Path::new(".conduit").join("users").join("u1.guard.json");
-    let new = Path::new(".conduit")
-        .join("kv")
-        .join("users")
-        .join("u1.guard.json");
-    assert!(err.contains(&old.display().to_string()), "{err}");
-    assert!(err.contains(&new.display().to_string()), "{err}");
 }
 
 // ---------------------------------------------------------------------------
@@ -406,7 +316,7 @@ fn an_old_and_a_new_guard_for_one_key_are_refused() {
 
 #[test]
 fn mapping_names_must_be_plain_directory_names() {
-    for bad in ["../x", ".conduit", "a/b", "con", "a:b", "a.b"] {
+    for bad in ["../x", ".kulyrax", "a/b", "con", "a:b", "a.b"] {
         let dir = tempfile::tempdir().unwrap();
         let err = refused(&kv(dir.path(), &[bad]));
         assert!(err.contains("cannot name a directory"), "{bad}: {err}");
@@ -415,7 +325,7 @@ fn mapping_names_must_be_plain_directory_names() {
         let err = refused(&graph(dir.path(), bad));
         assert!(err.contains("cannot name a directory"), "{bad}: {err}");
         assert!(
-            !dir.path().join(".conduit").exists(),
+            !dir.path().join(".kulyrax").exists(),
             "{bad}: refused before writing"
         );
     }

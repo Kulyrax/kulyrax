@@ -149,7 +149,7 @@ fn default_facet_resurrection_reopens_facet_lanes() -> Result<(), Box<dyn std::e
     assert_eq!(email, "ada@x.com");
 
     let contact_deleted: i64 = conn.query_row(
-        "SELECT deleted FROM conduit_projection_state
+        "SELECT deleted FROM kulyrax_projection_state
          WHERE target_table = 'users' AND facet = 'contact'",
         [],
         |r| r.get(0),

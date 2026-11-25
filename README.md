@@ -78,7 +78,7 @@ kulyrax run --config config.yaml --mappings mappings --once
 - **`events/events.ndjson`** is the input — three NDJSON events.
 
 **You create the tables, Kulyrax fills them.** Kulyrax never creates or migrates your
-read-model schema; it only creates its own bookkeeping table (`conduit_projection_state`).
+read-model schema; it only creates its own bookkeeping table (`kulyrax_projection_state`).
 That's why `run.sh` calls `dbtool init` to create `users` before the run. Without it,
 every event fails because the table doesn't exist.
 

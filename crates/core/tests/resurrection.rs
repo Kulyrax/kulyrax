@@ -117,7 +117,7 @@ columns:
         conn.query_row("SELECT state FROM users WHERE id = 'u1'", [], |r| r.get(0))?;
     assert_eq!(state, "s3");
     let (last_sequence, deleted): (i64, i64) = conn.query_row(
-        "SELECT last_sequence, deleted FROM conduit_projection_state WHERE target_table = 'users'",
+        "SELECT last_sequence, deleted FROM kulyrax_projection_state WHERE target_table = 'users'",
         [],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;

@@ -258,10 +258,10 @@ fn dlq_write(
     std::io::Write::write_all(&mut f, json.as_bytes())?;
     f.sync_all()?;
     drop(f);
-    crate::adapter::file_store::crash_point("dlq-before-rename");
+    crate::crash::crash_point("dlq-before-rename");
     std::fs::rename(&tmp, &path)?;
     crate::source::checkpoint::sync_dir(dlq_dir)?;
-    crate::adapter::file_store::crash_point("dlq-written");
+    crate::crash::crash_point("dlq-written");
     Ok(())
 }
 

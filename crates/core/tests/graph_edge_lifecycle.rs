@@ -88,7 +88,7 @@ fn edge_lifecycle_ends_absent() -> Result<(), Box<dyn std::error::Error>> {
     // The u1 incident index is now empty → removed.
     assert!(
         !dir.path()
-            .join(".conduit")
+            .join(".kulyrax")
             .join("incident")
             .join("u1.json")
             .exists()

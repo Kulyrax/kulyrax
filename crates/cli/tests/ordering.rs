@@ -10,7 +10,11 @@
 //! expected result.
 //!
 //! **Gated on** `KULYRAX_NEO4J_URI` (graph cases) and `KULYRAX_PG_URL` (SQL and
-//! outbox cases).
+//! outbox cases). A graph case owns the whole Neo4j database while it runs
+//! (`support/neo4j/`); an SQL case works in a schema of its own.
+
+#[path = "support/neo4j/mod.rs"]
+mod neo4j_isolation;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -91,8 +95,8 @@ fn text(out: &Output) -> String {
 // ---------------------------------------------------------------------------
 
 fn neo4j_project(p: &Path, uri: &str, label: &str, edge: &str) {
-    let user = env("KULYRAX_NEO4J_USER").unwrap_or_else(|| "neo4j".into());
-    let password = env("KULYRAX_NEO4J_PASSWORD").unwrap_or_else(|| "kulyrax-test".into());
+    let user = neo4j_isolation::user();
+    let password = neo4j_isolation::password();
     write(
         p.join("kulyrax.yaml"),
         &format!(
@@ -133,8 +137,8 @@ fn neo4j_project(p: &Path, uri: &str, label: &str, edge: &str) {
 
 /// (edges between the two labelled nodes, nodes with id u1, nodes with id u2).
 fn neo4j_state(uri: &str, label: &str, edge: &str) -> (i64, i64, i64) {
-    let user = env("KULYRAX_NEO4J_USER").unwrap_or_else(|| "neo4j".into());
-    let password = env("KULYRAX_NEO4J_PASSWORD").unwrap_or_else(|| "kulyrax-test".into());
+    let user = neo4j_isolation::user();
+    let password = neo4j_isolation::password();
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         let g = neo4rs::Graph::new(uri, user, password).await.unwrap();
@@ -161,8 +165,8 @@ fn neo4j_state(uri: &str, label: &str, edge: &str) -> (i64, i64, i64) {
 }
 
 fn neo4j_cleanup(uri: &str, label: &str) {
-    let user = env("KULYRAX_NEO4J_USER").unwrap_or_else(|| "neo4j".into());
-    let password = env("KULYRAX_NEO4J_PASSWORD").unwrap_or_else(|| "kulyrax-test".into());
+    let user = neo4j_isolation::user();
+    let password = neo4j_isolation::password();
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         let g = neo4rs::Graph::new(uri, user, password).await.unwrap();
@@ -178,10 +182,11 @@ fn neo4j_cleanup(uri: &str, label: &str) {
 
 #[test]
 fn an_edge_after_its_nodes_attaches_to_them_in_neo4j() {
-    let Some(uri) = env("KULYRAX_NEO4J_URI") else {
+    let Some(lease) = neo4j_isolation::lease() else {
         eprintln!("SKIP: KULYRAX_NEO4J_URI not set");
         return;
     };
+    let uri = lease.uri().to_string();
     // Both runs first, then the verdict, so a failure shows the control too.
     let mut results = Vec::new();
     for (name, max_batch) in [("one batch", None), ("one event per batch", Some("1"))] {
@@ -274,10 +279,15 @@ fn a_child_row_after_its_parent_needs_no_retry() {
 
 #[test]
 fn an_outbox_edge_after_its_nodes_attaches_to_them_in_neo4j() {
-    let (Some(base), Some(uri)) = (env("KULYRAX_PG_URL"), env("KULYRAX_NEO4J_URI")) else {
-        eprintln!("SKIP: KULYRAX_PG_URL or KULYRAX_NEO4J_URI not set");
+    let Some(base) = env("KULYRAX_PG_URL") else {
+        eprintln!("SKIP: KULYRAX_PG_URL not set");
         return;
     };
+    let Some(lease) = neo4j_isolation::lease() else {
+        eprintln!("SKIP: KULYRAX_NEO4J_URI not set");
+        return;
+    };
+    let uri = lease.uri().to_string();
     let schema = unique("kx_outbox_");
     let mut c = postgres::Client::connect(&base, postgres::NoTls).unwrap();
     c.batch_execute(&format!(

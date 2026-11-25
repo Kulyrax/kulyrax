@@ -9,7 +9,7 @@ bash run.sh
 `run.sh` does exactly what a real deployment does:
 
 1. Creates an empty `users` table in `app.db` (the target read model — Kulyrax never
-   creates *your* tables, only its own `conduit_projection_state` guard table).
+   creates *your* tables, only its own `kulyrax_projection_state` guard table).
 2. Runs `kulyrax run --config config.yaml --mappings mappings --once`, which drains the
    `events/events.ndjson` directory source once and exits (see `config.yaml`).
 3. Dumps `app.db`'s `users` table and diffs it against [`expected/users.txt`](expected/users.txt)

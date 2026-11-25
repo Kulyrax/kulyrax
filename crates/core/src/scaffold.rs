@@ -146,3 +146,16 @@ pub fn init_project(dir: &Path) -> Result<Vec<PathBuf>, InitError> {
     }
     Ok(written)
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::kulyrax_dir::{DIR, STATE};
+
+    /// The scaffolded checkpoints live in the reserved `state` entry of
+    /// `.kulyrax/`, which no file store creates (see `kulyrax_dir`).
+    #[test]
+    fn scaffolded_state_dir_is_the_reserved_entry() {
+        let state_dir = format!("state_dir: ./{DIR}/{STATE}\n");
+        assert!(super::CONFIG.contains(&state_dir), "{}", super::CONFIG);
+    }
+}

@@ -626,10 +626,10 @@ sources:
   - type: directory
     id: inbox
     path: ./events
-    state_dir: ./.conduit/sources
+    state_dir: ./.kulyrax/sources
   - type: stdin
     id: pipe
-    state_dir: ./.conduit/sources
+    state_dir: ./.kulyrax/sources
 "#;
         let cfg: KulyraxConfig = serde_yaml::from_str(yaml).unwrap();
         cfg.validate().unwrap();

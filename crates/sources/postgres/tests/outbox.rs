@@ -3,7 +3,10 @@
 //! **Gated on `KULYRAX_PG_URL`**, like the Postgres adapter's suite: unset, every
 //! test prints a skip line and passes. The tests run one at a time (`SERIAL`):
 //! the gap rule reads the database's oldest running transaction, so a test
-//! holding a transaction open would hold back another test's gaps.
+//! holding a transaction open would hold back another test's gaps. Every test
+//! works in this binary's own schema (`common::isolated_pg_url`).
+
+mod common;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -26,10 +29,7 @@ static TABLE_SEQ: AtomicU32 = AtomicU32::new(0);
 
 macro_rules! require_pg {
     ($url:ident, $guard:ident) => {
-        let Some($url) = std::env::var("KULYRAX_PG_URL")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-        else {
+        let Some($url) = common::isolated_pg_url() else {
             eprintln!("SKIP: KULYRAX_PG_URL not set");
             return Ok(());
         };

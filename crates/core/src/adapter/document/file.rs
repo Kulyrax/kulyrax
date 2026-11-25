@@ -59,7 +59,7 @@ impl FileDocumentAdapter {
 }
 
 /// Where guards live: one directory per collection.
-const GUARD_DIR: &str = ".conduit/entities";
+const GUARD_DIR: &str = ".kulyrax/entities";
 
 /// The collections the mappings name, each a top-level directory of
 /// documents.

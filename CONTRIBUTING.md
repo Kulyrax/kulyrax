@@ -40,25 +40,58 @@ And two standards specific to this codebase (see `CLAUDE.md` for the full list):
 
 ## DB-backed tests
 
-Postgres, MySQL, Redis, MongoDB, and Neo4j each have their own integration suite
-(`tests/pg_backend.rs`, `tests/mysql_backend.rs`, `tests/redis_backend.rs`,
-`tests/mongo_backend.rs`, `tests/neo4j_backend.rs`). They're **skipped, not failed**,
-when the matching connection env var isn't set — `cargo test --workspace` locally with
-no databases running will report them as passed-and-skipped, not error:
+Postgres, MySQL, Redis, MongoDB, Neo4j and Elasticsearch each have their own
+integration suite (`tests/pg_backend.rs`, `tests/mysql_backend.rs`,
+`tests/redis_backend.rs`, `tests/mongo_backend.rs`, `tests/neo4j_backend.rs`,
+`tests/es_backend.rs`), and some CLI, ingest and outbox tests use them too. They're
+**skipped, not failed**, when the matching connection env var isn't set —
+`cargo test --workspace` locally with no databases running will report them as
+passed-and-skipped, not error:
 
 | Suite | Env var |
 |---|---|
-| Postgres | `KULYRAX_POSTGRES_URL` |
+| Postgres | `KULYRAX_PG_URL` |
 | MySQL | `KULYRAX_MYSQL_URL` |
 | Redis | `KULYRAX_REDIS_URL` |
-| MongoDB | `KULYRAX_MONGO_URL` (+ optional `KULYRAX_MONGO_DB`) |
-| Neo4j | `KULYRAX_NEO4J_URL`, `KULYRAX_NEO4J_USER`, `KULYRAX_NEO4J_PASSWORD` |
+| MongoDB | `KULYRAX_MONGO_URL` |
+| Neo4j | `KULYRAX_NEO4J_URI`, `KULYRAX_NEO4J_USER`, `KULYRAX_NEO4J_PASSWORD` |
+| Elasticsearch | `KULYRAX_ELASTICSEARCH_URL` |
 
 Point the relevant env var at a real instance (a local Docker container is the easiest
 way — see `.github/workflows/ci.yml`'s `test-postgres` / `test-mysql` / `test-redis` /
 `test-mongo` / `test-neo4j` jobs for exactly how CI starts each one, including Mongo's
 replica-set initialization) to run that suite for real before touching backend code.
-CI runs all five on every PR regardless of what you tested locally.
+CI runs all of them on every PR regardless of what you tested locally.
+
+### Isolation
+
+A test never reads or writes another run's data, or the shared database's own
+guard table, collection or label:
+
+- **Postgres, MySQL, MongoDB:** each test binary works in a schema (Postgres) or
+  database (MySQL, MongoDB) of its own, named `kx_run_<binary>`. It is dropped and
+  recreated when the binary starts, and the binary fails at once if it is not empty
+  then. Tests that need more than one (the `*_rename` suites, the CLI upgrade tests)
+  make one per test and drop it at the end.
+- **Redis, Elasticsearch:** each test uses a namespace or index of its own. The CLI
+  upgrade tests delete theirs at the end.
+- **Neo4j** has a single database, and the guard-label migration relabels every guard
+  node in it, so a Neo4j test owns the whole database while it runs. It takes a
+  process-wide lock and an OS file lock in `target/tmp`, then wipes everything: every
+  node, and every constraint and index named `kulyrax_…` (or with 0.12's prefix), or
+  on a guard label. It wipes again when it ends. A guard node left after the first wipe fails
+  the test.
+
+  **Locally, run one Neo4j container per branch**, and never point two branches at
+  one Neo4j: a run on one branch wipes the other's data. Pick the port with
+  `KULYRAX_NEO4J_URI`, for example `bolt://localhost:7687` for `main` and
+  `bolt://localhost:7688` for a second branch:
+
+  ```
+  docker run -d --name kx-neo4j-7688 -p 7688:7687 -e NEO4J_AUTH=neo4j/kulyrax-test neo4j:5
+  ```
+
+  CI starts a fresh Neo4j for every job.
 
 ## Code style
 

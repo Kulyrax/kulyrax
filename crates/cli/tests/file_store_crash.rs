@@ -214,9 +214,9 @@ fn stores(project: &Path) -> BTreeMap<String, String> {
                 .unwrap()
                 .to_string_lossy()
                 .replace('\\', "/");
-            if rel.ends_with(".conduit/lock")
-                || rel.contains(".conduit/wal")
-                || rel.contains(".conduit/layout")
+            if rel.ends_with(".kulyrax/lock")
+                || rel.contains(".kulyrax/wal")
+                || rel.contains(".kulyrax/layout")
             {
                 continue;
             }
@@ -233,7 +233,7 @@ fn stores(project: &Path) -> BTreeMap<String, String> {
 }
 
 fn logs(project: &Path, store: &str) -> Vec<PathBuf> {
-    let mut v: Vec<PathBuf> = std::fs::read_dir(project.join(store).join(".conduit/wal"))
+    let mut v: Vec<PathBuf> = std::fs::read_dir(project.join(store).join(".kulyrax/wal"))
         .map(|d| d.map(|e| e.unwrap().path()).collect())
         .unwrap_or_default();
     v.sort();

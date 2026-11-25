@@ -140,7 +140,7 @@ fn guard_lanes(db: &Path) -> Vec<String> {
     query_strings(
         db,
         "SELECT target_table || ' ' || entity_key || ' ' || last_sequence
-         FROM conduit_projection_state ORDER BY 1",
+         FROM kulyrax_projection_state ORDER BY 1",
     )
 }
 
@@ -424,7 +424,7 @@ fn refused_with(ddl: &str) -> String {
     assert_eq!(
         query_strings(
             &p.db,
-            "SELECT target_table FROM conduit_projection_state WHERE target_table <> 'users'"
+            "SELECT target_table FROM kulyrax_projection_state WHERE target_table <> 'users'"
         ),
         Vec::<String>::new(),
         "no shadow guard lanes"

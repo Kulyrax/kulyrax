@@ -11,6 +11,11 @@
 //! Consolidated into one file, mirroring `pg_backend.rs` (Phase 19.6),
 //! `redis_backend.rs` (Phase 22.5), and `mongo_backend.rs` (Phase 23.5) —
 //! every scenario shares the same skip guard and fresh-label helper.
+//!
+//! Each test owns the whole database while it runs (`common::lease`): one at a
+//! time, wiped before and after.
+
+mod common;
 
 use kulyrax_adapter_neo4j::Neo4jAdapter;
 use kulyrax_core::adapter::StorageAdapter;
@@ -29,26 +34,23 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 type R = Result<(), Box<dyn std::error::Error>>;
 
-fn neo4j_uri() -> Option<String> {
-    std::env::var("KULYRAX_NEO4J_URI")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-}
-
 fn neo4j_user() -> String {
-    std::env::var("KULYRAX_NEO4J_USER").unwrap_or_else(|_| "neo4j".into())
+    common::user()
 }
 
 fn neo4j_password() -> String {
-    std::env::var("KULYRAX_NEO4J_PASSWORD").unwrap_or_else(|_| "kulyrax-test".into())
+    common::password()
 }
 
+/// Skip when `KULYRAX_NEO4J_URI` is unset; otherwise hold the database (wiped)
+/// until the end of the test, and bind `$uri` to it.
 macro_rules! require_neo4j {
     ($uri:ident) => {
-        let Some($uri) = neo4j_uri() else {
+        let Some(lease) = common::lease() else {
             eprintln!("SKIP: KULYRAX_NEO4J_URI not set");
             return Ok(());
         };
+        let $uri = lease.uri().to_string();
     };
 }
 
@@ -190,7 +192,7 @@ fn neo4j_node_lifecycle() -> R {
         &rt,
         &graph,
         neo4rs::Query::new(
-            "MATCH (g:__ConduitGuard {kind:'node', target:$label, entity_key:'n1', facet:''}) \
+            "MATCH (g:__KulyraxGuard {kind:'node', target:$label, entity_key:'n1', facet:''}) \
              RETURN g.last_sequence AS seq, g.deleted AS deleted"
                 .to_string(),
         )
@@ -342,7 +344,7 @@ fn neo4j_detach_delete() -> R {
         &rt,
         &graph,
         neo4rs::Query::new(format!(
-            "MATCH (g:__ConduitGuard {{kind:'edge', target:'{etype}', deleted:true}}) RETURN count(g) AS c"
+            "MATCH (g:__KulyraxGuard {{kind:'edge', target:'{etype}', deleted:true}}) RETURN count(g) AS c"
         )),
     )
     .expect("count query must return a row");
@@ -602,7 +604,7 @@ fn neo4j_prepare_twice_is_idempotent() -> R {
         &rt,
         &graph,
         neo4rs::Query::new(
-            "SHOW CONSTRAINTS YIELD labelsOrTypes WHERE '__ConduitGuard' IN labelsOrTypes RETURN count(*) AS c"
+            "SHOW CONSTRAINTS YIELD labelsOrTypes WHERE '__KulyraxGuard' IN labelsOrTypes RETURN count(*) AS c"
                 .to_string(),
         ),
     )
@@ -769,7 +771,7 @@ fn neo4j_batch_rollback_leaves_nothing() -> R {
         &rt,
         &graph,
         neo4rs::Query::new(format!(
-            "MATCH (g:__ConduitGuard) WHERE g.target IN ['{label}', '{etype}'] RETURN count(g) AS c"
+            "MATCH (g:__KulyraxGuard) WHERE g.target IN ['{label}', '{etype}'] RETURN count(g) AS c"
         )),
     )
     .expect("count query must return a row");
@@ -899,7 +901,7 @@ fn neo4j_subgraph_projects_every_record_in_one_transaction() -> R {
             &rt,
             &graph,
             format!(
-                "MATCH (g:__ConduitGuard) WHERE g.entity_key IN ['{o2}', '{c2}'] RETURN count(g) AS c"
+                "MATCH (g:__KulyraxGuard) WHERE g.entity_key IN ['{o2}', '{c2}'] RETURN count(g) AS c"
             )
         )?,
         0,

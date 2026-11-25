@@ -119,7 +119,7 @@ columns:
 
     let conn = Connection::open(&db_path)?;
     let last_sequence: i64 = conn.query_row(
-        "SELECT last_sequence FROM conduit_projection_state WHERE target_table = 'users'",
+        "SELECT last_sequence FROM kulyrax_projection_state WHERE target_table = 'users'",
         [],
         |r| r.get(0),
     )?;
@@ -140,7 +140,7 @@ columns:
     );
 
     let (last_sequence, deleted): (i64, i64) = conn.query_row(
-        "SELECT last_sequence, deleted FROM conduit_projection_state WHERE target_table = 'users'",
+        "SELECT last_sequence, deleted FROM kulyrax_projection_state WHERE target_table = 'users'",
         [],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
@@ -232,7 +232,7 @@ document: {}
     );
 
     let guard_content = std::fs::read_to_string(
-        root.join(".conduit")
+        root.join(".kulyrax")
             .join("entities")
             .join("users")
             .join("u1.done"),

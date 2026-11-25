@@ -120,7 +120,7 @@ fn a_rejected_reload_is_reported_and_recorded_without_the_password() {
     );
     // The running process has built its store once it holds the lock.
     let deadline = Instant::now() + Duration::from_secs(30);
-    while !p.join("store/.conduit/lock").exists() {
+    while !p.join("store/.kulyrax/lock").exists() {
         assert!(Instant::now() < deadline, "kulyrax run did not start");
         std::thread::sleep(Duration::from_millis(50));
     }

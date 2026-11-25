@@ -322,7 +322,7 @@ mod tests {
             assert!(check_config_name("namespace", ok).is_ok(), "{ok}");
         }
         for bad in [
-            "", "../x", ".conduit", "a/b", "a:b", "a b", "CON", "lpt1", "a.b",
+            "", "../x", ".kulyrax", "a/b", "a:b", "a b", "CON", "lpt1", "a.b",
         ] {
             assert!(check_config_name("namespace", bad).is_err(), "{bad}");
         }

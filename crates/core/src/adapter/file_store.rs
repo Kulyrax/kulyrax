@@ -3,12 +3,17 @@
 //! The document, key-value and graph file stores keep one JSON file per key.
 //! They all write through a [`FileStore`]. It collects a batch's writes in
 //! memory, keeping only the final content of each path, and makes them durable
-//! with one fsynced batch log (`.conduit/wal/<seq>.log`) before applying them to
+//! with one fsynced batch log (`.kulyrax/wal/<seq>.log`) before applying them to
 //! the per-key files without fsync. A sync point in the background later fsyncs
 //! the touched files and deletes the logs they cover. `prepare` replays any log
 //! still on disk before anything is ingested.
 //!
 //! Decision record: `docs/ledger/decisions/2026-10-30-file-store-batch-log.md`.
+//!
+//! A store's internal files live in `<root>/.kulyrax/`, in the entries
+//! [`kulyrax_dir::STORE_ENTRIES`] lists and nowhere else. A store last opened by
+//! Kulyrax 0.12 keeps them under the old name; the first start moves them (see
+//! [`crate::adapter::legacy`]).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
@@ -21,15 +26,14 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::adapter::{AdapterError, file_names};
+use crate::crash::crash_point;
 use crate::execution::stages::{self, Stage, timed};
+use crate::kulyrax_dir::{self, DIR, LAYOUT, LOCK, WAL};
 
-/// Under the store root: the lock file and the batch-log directory.
-const CONDUIT_DIR: &str = ".conduit";
-const LOCK_FILE: &str = "lock";
-const WAL_DIR: &str = "wal";
-/// Under `.conduit/`: one marker per adapter kind whose layout check passed
-/// (see [`Layout`]).
-const LAYOUT_DIR: &str = "layout";
+/// The content of a layout marker (`.kulyrax/layout/<kind>`): version 2 is the
+/// `.kulyrax/` layout. Version 1 (0.12.1) was the same layout under the old name.
+pub(crate) const LAYOUT_VERSION: &[u8] = b"2
+";
 
 /// Batch log layout: magic, body length (u64 LE), CRC-32 of the body (u32 LE),
 /// then the body: per entry, a tag byte (1 write, 0 remove), the path length
@@ -53,7 +57,7 @@ const SYNC_DELAY: Duration = Duration::from_secs(2);
 /// which bounds the batch logs kept on disk.
 const SYNC_QUEUE: usize = 4;
 
-/// Past this many cached `.conduit/` files the cache is cleared rather than
+/// Past this many cached `.kulyrax/` files the cache is cleared rather than
 /// grown (about 100 bytes of guard per entry, plus the path).
 const CACHE_LIMIT: usize = 1_000_000;
 
@@ -120,10 +124,10 @@ impl Pending {
     }
 }
 
-/// Only `.conduit/` files (guards, graph incident indexes) are cached: they
+/// Only `.kulyrax/` files (guards, graph incident indexes) are cached: they
 /// are what every event reads. Data files are read only for facet merges.
 fn is_cached(path: &str) -> bool {
-    path.starts_with(".conduit/")
+    kulyrax_dir::is_store_path(path)
 }
 
 // ---------------------------------------------------------------------------
@@ -223,7 +227,7 @@ fn list_logs(wal: &Path) -> io::Result<Vec<(u64, PathBuf)>> {
 // File-system helpers
 // ---------------------------------------------------------------------------
 
-fn remove_if_exists(path: &Path) -> io::Result<()> {
+pub(crate) fn remove_if_exists(path: &Path) -> io::Result<()> {
     match fs::remove_file(path) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
         _ => Ok(()),
@@ -234,7 +238,7 @@ fn remove_if_exists(path: &Path) -> io::Result<()> {
 /// durable. Windows has no portable equivalent (a directory cannot be opened
 /// as a file), so this is a no-op there; NTFS journals those changes in order
 /// (see the decision record).
-fn sync_dir(dir: &Path) -> io::Result<()> {
+pub(crate) fn sync_dir(dir: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
         match File::open(dir) {
@@ -399,37 +403,6 @@ fn dirs_to_sync(files: &[String]) -> BTreeSet<String> {
 }
 
 // ---------------------------------------------------------------------------
-// Crash test hook
-// ---------------------------------------------------------------------------
-
-/// With the `crash-points` feature, `KULYRAX_CRASH_AT=<point>:<n>` aborts the
-/// process the n-th time it reaches `point`, simulating a crash there. Only
-/// `kulyrax-cli`'s crash tests enable the feature; without it this is empty.
-#[cfg(feature = "crash-points")]
-pub(crate) fn crash_point(point: &str) {
-    use std::sync::OnceLock;
-    use std::sync::atomic::AtomicU32;
-    static TARGET: OnceLock<Option<(String, u32)>> = OnceLock::new();
-    static HITS: AtomicU32 = AtomicU32::new(0);
-    let target = TARGET.get_or_init(|| {
-        let spec = std::env::var("KULYRAX_CRASH_AT").ok()?;
-        let (p, n) = spec.split_once(':')?;
-        Some((p.to_string(), n.parse().ok()?))
-    });
-    if let Some((p, n)) = target
-        && p == point
-        && HITS.fetch_add(1, Ordering::SeqCst) + 1 == *n
-    {
-        eprintln!("crash point {point} reached, aborting");
-        std::process::abort();
-    }
-}
-
-#[cfg(not(feature = "crash-points"))]
-#[inline(always)]
-pub(crate) fn crash_point(_point: &str) {}
-
-// ---------------------------------------------------------------------------
 // The per-root handle: lock, log sequence, sync point
 // ---------------------------------------------------------------------------
 
@@ -461,7 +434,7 @@ struct WalState {
 }
 
 /// One store directory, held by this process: the OS lock on
-/// `.conduit/lock`, and the batch logs written to it. Every adapter on the
+/// `.kulyrax/lock`, and the batch logs written to it. Every adapter on the
 /// same root in one process shares it (see [`acquire_root`]), so a sync point
 /// covers every log on the root, oldest first.
 struct Root {
@@ -519,7 +492,7 @@ impl Root {
     }
 
     fn wal_dir(&self) -> PathBuf {
-        self.dir.join(CONDUIT_DIR).join(WAL_DIR)
+        self.dir.join(DIR).join(WAL)
     }
 
     fn state(&self) -> io::Result<std::sync::MutexGuard<'_, WalState>> {
@@ -703,8 +676,8 @@ static ROOTS: Mutex<BTreeMap<PathBuf, Weak<Root>>> = Mutex::new(BTreeMap::new())
 /// process has not been writing to the root, and leftover logs must be
 /// replayed).
 fn acquire_root(dir: &Path) -> io::Result<(Arc<Root>, bool)> {
-    let conduit = dir.join(CONDUIT_DIR);
-    fs::create_dir_all(conduit.join(WAL_DIR))?;
+    let internal = dir.join(DIR);
+    fs::create_dir_all(internal.join(WAL))?;
     let key = fs::canonicalize(dir)?;
     let mut roots = ROOTS
         .lock()
@@ -712,27 +685,7 @@ fn acquire_root(dir: &Path) -> io::Result<(Arc<Root>, bool)> {
     if let Some(root) = roots.get(&key).and_then(Weak::upgrade) {
         return Ok((root, false));
     }
-    let lock_path = conduit.join(LOCK_FILE);
-    let lock = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(&lock_path)?;
-    match lock.try_lock() {
-        Ok(()) => {}
-        Err(fs::TryLockError::WouldBlock) => {
-            return Err(io::Error::new(
-                io::ErrorKind::WouldBlock,
-                format!(
-                    "file store {} is in use by another process (lock {} is held); \
-                     only one Kulyrax process may write to a file store",
-                    dir.display(),
-                    lock_path.display()
-                ),
-            ));
-        }
-        Err(fs::TryLockError::Error(e)) => return Err(e),
-    }
+    let lock = take_lock(dir, &internal.join(LOCK), true)?;
     let root = Arc::new(Root {
         dir: dir.to_path_buf(),
         _lock: lock,
@@ -754,10 +707,44 @@ fn acquire_root(dir: &Path) -> io::Result<(Arc<Root>, bool)> {
     Ok((root, true))
 }
 
+/// Open `lock_path` and take its OS lock, or say which process-level lock is
+/// held. `create`: make the file if it is missing.
+pub(crate) fn take_lock(dir: &Path, lock_path: &Path, create: bool) -> io::Result<File> {
+    let lock = OpenOptions::new()
+        .create(create)
+        .truncate(false)
+        .write(true)
+        .open(lock_path)?;
+    match lock.try_lock() {
+        Ok(()) => Ok(lock),
+        Err(fs::TryLockError::WouldBlock) => Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            format!(
+                "file store {} is in use by another process (lock {} is held); \
+                 only one Kulyrax process may write to a file store",
+                dir.display(),
+                lock_path.display()
+            ),
+        )),
+        Err(fs::TryLockError::Error(e)) => Err(e),
+    }
+}
+
 /// Replay every batch log under the root, oldest first, then fsync what they
 /// touched and delete them. Returns the next free log sequence number.
 fn recover(root: &Root, known_dirs: &mut HashSet<String>) -> io::Result<u64> {
-    let logs = list_logs(&root.wal_dir())?;
+    replay_logs(&root.dir, &root.wal_dir(), known_dirs)
+}
+
+/// Replay every batch log in `wal`, oldest first, applying it under `dir`
+/// (log entries name paths relative to the store root), then fsync what they
+/// touched and delete them. Returns the next free log sequence number.
+pub(crate) fn replay_logs(
+    dir: &Path,
+    wal: &Path,
+    known_dirs: &mut HashSet<String>,
+) -> io::Result<u64> {
+    let logs = list_logs(wal)?;
     let next_seq = logs.last().map_or(1, |(seq, _)| seq + 1);
     let mut decoded = Vec::with_capacity(logs.len());
     let mut valid = Vec::with_capacity(logs.len());
@@ -785,7 +772,7 @@ fn recover(root: &Root, known_dirs: &mut HashSet<String>) -> io::Result<u64> {
     }
     let mut touched = HashSet::new();
     for pending in &decoded {
-        apply(&root.dir, pending, known_dirs)?;
+        apply(dir, pending, known_dirs)?;
         touched.extend(pending.files.keys().cloned());
     }
     if !decoded.is_empty() {
@@ -794,7 +781,7 @@ fn recover(root: &Root, known_dirs: &mut HashSet<String>) -> io::Result<u64> {
             logs: valid,
             not_before: None,
         };
-        run_sync(&root.dir, &job)?;
+        run_sync(dir, &job)?;
     }
     Ok(next_seq)
 }
@@ -807,9 +794,9 @@ struct StoreState {
     root: Option<Arc<Root>>,
     /// The open batch, between `begin` and `commit`/`rollback`.
     batch: Option<Pending>,
-    /// `.conduit/` files as they are on disk (`None`: absent).
+    /// `.kulyrax/` files as they are on disk (`None`: absent).
     cache: HashMap<String, Option<String>>,
-    /// Every `.conduit/` file this store reads is in `cache`, so a miss means
+    /// Every `.kulyrax/` file this store reads is in `cache`, so a miss means
     /// absent. True when the store was empty at `prepare`.
     cache_complete: bool,
     known_dirs: HashSet<String>,
@@ -820,7 +807,7 @@ struct StoreState {
 /// - every mapping name it puts in a path is a plain directory name
 ///   ([`file_names::check_config_name`]);
 /// - its top-level directories are its own on the root ([`Root::claim`]);
-/// - until it has passed once (a marker under `.conduit/layout/`),
+/// - until it has passed once (a marker under `.kulyrax/layout/`),
 ///   `upgrade` moves an older layout into place and lists the files an older
 ///   scheme wrote that this one cannot read. Any listed file refuses the
 ///   start: re-keying it silently would lose its guard.
@@ -877,11 +864,7 @@ impl FileStore {
             return Ok(());
         };
         root.claim(layout.kind, &layout.claims)?;
-        let marker = self
-            .dir
-            .join(CONDUIT_DIR)
-            .join(LAYOUT_DIR)
-            .join(layout.kind);
+        let marker = self.dir.join(DIR).join(LAYOUT).join(layout.kind);
         if marker.exists() {
             return Ok(());
         }
@@ -958,6 +941,8 @@ impl FileStore {
         }
         let (root, fresh) = acquire_root(&self.dir).map_err(io_err)?;
         if fresh {
+            crate::adapter::legacy::migrate_file_store(&self.dir, &mut st.known_dirs)
+                .map_err(io_err)?;
             let next_seq = recover(&root, &mut st.known_dirs).map_err(io_err)?;
             root.state().map_err(io_err)?.next_seq = next_seq;
         }
@@ -1048,6 +1033,7 @@ impl FileStore {
         if pending.is_empty() {
             return Ok(());
         }
+        check_paths(&pending)?;
         let root = Arc::clone(self.ready(st)?);
         let mut wal = root.state().map_err(io_err)?;
         let log = timed(Stage::Log, || root.write_log(&mut wal, &pending)).map_err(io_err)?;
@@ -1078,14 +1064,40 @@ impl FileStore {
     }
 }
 
-/// True when `.conduit/` holds nothing but the batch logs, the lock and the
-/// layout markers: no guard has ever been written here. (Guards are never
-/// written into those directories: mapping names cannot name them.)
+/// Refuse a batch that writes under `.kulyrax/` outside the store's own
+/// entries: `control` and `state` belong to other owners (see [`kulyrax_dir`]).
+fn check_paths(pending: &Pending) -> Result<(), AdapterError> {
+    let prefix = format!("{DIR}/");
+    let bad: Vec<&str> = pending
+        .files
+        .keys()
+        .map(String::as_str)
+        .filter(|p| (*p == DIR || p.starts_with(&prefix)) && !kulyrax_dir::is_store_path(p))
+        .collect();
+    if bad.is_empty() {
+        return Ok(());
+    }
+    Err(AdapterError::WriteFailed(format!(
+        "file store refused to write {}: under {DIR}/ a file store writes only its own \
+         entries ({})",
+        bad.join(", "),
+        kulyrax_dir::STORE_ENTRIES.join(", ")
+    )))
+}
+
+/// True when no guard has ever been written here: none of the store's guard
+/// entries exists under `.kulyrax/`. Only the store's own entries are looked
+/// at; `.kulyrax/` may hold other owners' entries (see [`kulyrax_dir`]).
 fn store_is_empty(dir: &Path) -> io::Result<bool> {
-    for entry in fs::read_dir(dir.join(CONDUIT_DIR))? {
-        let name = entry?.file_name();
-        if name != WAL_DIR && name != LOCK_FILE && name != LAYOUT_DIR {
-            return Ok(false);
+    let internal = dir.join(DIR);
+    for entry in kulyrax_dir::STORE_ENTRIES {
+        if [WAL, LOCK, LAYOUT].contains(entry) {
+            continue;
+        }
+        match fs::symlink_metadata(internal.join(entry)) {
+            Ok(_) => return Ok(false),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
         }
     }
     Ok(true)
@@ -1176,6 +1188,41 @@ mod tests {
             p.set(path, c.map(str::to_string));
         }
         p
+    }
+
+    /// `.kulyrax/control` and `.kulyrax/state` belong to `kulyrax reload` and
+    /// the checkpoints: a store never writes there, and nothing is written
+    /// when a batch tries.
+    #[test]
+    fn a_store_never_writes_another_owner_s_entries() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = FileStore::new(dir.path().to_path_buf());
+        for path in [
+            ".kulyrax/state/events.json",
+            ".kulyrax/control/reload-request",
+            ".kulyrax/unknown",
+            ".kulyrax",
+        ] {
+            let err = store
+                .with_txn(|t| {
+                    t.write(path, "x".to_string());
+                    Ok::<(), ()>(())
+                })
+                .expect_err(path);
+            assert!(
+                err.to_string().contains("refused to write"),
+                "{path}: {err}"
+            );
+            assert!(!dir.path().join(path).is_file(), "{path} written");
+        }
+        store
+            .with_txn(|t| {
+                t.write(".kulyrax/kv/users/u1.guard.json", "{}".to_string());
+                t.write("users/u1.json", "{}".to_string());
+                Ok::<(), ()>(())
+            })
+            .expect("own entries")
+            .expect("own entries");
     }
 
     #[test]

@@ -2,7 +2,7 @@
 //! `type: mongodb` via [`factory`].
 //!
 //! Documents go to `{database}.{collection}`; guards go to a separate
-//! `conduit_projection_state` collection. The guard and the target document
+//! `kulyrax_projection_state` collection. The guard and the target document
 //! live in different collections, so no single atomic Mongo operation covers
 //! both: each write runs in a client-session transaction.
 //!
@@ -16,6 +16,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
+
+mod legacy;
 
 use mongodb::bson::{Document, doc, from_document, to_document};
 use mongodb::sync::{Client, ClientSession, Database};
@@ -97,7 +99,7 @@ pub fn factory(
 
 /// Dedicated collection for guard documents — kept separate from the user's
 /// projected documents, same principle as the SQL guard table.
-const GUARD_COLLECTION: &str = "conduit_projection_state";
+const GUARD_COLLECTION: &str = "kulyrax_projection_state";
 
 /// Retry budget for a transaction aborted by a concurrent writer.
 const MAX_ATTEMPTS: u32 = 5;
@@ -541,7 +543,9 @@ impl StorageAdapter for MongoDbAdapter {
         self.prepared
             .prepare(|| {
                 timed(Stage::Schema, || {
-                    self.ensure_guard_index(&client.database(&self.database))
+                    let db = client.database(&self.database);
+                    legacy::migrate_guard_collection(client, &db)?;
+                    self.ensure_guard_index(&db)
                 })
             })
             .map_err(|e| AdapterError::WriteFailed(e.to_string()))

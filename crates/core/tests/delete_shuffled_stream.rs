@@ -126,7 +126,7 @@ fn apply_order(order: &[u64]) -> (i64, i64, i64) {
         .unwrap();
     let (last_sequence, deleted): (i64, i64) = conn
         .query_row(
-            "SELECT last_sequence, deleted FROM conduit_projection_state WHERE target_table = 'users'",
+            "SELECT last_sequence, deleted FROM kulyrax_projection_state WHERE target_table = 'users'",
             [],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )

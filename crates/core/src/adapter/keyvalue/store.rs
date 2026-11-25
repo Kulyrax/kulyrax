@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -58,7 +57,7 @@ impl FileKvStore {
 
 /// Where guards live: one directory per namespace, under a directory of
 /// their own, so no namespace name can reach the store's own files.
-const GUARD_DIR: &str = ".conduit/kv";
+const GUARD_DIR: &str = ".kulyrax/kv";
 
 /// The namespaces the mappings name, each a top-level directory of values.
 fn layout(builder: &KvRuntimeBuilder) -> Layout {
@@ -82,37 +81,18 @@ fn layout(builder: &KvRuntimeBuilder) -> Layout {
     }
 }
 
-/// Up to 0.12.0 guards lived at `.conduit/<namespace>/`, beside the store's
-/// own files: move them under [`GUARD_DIR`] (same names, so every lane is
-/// kept). Then refuse what this version would not have named.
+/// Refuse what this version would not have named. (Key-value guards from
+/// 0.12.0, at `.kulyrax/<namespace>/`, are refused earlier, by the store's
+/// migration: they need one start under 0.12.1.)
 fn upgrade(root: &Path, namespaces: &[String]) -> io::Result<Vec<String>> {
     let mut refused = Vec::new();
     for ns in namespaces {
-        let old = root.join(".conduit").join(ns);
-        let new = root.join(".conduit").join("kv").join(ns);
-        if let Ok(entries) = fs::read_dir(&old) {
-            for entry in entries {
-                let entry = entry?;
-                let name = entry.file_name();
-                if !entry.file_type()?.is_file() || !name.to_string_lossy().ends_with(".guard.json")
-                {
-                    continue;
-                }
-                let target = new.join(&name);
-                if target.exists() {
-                    refused.push(format!(
-                        "both {} and {}",
-                        entry.path().display(),
-                        target.display()
-                    ));
-                    continue;
-                }
-                fs::create_dir_all(&new)?;
-                fs::rename(entry.path(), &target)?;
-            }
-        }
         file_names::refuse_foreign_names(&root.join(ns), ".json", &mut refused)?;
-        file_names::refuse_foreign_names(&new, ".guard.json", &mut refused)?;
+        file_names::refuse_foreign_names(
+            &root.join(GUARD_DIR).join(ns),
+            ".guard.json",
+            &mut refused,
+        )?;
     }
     Ok(refused)
 }

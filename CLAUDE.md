@@ -63,7 +63,7 @@ kulyrax/
    kind in `dispatch.rs`, `runtime/dependency_graph.rs`, or `decide()`.**
 
 2. **Guard lanes** — idempotency is entity-keyed and sequence-gated (Phase 11), per
-   `(target, entity_key, facet)` (Phase 15). SQL: the `conduit_projection_state` table.
+   `(target, entity_key, facet)` (Phase 15). SQL: the `kulyrax_projection_state` table.
    Document / KV / Graph: a per-entity JSON sidecar. Redelivery → `Skipped(StaleSequence)`.
 
 3. **Dependency order** — Kahn's algorithm over `depends_on`, then priority

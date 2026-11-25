@@ -96,7 +96,7 @@ fn kv_full_lifecycle_ends_absent_with_tombstone() -> Result<(), Box<dyn std::err
 
     let guard_content = std::fs::read_to_string(
         dir.path()
-            .join(".conduit")
+            .join(".kulyrax")
             .join("kv")
             .join("user-view")
             .join("u1.guard.json"),

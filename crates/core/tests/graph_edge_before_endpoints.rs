@@ -63,7 +63,7 @@ fn edge_written_even_when_endpoints_never_projected() -> Result<(), Box<dyn std:
     for endpoint in ["ghost1", "ghost2"] {
         assert!(
             dir.path()
-                .join(".conduit")
+                .join(".kulyrax")
                 .join("incident")
                 .join(format!("{endpoint}.json"))
                 .exists()

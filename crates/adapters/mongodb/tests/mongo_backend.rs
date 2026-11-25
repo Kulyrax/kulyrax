@@ -1,8 +1,8 @@
 //! MongoDB backend integration scenarios.
 //!
-//! **Gated on `KULYRAX_MONGO_URL`** (`mongodb://[user:pass@]host[:port]`,
-//! optionally `KULYRAX_MONGO_DB` for the database name, default
-//! `kulyrax_test`). When unset every test prints a skip line and returns
+//! **Gated on `KULYRAX_MONGO_URL`** (`mongodb://[user:pass@]host[:port]`).
+//! Every test works in this binary's own database, `kx_run_mongo_backend`
+//! (see `mongo_db`). When unset every test prints a skip line and returns
 //! `Ok` — the hermetic file-backed document suite stays the default and CI
 //! without a MongoDB replica set stays green. Point it at a throwaway
 //! single-node replica set (`docker run --rm -p 27017:27017 mongo:7 --replSet
@@ -38,8 +38,34 @@ fn mongo_url() -> Option<String> {
         .filter(|s| !s.trim().is_empty())
 }
 
+/// This binary's own database, `kx_run_mongo_backend`, dropped once per run
+/// and checked empty before any test uses it, so no test reads or writes the
+/// shared database's guard collection. The harness has no
+/// end-of-binary hook, so the database is dropped at the start of the next
+/// run. Call it only after `require_mongo!`.
 fn mongo_db() -> String {
-    std::env::var("KULYRAX_MONGO_DB").unwrap_or_else(|_| "kulyrax_test".into())
+    static DB: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    DB.get_or_init(|| {
+        let db = format!("kx_run_{}", env!("CARGO_CRATE_NAME"));
+        let url = mongo_url().unwrap_or_else(|| panic!("KULYRAX_MONGO_URL is not set"));
+        let client = mongo_client(&url).unwrap_or_else(|e| panic!("connect to MongoDB: {e}"));
+        let handle = client.database(&db);
+        handle
+            .drop()
+            .run()
+            .unwrap_or_else(|e| panic!("drop the test database {db}: {e}"));
+        // Fail loudly on leftovers: the fresh database holds nothing.
+        let leftovers = handle
+            .list_collection_names()
+            .run()
+            .unwrap_or_else(|e| panic!("inspect the test database {db}: {e}"));
+        assert!(
+            leftovers.is_empty(),
+            "the fresh test database {db} is not empty: {leftovers:?}"
+        );
+        db
+    })
+    .clone()
 }
 
 macro_rules! require_mongo {
@@ -198,7 +224,7 @@ fn mongo_delete_lifecycle() -> R {
         target.find_one(doc! { "_id": "u1" }).run()?.is_none(),
         "document must be gone after delete"
     );
-    let guard_coll = db_handle.collection::<mongodb::bson::Document>("conduit_projection_state");
+    let guard_coll = db_handle.collection::<mongodb::bson::Document>("kulyrax_projection_state");
     let guard = guard_coll
         .find_one(doc! { "target": &coll, "entity_key": "u1" })
         .run()?
@@ -319,7 +345,7 @@ fn mongo_concurrent_writers() -> R {
 
     let client = mongo_client(&url)?;
     let db_handle = client.database(&db);
-    let guard_coll = db_handle.collection::<mongodb::bson::Document>("conduit_projection_state");
+    let guard_coll = db_handle.collection::<mongodb::bson::Document>("kulyrax_projection_state");
     let guard = guard_coll
         .find_one(doc! { "target": &coll, "entity_key": "u1" })
         .run()?
@@ -385,12 +411,12 @@ fn doc_cross_backend() -> R {
 
     let file_guard: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
         dir.path()
-            .join(".conduit")
+            .join(".kulyrax")
             .join("entities")
             .join(&coll)
             .join("u1.done"),
     )?)?;
-    let guard_coll = db_handle.collection::<mongodb::bson::Document>("conduit_projection_state");
+    let guard_coll = db_handle.collection::<mongodb::bson::Document>("kulyrax_projection_state");
     let mongo_guard = guard_coll
         .find_one(doc! { "target": &coll, "entity_key": "u1" })
         .run()?
@@ -471,7 +497,7 @@ fn mongo_prepare_twice_is_idempotent() -> R {
     a.prepare().map_err(|e| e.to_string())?;
     let guard_indexes = mongo_client(&url)?
         .database(&db)
-        .collection::<mongodb::bson::Document>("conduit_projection_state")
+        .collection::<mongodb::bson::Document>("kulyrax_projection_state")
         .list_indexes()
         .run()?
         .filter_map(Result::ok)
@@ -574,7 +600,7 @@ fn coll_state(url: &str, db: &str, coll: &str) -> Result<MongoState, Box<dyn std
             .find_one(doc! { "_id": id })
             .run()?;
         let guard = db
-            .collection::<mongodb::bson::Document>("conduit_projection_state")
+            .collection::<mongodb::bson::Document>("kulyrax_projection_state")
             .find_one(doc! { "target": coll, "entity_key": id })
             .run()?
             .map(|mut g| {

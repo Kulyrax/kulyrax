@@ -71,12 +71,12 @@ document:
     );
 
     let guard_by_entity = root
-        .join(".conduit")
+        .join(".kulyrax")
         .join("entities")
         .join("users")
         .join("entity-42.done");
     let guard_by_event = root
-        .join(".conduit")
+        .join(".kulyrax")
         .join("events")
         .join("evt-completely-unrelated.done");
     assert!(guard_by_entity.exists(), "guard must be keyed by entity id");

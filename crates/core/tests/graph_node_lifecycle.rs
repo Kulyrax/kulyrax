@@ -112,7 +112,7 @@ fn node_lifecycle_ends_absent_with_tombstone() -> Result<(), Box<dyn std::error:
 
     let guard: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
         dir.path()
-            .join(".conduit")
+            .join(".kulyrax")
             .join("guard")
             .join("nodes")
             .join("User")

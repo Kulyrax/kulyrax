@@ -149,7 +149,7 @@ document: {}
     let conn = Connection::open(&db_path)?;
     let sql_count: i64 = conn.query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))?;
     let sql_last_sequence: i64 = conn.query_row(
-        "SELECT last_sequence FROM conduit_projection_state WHERE target_table = 'users'",
+        "SELECT last_sequence FROM kulyrax_projection_state WHERE target_table = 'users'",
         [],
         |r| r.get(0),
     )?;
@@ -161,7 +161,7 @@ document: {}
     );
 
     let doc_guard_content = std::fs::read_to_string(
-        root.join(".conduit")
+        root.join(".kulyrax")
             .join("entities")
             .join("users")
             .join("u1.done"),

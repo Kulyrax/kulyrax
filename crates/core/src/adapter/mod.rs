@@ -3,6 +3,8 @@ pub(crate) mod file_names;
 pub mod file_store;
 pub mod graph;
 pub mod keyvalue;
+#[doc(hidden)]
+pub mod legacy;
 pub(crate) mod loader;
 pub mod sql;
 
