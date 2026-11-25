@@ -22,11 +22,12 @@ use crate::event::Event;
 /// of the batch's **last event in delivery order** (`docs/producer-contract.md`,
 /// §9 "Positions").
 ///
-/// **Deprecated: `PartialOrd` and `Ord` are removed in 1.0.** They are text
-/// order, which is not delivery order in general (`"9"` sorts after `"10"`),
-/// so don't use them to order positions. (`#[deprecated]` cannot mark a trait
-/// impl, so this comment is the notice.)
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+/// Positions are compared for equality (`Eq`, `Hash`) but have no order: text
+/// order is not delivery order in general (`"9"` sorts after `"10"`). A source
+/// that needs to order its own positions parses them by its own rule. 0.12
+/// derived `PartialOrd` and `Ord`; 1.0 removes them (decision
+/// 2026-11-25-source-position-contract).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SourcePosition(pub String);
 
 impl SourcePosition {

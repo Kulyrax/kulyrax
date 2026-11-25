@@ -32,7 +32,7 @@ Decision: [2026-11-26-non-exhaustive-scope](../decisions/2026-11-26-non-exhausti
   `with_metadata` / `with_version`.
 - [x] Tests, examples and docs migrated (142 `Event` literals, the configs,
   options and contexts). The embedded example runs.
-- [ ] The R3 items: empty gRPC positions refused; `SourcePosition` unordered
+- [x] The R3 items: empty gRPC positions refused; `SourcePosition` unordered
   and `Hash`; `EventEnvelope` built from an event carries its position.
 - [ ] Four gates green; every Docker suite green; PR merged.
 
@@ -50,3 +50,8 @@ Decision: [2026-11-26-non-exhaustive-scope](../decisions/2026-11-26-non-exhausti
 | clippy, first run | `cargo clippy --workspace --all-targets -- -D warnings` | `items_after_test_module` ×3: constructors appended after a `mod tests`. Moved above it. Then clean |
 | Build | `cargo build --workspace --all-targets` | 0 errors, 0 warnings (`cargo fix` removed the imports the rewrite left unused) |
 | Examples | `cargo build --manifest-path examples/*/Cargo.toml` | the embedded example built a `KulyraxConfig` literal, now `KulyraxConfig::new`. All build; `cargo run --manifest-path examples/embedded/Cargo.toml` projects `users.u1` |
+| `SourcePosition` without `Ord` | build after removing `PartialOrd`/`Ord`, adding `Hash` | 1 error: `source_directory_split.rs` took `max()` of a batch's positions. It now takes the last, as the run loop does |
+| Empty gRPC position | `cargo test -p kulyrax-ingest` | new unit test `an_empty_position_is_refused_with_invalid_argument`. New end-to-end test `an_event_with_an_empty_position_ends_its_stream_with_invalid_argument`: the earlier event is acked, the stream ends with `INVALID_ARGUMENT` naming the event, and a second producer carries on. Ingest: 3 + 7 + 5 passed |
+| `EventEnvelope::from(&Event)` | `pb::EventEnvelope::from_event(&event, position)` | the round-trip unit test checks the position travels |
+| Docs | `producer-contract.md` §9, the `position` comment in `ingest.proto` (comments only), `stability.md`, `writing-a-backend.md`, the rc.1 notes ("API changes", with before/after code) | updated |
+| Gates and Docker suites | fmt; clippy `-D warnings`; `cargo test --workspace`; the embedded example; every Docker suite (Neo4j on 7688, `KULYRAX_V0121_BIN`) | clean; clean; 527 passed, 0 failed; projects `users.u1`; postgres 30, mysql 25, redis 14, mongodb 21, elasticsearch 11, neo4j 20, source-postgres 14, ingest 15, cli 32, all passed |

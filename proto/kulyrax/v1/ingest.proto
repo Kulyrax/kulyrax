@@ -37,10 +37,11 @@ message EventEnvelope {
   uint64 sequence = 5;
   // Opaque, producer-defined resume token for this FEED (not per entity) — a
   // Kafka offset map, an outbox row id, an event-store revision. Kulyrax
-  // never interprets it, only durably records and echoes back the highest
-  // one whose batch has committed, in an `Ack`. Two different entities'
+  // never interprets or orders it; each stream's `Ack` echoes back the last
+  // one that stream sent whose batch has committed. Two different entities'
   // events share the same position stream; each still needs its own
-  // `sequence` above. See docs/concepts.md.
+  // `sequence` above. See docs/concepts.md. Required: an event with an empty
+  // position ends its stream with INVALID_ARGUMENT (producer-contract.md §9).
   string position = 6;
   // Optional. Recorded on the guard row and in the execution report / DLQ
   // filename. When empty Kulyrax derives one from `position` (or

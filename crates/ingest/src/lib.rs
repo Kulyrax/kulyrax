@@ -87,15 +87,18 @@ impl pb::EventEnvelope {
     }
 }
 
-impl From<&Event> for pb::EventEnvelope {
-    fn from(e: &Event) -> Self {
+impl pb::EventEnvelope {
+    /// The envelope for `event`, at the producer's resume `position`. Every
+    /// envelope needs one: Kulyrax refuses an empty position. (0.12 had a
+    /// `From<&Event>` that left it empty.)
+    pub fn from_event(e: &Event, position: impl Into<String>) -> Self {
         pb::EventEnvelope {
             event_type: e.event_type.clone(),
             payload: e.payload.clone(),
             metadata: e.metadata.clone().into_iter().collect(),
             version: e.version,
             sequence: e.sequence,
-            position: String::new(),
+            position: position.into(),
             event_id: e.event_id.clone(),
         }
     }
@@ -115,13 +118,17 @@ struct AckMsg {
     dlq_events: u32,
 }
 
+/// What a stream's response carries: its acks, or the status that ends it
+/// (an event the stream may not send, such as one with no position).
+type AckItem = Result<AckMsg, Status>;
+
 /// The ack sender of every open stream. A stream registers itself when it
 /// opens and is removed when its response stream is dropped.
-type AckSenders = Arc<Mutex<HashMap<StreamId, mpsc::Sender<AckMsg>>>>;
+type AckSenders = Arc<Mutex<HashMap<StreamId, mpsc::Sender<AckItem>>>>;
 
 fn lock_senders(
     senders: &AckSenders,
-) -> std::sync::MutexGuard<'_, HashMap<StreamId, mpsc::Sender<AckMsg>>> {
+) -> std::sync::MutexGuard<'_, HashMap<StreamId, mpsc::Sender<AckItem>>> {
     // The map holds no invariant that a panicking holder could break.
     senders.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -147,34 +154,18 @@ struct IngestService {
     next_stream: AtomicU64,
 }
 
-/// The warning for an event with an empty `position`, once per stream: at the
-/// stream's first such event. Empty positions are accepted in 0.12.x and
-/// refused with `InvalidArgument` from 1.0 (producer contract §9, decision
-/// 2026-11-25-source-position-contract).
-struct EmptyPositionWarning {
-    stream: StreamId,
-    warned: bool,
-}
-
-impl EmptyPositionWarning {
-    fn new(stream: StreamId) -> Self {
-        Self {
-            stream,
-            warned: false,
-        }
-    }
-
-    fn check(&mut self, env: &pb::EventEnvelope) -> Option<String> {
-        if !env.position.is_empty() || std::mem::replace(&mut self.warned, true) {
-            return None;
-        }
-        Some(format!(
-            "kulyrax ingest: warning: stream {} sent an event with an empty position. \
-             Its acks will carry an empty position, so the producer has nothing to resume from. \
-             Kulyrax 1.0 refuses empty positions (InvalidArgument); see docs/producer-contract.md §9",
-            self.stream
+/// Why an envelope is refused, ending its stream with `InvalidArgument`: an
+/// empty `position` (producer contract §9; decision
+/// 2026-11-25-source-position-contract). Its acks would carry nothing to
+/// resume from. 0.12.x accepted it with a warning.
+fn refusal(env: &pb::EventEnvelope) -> Option<Status> {
+    env.position.is_empty().then(|| {
+        Status::invalid_argument(format!(
+            "event {:?} (type {:?}, sequence {}) has an empty position: give every event \
+             the position your producer resumes from (docs/producer-contract.md §9)",
+            env.event_id, env.event_type, env.sequence
         ))
-    }
+    })
 }
 
 type AckStream =
@@ -194,7 +185,8 @@ impl pb::ingest_server::Ingest for IngestService {
         let mut inbound = request.into_inner();
         let ev_tx = self.ev_tx.clone();
         let id = self.next_stream.fetch_add(1, Ordering::Relaxed);
-        let (ack_tx, ack_rx) = mpsc::channel::<AckMsg>(ACK_BOUND);
+        let (ack_tx, ack_rx) = mpsc::channel::<AckItem>(ACK_BOUND);
+        let refuse_tx = ack_tx.clone();
         lock_senders(&self.ack_senders).insert(id, ack_tx);
         let deregister = Deregister {
             senders: Arc::clone(&self.ack_senders),
@@ -202,12 +194,14 @@ impl pb::ingest_server::Ingest for IngestService {
         };
 
         // Reader task: inbound envelopes → bounded channel. `send().await` is
-        // where backpressure lands when the engine is behind.
+        // where backpressure lands when the engine is behind. A refused
+        // envelope ends the stream with its status; the events before it keep
+        // their acks.
         tokio::spawn(async move {
-            let mut empty_position = EmptyPositionWarning::new(id);
             while let Ok(Some(env)) = inbound.message().await {
-                if let Some(warning) = empty_position.check(&env) {
-                    eprintln!("{warning}");
+                if let Some(status) = refusal(&env) {
+                    let _ = refuse_tx.send(Err(status)).await;
+                    break;
                 }
                 if ev_tx.send((id, env.into_sourced())).await.is_err() {
                     break; // engine / source dropped
@@ -215,11 +209,12 @@ impl pb::ingest_server::Ingest for IngestService {
             }
         });
 
-        // Response stream: this stream's acks only. The closure owns
-        // `deregister`, so the sender is removed when tonic drops the stream.
-        let out = ReceiverStream::new(ack_rx).map(move |a: AckMsg| {
+        // Response stream: this stream's acks only, then its refusal if any.
+        // The closure owns `deregister`, so the sender is removed when tonic
+        // drops the stream.
+        let out = ReceiverStream::new(ack_rx).map(move |item: AckItem| {
             let _ = &deregister;
-            Ok(pb::Ack {
+            item.map(|a| pb::Ack {
                 position: a.position,
                 batch_events: a.batch_events,
                 dlq_events: a.dlq_events,
@@ -337,7 +332,7 @@ impl EventSource for GrpcSource {
             // the last ack it did receive. A full channel drops the ack (see
             // `ACK_BOUND`).
             if let Some(tx) = senders.get(&stream) {
-                let _ = tx.try_send(ack);
+                let _ = tx.try_send(Ok(ack));
             }
         }
         drop(senders);
@@ -696,28 +691,28 @@ mod tests {
         assert_eq!(se.event.event_id, "offset-42", "derived from position");
         assert_eq!(se.position, SourcePosition("offset-42".into()));
 
-        let back = pb::EventEnvelope::from(&se.event);
+        let back = pb::EventEnvelope::from_event(&se.event, se.position.as_str());
         assert_eq!(back.event_type, "UserCreated");
         assert_eq!(back.sequence, 7);
         assert_eq!(back.version, 1);
+        assert_eq!(
+            back.position, "offset-42",
+            "the position goes with the event"
+        );
     }
 
     #[test]
-    fn an_empty_position_is_warned_about_once_per_stream() {
+    fn an_empty_position_is_refused_with_invalid_argument() {
         let at = |position: &str| pb::EventEnvelope {
+            event_id: "e1".into(),
             position: position.into(),
             ..Default::default()
         };
-        let mut s1 = EmptyPositionWarning::new(1);
-        assert_eq!(s1.check(&at("p1")), None, "a position: no warning");
-        let warning = s1.check(&at("")).expect("the first empty position warns");
-        assert!(warning.contains("stream 1"), "{warning}");
-        assert!(warning.contains("1.0 refuses empty positions"), "{warning}");
-        assert_eq!(s1.check(&at("")), None, "once per stream");
-        assert_eq!(s1.check(&at("p2")), None);
-        // Another stream warns on its own.
-        let mut s2 = EmptyPositionWarning::new(2);
-        assert!(s2.check(&at("")).is_some_and(|w| w.contains("stream 2")));
+        assert!(refusal(&at("p1")).is_none(), "a position is accepted");
+        let status = refusal(&at("")).expect("an empty position is refused");
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+        assert!(status.message().contains("empty position"), "{status:?}");
+        assert!(status.message().contains("\"e1\""), "{status:?}");
     }
 
     #[test]

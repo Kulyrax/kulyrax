@@ -281,3 +281,40 @@ fn a_producers_ack_is_its_last_position_not_the_text_wise_maximum() {
     let got = positions(&acks);
     assert!(got == ["10"] || got == ["9", "10"], "{got:?}");
 }
+
+/// An event with an empty position ends its stream with `InvalidArgument`
+/// (producer contract §9): there would be nothing to resume from. The events
+/// the stream sent before it are projected and acked, and another producer
+/// on the same endpoint carries on.
+#[test]
+fn an_event_with_an_empty_position_ends_its_stream_with_invalid_argument() {
+    let h = Harness::start();
+    let (before, end, b_acks) = rt().block_on(async {
+        let mut a = Producer::connect(h.endpoint.clone()).await.unwrap();
+        let mut b = Producer::connect(h.endpoint.clone()).await.unwrap();
+        a.send(env(1, "a1", "a-0001")).await.unwrap();
+        let before = acks_until(&mut a, "a-0001", Duration::ZERO).await;
+        let _ = a.send(env(2, "a1", "")).await;
+        let end = tokio::time::timeout(Duration::from_secs(5), a.next_ack()).await;
+        b.send(env(1, "b1", "b-0001")).await.unwrap();
+        let b_acks = acks_until(&mut b, "b-0001", Duration::ZERO).await;
+        (before, end, b_acks)
+    });
+    assert!(
+        positions(&before).contains(&"a-0001"),
+        "{:?}",
+        positions(&before)
+    );
+    match end {
+        Ok(Some(Err(kulyrax_client::ClientError::Rpc(status)))) => {
+            assert_eq!(status.code(), tonic::Code::InvalidArgument, "{status:?}");
+            assert!(status.message().contains("empty position"), "{status:?}");
+        }
+        other => panic!("expected InvalidArgument, got {other:?}"),
+    }
+    assert!(
+        positions(&b_acks).contains(&"b-0001"),
+        "B carries on: {:?}",
+        positions(&b_acks)
+    );
+}
