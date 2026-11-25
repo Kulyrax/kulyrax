@@ -28,11 +28,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 type R = Result<(), Box<dyn std::error::Error>>;
 
-fn mysql_url() -> Option<String> {
-    std::env::var("KULYRAX_MYSQL_URL")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-}
+mod common;
+use common::mysql_url;
 
 macro_rules! require_mysql {
     ($url:ident) => {

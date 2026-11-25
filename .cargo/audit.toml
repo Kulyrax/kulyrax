@@ -1,0 +1,37 @@
+# cargo-audit configuration. CI runs
+#   cargo audit --deny unsound --deny unmaintained --deny yanked
+# so a vulnerability, an unsound crate, a yanked crate or a newly unmaintained
+# crate fails the build. The ignores below are unmaintained crates with no fixed
+# release. Each one names what pulls it in, why it stays for now, and when to
+# look again.
+
+[advisories]
+ignore = [
+    # backoff: unmaintained, no fix. Pulled in by neo4rs (kulyrax-adapter-neo4j)
+    # for its retry loop. Ours retries on its own; nothing calls backoff
+    # directly. Goes when neo4rs drops it. Revisit 2027-02-25.
+    "RUSTSEC-2025-0012",
+    # chrono: unmaintained, no fix. Used directly by kulyrax-adapter-postgres
+    # and kulyrax-ingest's tests (postgres `with-chrono-0_4`, to bind timestamp
+    # columns), and through neo4rs. Replacing it means moving those bindings to
+    # another time crate, a change of its own. Revisit 2027-02-25.
+    "RUSTSEC-2026-0543",
+    # chrono-tz and chrono-tz-build: unmaintained, no fix. Pulled in by neo4rs
+    # (kulyrax-adapter-neo4j) for zoned datetimes; Kulyrax does not use time
+    # zones. Revisit 2027-02-25.
+    "RUSTSEC-2026-0555",
+    "RUSTSEC-2026-0559",
+    # instant: unmaintained, no fix. Pulled in by backoff (via neo4rs).
+    # Revisit 2027-02-25, with backoff.
+    "RUSTSEC-2024-0384",
+    # paste: unmaintained, no fix. A build-time macro helper of neo4rs; no
+    # runtime code. Revisit 2027-02-25.
+    "RUSTSEC-2024-0436",
+    # rustls-pemfile: unmaintained, no fix (its functions moved into
+    # rustls-pki-types). Pulled in by mysql, neo4rs and rustls-native-certs.
+    # Goes when they move. Revisit 2027-02-25.
+    "RUSTSEC-2025-0134",
+    # unsafe-libyaml: unmaintained, no fix. serde_yaml's parser. Removed by step
+    # 3 of the 1.0 plan (serde_yaml -> serde-saphyr); drop this ignore then.
+    "RUSTSEC-2024-0449",
+]

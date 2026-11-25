@@ -6,7 +6,9 @@
 //! (`docker run --rm -p 9200:9200 -e "discovery.type=single-node" -e
 //! "xpack.security.enabled=false" docker.elastic.co/elasticsearch/elasticsearch:8.15.0`)
 //! to actually exercise these. Mirrors `mongo_backend.rs`'s structure — same
-//! skip guard, same fresh-index-per-test isolation.
+//! skip guard, same fresh-index-per-test isolation. Run it with
+//! `--test-threads=1`, as CI does: on one node, parallel index creation queues
+//! behind cluster-state writes until requests time out.
 
 use kulyrax_adapter_elasticsearch::ElasticsearchAdapter;
 use kulyrax_core::adapter::AdapterOutcome;
@@ -80,12 +82,15 @@ fn create_index(url: &str, idx: &str) {
     );
 }
 
+/// Requests time out after 60 s, not the 10 s default: on a single-node test
+/// server a write that creates an index waits for a cluster-state write, which
+/// has taken over 30 s under load.
 fn es_adapter(url: &str, mappings: HashMap<String, DocumentMapping>) -> ElasticsearchAdapter {
     ElasticsearchAdapter::new(
         "es".into(),
         url,
         None,
-        10_000,
+        60_000,
         10,
         DocumentRuntimeBuilder::new(mappings),
         Arc::new(UpcasterRegistry::new()),
