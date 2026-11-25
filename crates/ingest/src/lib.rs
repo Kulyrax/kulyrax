@@ -15,19 +15,28 @@ pub mod pb {
     tonic::include_proto!("kulyrax.v1");
 }
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use kulyrax_core::event::Event;
+use kulyrax_core::execution::{ExecutionReport, ExecutionStatus};
 use kulyrax_core::source::{EventSource, SourceError, SourcePosition, SourcedEvent};
-use tokio::sync::{broadcast, mpsc, watch};
+use tokio::sync::{mpsc, watch};
 use tokio_stream::StreamExt;
-use tokio_stream::wrappers::{BroadcastStream, TcpListenerStream};
+use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
 use tonic::{Request, Response, Status, Streaming, transport::Server};
 
 /// Bound of the receive channel. Not event storage — a socket buffer. When
 /// full, the gRPC handler's `send` awaits, HTTP/2 flow control pauses the
 /// producer's stream: backpressure, not buffering (Phase 20.2).
 const CHANNEL_BOUND: usize = 1024;
+
+/// Bound of each stream's ack channel. A producer that stops reading its acks
+/// loses the newest ones past this many, as with the broadcast before it; the
+/// acks still queued carry positions it really has committed.
+const ACK_BOUND: usize = 256;
 
 /// The `ack_protocol_version` this server sends on every `Ack` (Phase 29.1).
 /// `1` means `dlq_events` is populated per the guarantee in
@@ -100,18 +109,46 @@ impl From<&Event> for pb::EventEnvelope {
 // The gRPC service
 // ---------------------------------------------------------------------------
 
-#[derive(Clone)]
+/// One `Ingest.Stream` call. Acks go only to the stream whose events they
+/// cover (F-02).
+type StreamId = u64;
+
 struct AckMsg {
     position: String,
     batch_events: u32,
     dlq_events: u32,
 }
 
+/// The ack sender of every open stream. A stream registers itself when it
+/// opens and is removed when its response stream is dropped.
+type AckSenders = Arc<Mutex<HashMap<StreamId, mpsc::Sender<AckMsg>>>>;
+
+fn lock_senders(
+    senders: &AckSenders,
+) -> std::sync::MutexGuard<'_, HashMap<StreamId, mpsc::Sender<AckMsg>>> {
+    // The map holds no invariant that a panicking holder could break.
+    senders.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Removes a stream's ack sender when its response stream is dropped (the
+/// producer disconnected, or the server is shutting down).
+struct Deregister {
+    senders: AckSenders,
+    id: StreamId,
+}
+
+impl Drop for Deregister {
+    fn drop(&mut self) {
+        lock_senders(&self.senders).remove(&self.id);
+    }
+}
+
 struct IngestService {
-    /// Decoded events → the bounded receive channel drained by `GrpcSource::poll`.
-    ev_tx: mpsc::Sender<SourcedEvent>,
-    /// Committed positions fanned out to every active session's response stream.
-    ack_tx: broadcast::Sender<AckMsg>,
+    /// Decoded events, tagged with their stream → the bounded receive channel
+    /// drained by `GrpcSource::poll`.
+    ev_tx: mpsc::Sender<(StreamId, SourcedEvent)>,
+    ack_senders: AckSenders,
+    next_stream: AtomicU64,
 }
 
 type AckStream =
@@ -130,27 +167,33 @@ impl pb::ingest_server::Ingest for IngestService {
     ) -> Result<Response<Self::StreamStream>, Status> {
         let mut inbound = request.into_inner();
         let ev_tx = self.ev_tx.clone();
-        let ack_rx = self.ack_tx.subscribe();
+        let id = self.next_stream.fetch_add(1, Ordering::Relaxed);
+        let (ack_tx, ack_rx) = mpsc::channel::<AckMsg>(ACK_BOUND);
+        lock_senders(&self.ack_senders).insert(id, ack_tx);
+        let deregister = Deregister {
+            senders: Arc::clone(&self.ack_senders),
+            id,
+        };
 
         // Reader task: inbound envelopes → bounded channel. `send().await` is
         // where backpressure lands when the engine is behind.
         tokio::spawn(async move {
             while let Ok(Some(env)) = inbound.message().await {
-                if ev_tx.send(env.into_sourced()).await.is_err() {
+                if ev_tx.send((id, env.into_sourced())).await.is_err() {
                     break; // engine / source dropped
                 }
             }
         });
 
-        // Response stream: every committed position becomes an `Ack`.
-        let out = BroadcastStream::new(ack_rx).filter_map(|r| {
-            r.ok().map(|a: AckMsg| {
-                Ok(pb::Ack {
-                    position: a.position,
-                    batch_events: a.batch_events,
-                    dlq_events: a.dlq_events,
-                    ack_protocol_version: CURRENT_ACK_PROTOCOL_VERSION,
-                })
+        // Response stream: this stream's acks only. The closure owns
+        // `deregister`, so the sender is removed when tonic drops the stream.
+        let out = ReceiverStream::new(ack_rx).map(move |a: AckMsg| {
+            let _ = &deregister;
+            Ok(pb::Ack {
+                position: a.position,
+                batch_events: a.batch_events,
+                dlq_events: a.dlq_events,
+                ack_protocol_version: CURRENT_ACK_PROTOCOL_VERSION,
             })
         });
         Ok(Response::new(Box::pin(out)))
@@ -161,16 +204,26 @@ impl pb::ingest_server::Ingest for IngestService {
 // GrpcSource + server lifecycle
 // ---------------------------------------------------------------------------
 
+/// An event polled but not yet committed: which stream sent it, its position,
+/// and whether it was dead-lettered.
+struct Pending {
+    stream: StreamId,
+    position: SourcePosition,
+    dead_lettered: bool,
+}
+
 /// The `EventSource` handed to `kulyrax_core::run_sources`. Holds no persistent
 /// state — `committed_position` is in memory only (Phase 20.2: the `Ack` is the
 /// durable signal, the producer owns the offset).
 pub struct GrpcSource {
     id: String,
-    ev_rx: mpsc::Receiver<SourcedEvent>,
-    ack_tx: broadcast::Sender<AckMsg>,
+    ev_rx: mpsc::Receiver<(StreamId, SourcedEvent)>,
+    ack_senders: AckSenders,
     committed: Option<SourcePosition>,
-    /// Events returned by `poll` since the last `commit` — the `Ack.batch_events`.
-    since_commit: u32,
+    /// Events returned by `poll` since the last `commit`, in poll order.
+    pending: Vec<Pending>,
+    /// How many of `pending` `on_resolved` has reported on.
+    resolved: usize,
 }
 
 impl EventSource for GrpcSource {
@@ -182,33 +235,82 @@ impl EventSource for GrpcSource {
         let mut out = Vec::new();
         while out.len() < max_batch {
             match self.ev_rx.try_recv() {
-                Ok(se) => out.push(se),
+                Ok((stream, se)) => {
+                    self.pending.push(Pending {
+                        stream,
+                        position: se.position.clone(),
+                        dead_lettered: false,
+                    });
+                    out.push(se);
+                }
                 Err(mpsc::error::TryRecvError::Empty) => break,
                 Err(mpsc::error::TryRecvError::Disconnected) => break,
             }
         }
-        self.since_commit += out.len() as u32;
         Ok(out)
+    }
+
+    fn on_resolved(&mut self, event: &SourcedEvent, report: &ExecutionReport) {
+        // The run loop reports a committed batch's events in batch order, which
+        // is poll order. A failed event in a committed batch was dead-lettered.
+        let Some(p) = self.pending.get_mut(self.resolved) else {
+            return;
+        };
+        debug_assert_eq!(p.position, event.position);
+        p.dead_lettered = report.status == ExecutionStatus::Failed;
+        self.resolved += 1;
     }
 
     fn commit(&mut self, position: SourcePosition) -> Result<(), SourceError> {
         self.commit_with_dlq_count(position, 0)
     }
 
+    /// Sends each stream with events in this batch one `Ack` for its own
+    /// events: the position of its last event (in its own send order), its
+    /// event count, and its dead-lettered count. `dlq_events == 0` is that
+    /// producer's only signal that every one of its events was projected
+    /// (Phase 29). Streams with no events in the batch get nothing, and no
+    /// position is compared across streams (F-02), so the batch-wide
+    /// `position` and dead-letter count are not sent to anyone.
     fn commit_with_dlq_count(
         &mut self,
         position: SourcePosition,
-        dlq_events: u32,
+        _dlq_events: u32,
     ) -> Result<(), SourceError> {
-        // Fan the position out to every session; a session forwards it as an
-        // `Ack` and the producer advances its offset. `dlq_events == 0` is
-        // the producer's only signal that every event this ack covers was
-        // actually projected, not silently dead-lettered (Phase 29).
-        let _ = self.ack_tx.send(AckMsg {
-            position: position.0.clone(),
-            batch_events: std::mem::take(&mut self.since_commit),
-            dlq_events,
-        });
+        // One ack per stream, in the order the streams first appear.
+        let mut acks: Vec<(StreamId, AckMsg)> = Vec::new();
+        for p in self.pending.drain(..) {
+            let i = match acks.iter().position(|(s, _)| *s == p.stream) {
+                Some(i) => i,
+                None => {
+                    acks.push((
+                        p.stream,
+                        AckMsg {
+                            position: String::new(),
+                            batch_events: 0,
+                            dlq_events: 0,
+                        },
+                    ));
+                    acks.len() - 1
+                }
+            };
+            let ack = &mut acks[i].1;
+            ack.position = p.position.0;
+            ack.batch_events += 1;
+            ack.dlq_events += u32::from(p.dead_lettered);
+        }
+        self.resolved = 0;
+
+        let senders = lock_senders(&self.ack_senders);
+        for (stream, ack) in acks {
+            // A stream that has gone is not acked: its producer resumes from
+            // the last ack it did receive. A full channel drops the ack (see
+            // `ACK_BOUND`).
+            if let Some(tx) = senders.get(&stream) {
+                let _ = tx.try_send(ack);
+            }
+        }
+        drop(senders);
         self.committed = Some(position);
         Ok(())
     }
@@ -262,8 +364,8 @@ pub fn start(
         .build()
         .map_err(IngestError::Runtime)?;
 
-    let (ev_tx, ev_rx) = mpsc::channel::<SourcedEvent>(CHANNEL_BOUND);
-    let (ack_tx, _ack_rx0) = broadcast::channel::<AckMsg>(256);
+    let (ev_tx, ev_rx) = mpsc::channel::<(StreamId, SourcedEvent)>(CHANNEL_BOUND);
+    let ack_senders: AckSenders = Arc::default();
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     // Bind inside the runtime task and report the actual address back — keeps
     // `start` free of `block_on`, so it is callable from any sync context.
@@ -271,7 +373,8 @@ pub fn start(
 
     let svc = IngestService {
         ev_tx,
-        ack_tx: ack_tx.clone(),
+        ack_senders: Arc::clone(&ack_senders),
+        next_stream: AtomicU64::new(0),
     };
 
     match target {
@@ -338,9 +441,10 @@ pub fn start(
     let source = GrpcSource {
         id: source_id.into(),
         ev_rx,
-        ack_tx,
+        ack_senders,
         committed: None,
-        since_commit: 0,
+        pending: Vec::new(),
+        resolved: 0,
     };
     Ok((
         GrpcServer {

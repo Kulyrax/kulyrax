@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Acknowledge each gRPC stream for its own events only
@@ -60,7 +60,7 @@ process (a `tonic` server and the reference `kulyrax-client`):
 
 All three assert the behaviour A gives; all three fail today.
 
-## Decision (proposed)
+## Decision
 
 A.
 - **Where the change lives:** `crates/ingest/src/lib.rs` only.

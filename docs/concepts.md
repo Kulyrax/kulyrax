@@ -58,6 +58,12 @@ breaks gating the moment two entities interleave in the outbox.
 
 ## `Ack` — what it proves, and what it doesn't
 
+An `Ack` covers only the events of the `Ingest.Stream` it arrives on. Its
+`position` is the last committed position that stream sent, in its own send
+order. Its counts cover only that stream's events. A stream with no events in
+a committed batch receives no ack for that batch. Several producers on one
+endpoint never see each other's positions.
+
 An `Ack` means the position advanced — not that every event in the batch
 landed. `batch_events` is an observability count. The only field that tells
 a producer whether anything was actually lost is `dlq_events`: how many of
