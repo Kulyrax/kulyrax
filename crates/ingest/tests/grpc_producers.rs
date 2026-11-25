@@ -267,3 +267,21 @@ fn a_producers_position_is_never_advanced_by_another_producers_events() {
         positions(&b_acks)
     );
 }
+
+/// One producer with numeric offsets `9`, `10`: its ack is `10`, the last it
+/// sent, not the text-wise maximum `9` (decision
+/// 2026-11-25-source-position-contract).
+#[test]
+fn a_producers_ack_is_its_last_position_not_the_text_wise_maximum() {
+    let h = Harness::start();
+    let acks = rt().block_on(async {
+        let mut a = Producer::connect(h.endpoint.clone()).await.unwrap();
+        a.send(env(1, "a1", "9")).await.unwrap();
+        a.send(env(2, "a1", "10")).await.unwrap();
+        acks_until(&mut a, "10", Duration::from_millis(300)).await
+    });
+    // `["10"]` when both land in one batch, `["9", "10"]` when they don't:
+    // never `9` after `10`.
+    let got = positions(&acks);
+    assert!(got == ["10"] || got == ["9", "10"], "{got:?}");
+}

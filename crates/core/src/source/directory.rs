@@ -99,6 +99,27 @@ fn parse_position(position: &str) -> (String, Option<usize>) {
     (position.to_string(), None)
 }
 
+/// Whether `position` comes after `committed` in delivery order: a later file
+/// (by name, the order files are listed in), or a later part of the same file.
+/// The whole-file position follows every part of that file.
+///
+/// Not text order: `<file>#<index>` sorts before a later file named
+/// `<file><c>…` for any `c` below `#`, such as a space (decision
+/// 2026-11-25-source-position-contract).
+fn is_after(position: &SourcePosition, committed: &SourcePosition) -> bool {
+    let (file, index) = parse_position(&position.0);
+    let (done, done_index) = parse_position(&committed.0);
+    match file.cmp(&done) {
+        std::cmp::Ordering::Greater => true,
+        std::cmp::Ordering::Less => false,
+        std::cmp::Ordering::Equal => match (index, done_index) {
+            (Some(i), Some(d)) => i > d,
+            (None, Some(_)) => true,
+            (_, None) => false,
+        },
+    }
+}
+
 impl EventSource for DirectorySource {
     fn id(&self) -> &str {
         &self.id
@@ -174,7 +195,11 @@ impl EventSource for DirectorySource {
     }
 
     fn commit(&mut self, position: SourcePosition) -> Result<(), SourceError> {
-        if self.committed.as_ref().is_some_and(|c| &position <= c) {
+        if self
+            .committed
+            .as_ref()
+            .is_some_and(|c| !is_after(&position, c))
+        {
             return Ok(()); // never moves backward
         }
         write_checkpoint(&self.state_dir, &self.id, &position)?;

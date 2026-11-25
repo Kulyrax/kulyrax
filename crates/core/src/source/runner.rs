@@ -1,5 +1,5 @@
 //! Phase 17.3 / 17.5: the continuous run loop —
-//! `poll → sort → dispatch batch → commit`, with across-batch retry and DLQ.
+//! `poll → dispatch batch → commit`, with across-batch retry and DLQ.
 //!
 //! The guarantee: a source position is committed **only** on a batch whose
 //! every event was projected, skipped by a guard, or DLQ'd. A crash before
@@ -95,8 +95,11 @@ pub enum StoppedReason {
 #[derive(Debug, Clone, Serialize)]
 pub struct BatchSummary {
     pub source_id: String,
+    /// The position of the batch's first event, in delivery order.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position_from: Option<String>,
+    /// The position of the batch's last event, in delivery order: the one the
+    /// batch is committed at.
     pub position_to: String,
     pub events: u64,
     pub created: u64,
@@ -432,12 +435,16 @@ fn run_loop(
             // a child row before its parent) and makes the outcome depend on
             // where batches happen to split. `decide()` resolves each entity's
             // own order through its guard lane (decision 2026-11-25-batch-order).
+            //
+            // The batch is committed at its last event in delivery order.
+            // Positions are opaque: only the source that made them may order
+            // them, so the core never compares them (decision
+            // 2026-11-25-source-position-contract).
             let position_to = batch
-                .iter()
+                .last()
                 .map(|se| se.position.clone())
-                .max()
                 .unwrap_or_else(|| SourcePosition(String::new()));
-            let position_from = batch.iter().map(|se| se.position.0.clone()).min();
+            let position_from = batch.first().map(|se| se.position.0.clone());
             let source_id = source.id().to_string();
 
             let mut retries = 0u32;

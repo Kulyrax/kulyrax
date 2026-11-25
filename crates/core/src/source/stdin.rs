@@ -13,7 +13,9 @@ use super::checkpoint::{read_checkpoint, write_checkpoint};
 use super::{EventSource, SourceError, SourcePosition, SourcedEvent};
 use crate::event::Event;
 
-/// Position width — zero-padded so string order matches line order.
+/// Position width: zero-padded, for readability. The source orders positions
+/// by their line number, never as text (decision
+/// 2026-11-25-source-position-contract).
 const POS_WIDTH: usize = 12;
 
 pub struct StdinSource<R: BufRead> {
@@ -23,6 +25,8 @@ pub struct StdinSource<R: BufRead> {
     /// Index of the next line to yield (0-based).
     next_line: u64,
     committed: Option<SourcePosition>,
+    /// The line `committed` names.
+    committed_line: Option<u64>,
     exhausted: bool,
 }
 
@@ -30,13 +34,19 @@ fn encode_pos(line: u64) -> SourcePosition {
     SourcePosition(format!("{line:0POS_WIDTH$}"))
 }
 
-fn decode_pos(p: &SourcePosition) -> u64 {
-    let trimmed = p.0.trim_start_matches('0');
-    if trimmed.is_empty() {
-        0
-    } else {
-        trimmed.parse().unwrap_or(0)
+/// The line number a position names, or `None` if it names none.
+fn decode_pos(p: &SourcePosition) -> Option<u64> {
+    if p.0.is_empty() || !p.0.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
     }
+    p.0.parse().ok()
+}
+
+fn not_a_line(id: &str, what: &str, p: &SourcePosition) -> SourceError {
+    SourceError::Checkpoint(format!(
+        "source {id:?}: {what} {:?} is not a stdin line number",
+        p.0
+    ))
 }
 
 impl<R: BufRead> StdinSource<R> {
@@ -48,12 +58,17 @@ impl<R: BufRead> StdinSource<R> {
         let id = id.into();
         let state_dir = state_dir.into();
         let committed = read_checkpoint(&state_dir, &id)?.map(|c| c.position);
+        let committed_line = match &committed {
+            Some(p) => Some(decode_pos(p).ok_or_else(|| not_a_line(&id, "checkpoint", p))?),
+            None => None,
+        };
         Ok(Self {
             id,
             state_dir,
             reader,
             next_line: 0,
             committed,
+            committed_line,
             exhausted: false,
         })
     }
@@ -68,7 +83,7 @@ impl<R: BufRead> EventSource for StdinSource<R> {
         if self.exhausted || max_batch == 0 {
             return Ok(Vec::new());
         }
-        let skip_through = self.committed.as_ref().map(decode_pos);
+        let skip_through = self.committed_line;
         let mut out: Vec<SourcedEvent> = Vec::new();
         let mut line = String::new();
 
@@ -100,11 +115,14 @@ impl<R: BufRead> EventSource for StdinSource<R> {
     }
 
     fn commit(&mut self, position: SourcePosition) -> Result<(), SourceError> {
-        if self.committed.as_ref().is_some_and(|c| &position <= c) {
-            return Ok(());
+        let line =
+            decode_pos(&position).ok_or_else(|| not_a_line(&self.id, "position", &position))?;
+        if self.committed_line.is_some_and(|c| line <= c) {
+            return Ok(()); // never moves backward
         }
         write_checkpoint(&self.state_dir, &self.id, &position)?;
         self.committed = Some(position);
+        self.committed_line = Some(line);
         Ok(())
     }
 
@@ -119,11 +137,15 @@ mod tests {
     use std::io::Cursor;
 
     #[test]
-    fn position_encoding_is_lexicographically_ordered() {
-        assert!(encode_pos(2) < encode_pos(10));
-        assert!(encode_pos(9) < encode_pos(100));
-        assert_eq!(decode_pos(&encode_pos(0)), 0);
-        assert_eq!(decode_pos(&encode_pos(42)), 42);
+    fn positions_round_trip_and_only_line_numbers_decode() {
+        assert_eq!(decode_pos(&encode_pos(0)), Some(0));
+        assert_eq!(decode_pos(&encode_pos(42)), Some(42));
+        // Past the padding width: still a line number, ordered as one.
+        let big = 10u64.pow(13);
+        assert_eq!(decode_pos(&encode_pos(big)), Some(big));
+        for bad in ["", "abc", "-1", "12a", " 1"] {
+            assert_eq!(decode_pos(&SourcePosition(bad.into())), None, "{bad:?}");
+        }
     }
 
     #[test]
