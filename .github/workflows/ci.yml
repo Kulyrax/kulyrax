@@ -198,8 +198,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # Every MySQL test file, each its own process: mysql_binlog.rs changes
-      # the server's global binlog_format, and mysql_guard_collation.rs /
-      # mysql_guard_ddl.rs alter the shared guard table.
+      # the server's global binlog_format. Each binary drops and recreates a
+      # database of its own (tests/common), so no run sees an earlier one's rows.
       - name: cargo test -p kulyrax-adapter-mysql
         run: cargo test -p kulyrax-adapter-mysql
         env:
@@ -226,8 +226,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # Serially: on one node, parallel index creation queues behind
+      # cluster-state writes until requests time out.
       - name: cargo test -p kulyrax-adapter-elasticsearch --test es_backend
-        run: cargo test -p kulyrax-adapter-elasticsearch --test es_backend
+        run: cargo test -p kulyrax-adapter-elasticsearch --test es_backend -- --test-threads=1
         env:
           KULYRAX_ELASTICSEARCH_URL: http://localhost:9200
 

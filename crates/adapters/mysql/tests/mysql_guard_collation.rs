@@ -19,14 +19,13 @@ use mysql::prelude::Queryable;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+mod common;
+
 type R = Result<(), Box<dyn std::error::Error>>;
 
 #[test]
 fn prepare_makes_old_case_insensitive_guard_keys_binary() -> R {
-    let Some(url) = std::env::var("KULYRAX_MYSQL_URL")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-    else {
+    let Some(url) = common::mysql_url() else {
         eprintln!("SKIP: KULYRAX_MYSQL_URL not set");
         return Ok(());
     };

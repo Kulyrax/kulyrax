@@ -17,6 +17,8 @@ use mysql::prelude::Queryable;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+mod common;
+
 type R = Result<(), Box<dyn std::error::Error>>;
 
 /// Sets the global `binlog_format` and puts the old one back on drop.
@@ -59,10 +61,7 @@ fn adapter(url: &str) -> MySqlAdapter {
 
 #[test]
 fn prepare_rejects_statement_binlog_format() -> R {
-    let Some(url) = std::env::var("KULYRAX_MYSQL_URL")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-    else {
+    let Some(url) = common::mysql_url() else {
         eprintln!("SKIP: KULYRAX_MYSQL_URL not set");
         return Ok(());
     };
