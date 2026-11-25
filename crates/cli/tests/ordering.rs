@@ -11,9 +11,9 @@
 //!
 //! **Gated on** `KULYRAX_NEO4J_URI` (graph cases) and `KULYRAX_PG_URL` (SQL and
 //! outbox cases). A graph case owns the whole Neo4j database while it runs
-//! (`support/neo4j.rs`); an SQL case works in a schema of its own.
+//! (`support/neo4j/`); an SQL case works in a schema of its own.
 
-#[path = "support/neo4j.rs"]
+#[path = "support/neo4j/mod.rs"]
 mod neo4j_isolation;
 
 use std::path::{Path, PathBuf};

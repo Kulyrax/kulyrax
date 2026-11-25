@@ -7,13 +7,15 @@
 //!   time per target directory (an OS file lock in `CARGO_TARGET_TMPDIR`, held
 //!   until the process exits);
 //! - the database is wiped before the test and again after it: every node, and
-//!   every constraint and index named `kulyrax_…` or `conduit_…` or on a guard
-//!   label;
-//! - after the first wipe, a guard node of either name fails the test loudly
-//!   instead of skewing its result.
+//!   every constraint and index named `kulyrax_…` or with the 0.12 prefix
+//!   (`legacy.rs`), or on a guard label;
+//! - after the first wipe, a guard node under either label fails the test
+//!   loudly instead of skewing its result.
 //!
-//! Locally, run one Neo4j container per branch (CONTRIBUTING.md, "Testing");
-//! never point two branches at one Neo4j.
+//! Locally, run one Neo4j container per branch (CONTRIBUTING.md, "DB-backed
+//! tests", "Isolation"); never point two branches at one Neo4j.
+
+mod legacy;
 
 use std::fs::File;
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -23,8 +25,8 @@ type E = Box<dyn std::error::Error>;
 static SERIAL: Mutex<()> = Mutex::new(());
 static PROCESS_LOCK: OnceLock<File> = OnceLock::new();
 
-/// The guard labels of 0.12 (`conduit`) and of this version.
-const GUARD_LABELS: [&str; 2] = ["__ConduitGuard", "__KulyraxGuard"];
+/// The guard labels of 0.12 and of this version.
+const GUARD_LABELS: [&str; 2] = [legacy::OLD_GUARD_LABEL, "__KulyraxGuard"];
 
 pub fn user() -> String {
     std::env::var("KULYRAX_NEO4J_USER").unwrap_or_else(|_| "neo4j".into())
@@ -102,7 +104,7 @@ fn wipe(uri: &str) -> Result<(), E> {
             .await?;
         let ours = |name: &str, labels: &[String]| {
             name.starts_with("kulyrax_")
-                || name.starts_with("conduit_")
+                || name.starts_with(legacy::OLD_NAME_PREFIX)
                 || labels.iter().any(|l| GUARD_LABELS.contains(&l.as_str()))
         };
         for (show, drop) in [
@@ -144,9 +146,10 @@ fn guard_nodes(uri: &str) -> Result<i64, E> {
     rt.block_on(async {
         let graph = neo4rs::Graph::new(uri, user(), password()).await?;
         let mut rows = graph
-            .execute(neo4rs::Query::new(
-                "MATCH (g) WHERE g:__ConduitGuard OR g:__KulyraxGuard RETURN count(g) AS n".into(),
-            ))
+            .execute(neo4rs::Query::new(format!(
+                "MATCH (g) WHERE g:{} OR g:{} RETURN count(g) AS n",
+                GUARD_LABELS[0], GUARD_LABELS[1]
+            )))
             .await?;
         let n = match rows.next().await? {
             Some(row) => row.get::<i64>("n")?,

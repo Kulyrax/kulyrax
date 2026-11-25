@@ -17,7 +17,7 @@
 //! `--features kulyrax-core/crash-points` (CI builds it from the v0.12.1 tag).
 //! The networked backends are also gated on their usual URLs.
 
-#[path = "support/neo4j.rs"]
+#[path = "support/neo4j/mod.rs"]
 mod neo4j_isolation;
 
 use std::path::{Path, PathBuf};

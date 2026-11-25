@@ -78,8 +78,8 @@ guard table, collection or label:
 - **Neo4j** has a single database, and the guard-label migration relabels every guard
   node in it, so a Neo4j test owns the whole database while it runs. It takes a
   process-wide lock and an OS file lock in `target/tmp`, then wipes everything: every
-  node, and every constraint and index named `kulyrax_…` or `conduit_…` or on a guard
-  label. It wipes again when it ends. A guard node left after the first wipe fails
+  node, and every constraint and index named `kulyrax_…` (or with 0.12's prefix), or
+  on a guard label. It wipes again when it ends. A guard node left after the first wipe fails
   the test.
 
   **Locally, run one Neo4j container per branch**, and never point two branches at
