@@ -37,6 +37,7 @@ impl fmt::Display for StorageKind {
     }
 }
 
+#[doc(hidden)]
 /// Resolve adapter IDs for an event given explicit routing rules.
 ///
 /// One event type may list several distinct adapters (e.g. `pgsql_master`, `pgsql_slave`); each
@@ -45,6 +46,7 @@ pub fn route_with_rules(event: &Event, rules: &HashMap<String, Vec<AdapterId>>) 
     rules.get(&event.event_type).cloned().unwrap_or_default()
 }
 
+#[doc(hidden)]
 /// Load the routing table from a YAML file (`.yaml` or `.yml`): a map of
 /// `event_type` to the adapter ids it reaches.
 ///

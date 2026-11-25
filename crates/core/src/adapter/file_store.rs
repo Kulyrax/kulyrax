@@ -908,10 +908,6 @@ impl FileStore {
         Ok(())
     }
 
-    pub fn dir(&self) -> &Path {
-        &self.dir
-    }
-
     fn state(&self) -> Result<std::sync::MutexGuard<'_, StoreState>, AdapterError> {
         self.state.lock().map_err(|_| {
             AdapterError::WriteFailed("file store state poisoned by an earlier panic".to_string())

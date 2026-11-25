@@ -37,6 +37,7 @@ use kulyrax_core::runtime::config::{CustomSourceConfig, expand_env};
 use kulyrax_core::source::checkpoint::{read_checkpoint, write_checkpoint};
 use kulyrax_core::source::{EventSource, SourceError, SourcePosition, SourcedEvent, lock_source};
 
+#[doc(hidden)]
 /// Most skipped values watched at once; the oldest drop off first.
 pub const WATCH_CAP: usize = 10_000;
 
@@ -217,6 +218,7 @@ fn position(after: Option<i64>, late_seq: u64) -> SourcePosition {
 }
 
 impl PostgresOutboxSource {
+    #[doc(hidden)]
     /// Lock, connect, check the table, and load the checkpoint.
     pub fn open(id: String, state_dir: PathBuf, config: OutboxConfig) -> Result<Self, SourceError> {
         let lock = lock_source(&state_dir, &id)?;
@@ -231,6 +233,7 @@ impl PostgresOutboxSource {
         Ok(source)
     }
 
+    #[doc(hidden)]
     /// Load the checkpoint only: for `kulyrax sources`.
     pub fn inspect(
         id: String,

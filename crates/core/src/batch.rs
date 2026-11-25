@@ -46,6 +46,13 @@ pub enum BatchResult {
     Committed(Vec<ExecutionReport>),
     /// Every open batch transaction was rolled back; dispatch the batch one
     /// event at a time.
+    ///
+    /// The run loop only needs to know it rolled back. The reason (a failed
+    /// commit names the adapter and its message) is not reported yet.
+    #[expect(
+        dead_code,
+        reason = "the run loop does not report the rollback reason yet"
+    )]
     RolledBack(RollbackReason),
 }
 

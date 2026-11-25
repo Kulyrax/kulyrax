@@ -11,7 +11,7 @@
 //!
 //! | Owner | Entries |
 //! |---|---|
-//! | file stores ([`crate::adapter::file_store`]) | [`STORE_ENTRIES`] |
+//! | file stores (`crate::adapter::file_store`) | [`STORE_ENTRIES`] |
 //! | `kulyrax reload` ([`crate::runtime::reload`]) | [`CONTROL`] |
 //! | scaffolded checkpoints (`state_dir: ./.kulyrax/state`) | [`STATE`] |
 //!

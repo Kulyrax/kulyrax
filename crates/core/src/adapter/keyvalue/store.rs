@@ -20,7 +20,7 @@ use crate::{
 
 /// File-backed key-value store (Phase 14). Since Phase 22.1 the write path
 /// lives in [`exec::project`]; this file is the file-sidecar driver —
-/// Since Phase 3 (v0.11) every write goes through a [`FileStore`]: batched,
+/// Since Phase 3 (v0.11) every write goes through a `FileStore`: batched,
 /// logged, and crash-safe.
 pub struct FileKvStore {
     id: String,

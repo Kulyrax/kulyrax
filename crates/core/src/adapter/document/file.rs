@@ -23,7 +23,7 @@ use crate::{
 /// File-based document adapter (Phase 4: idempotent; Phase 12: sequence-gated
 /// upsert; Phase 13: sequence-gated delete & tombstones). Since Phase 23.1
 /// the write path lives in [`exec::project`]; this file is the file-sidecar
-/// driver. Since Phase 3 (v0.11) every write goes through a [`FileStore`]:
+/// driver. Since Phase 3 (v0.11) every write goes through a `FileStore`:
 /// batched, logged, and crash-safe.
 pub struct FileDocumentAdapter {
     id: String,
