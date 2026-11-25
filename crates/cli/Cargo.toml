@@ -27,3 +27,7 @@ ctrlc = "3"
 # The crash tests (tests/file_store_crash.rs) abort the binary at chosen points.
 kulyrax-core = { workspace = true, features = ["crash-points"] }
 tempfile = "3"
+# tests/ordering.rs checks what reached Neo4j and Postgres.
+neo4rs = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+postgres = "0.19"
