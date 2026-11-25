@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # Review F-02: gRPC acks reach every producer (runbook R2)
@@ -24,7 +24,7 @@ Decision: [2026-11-25-grpc-acks-per-stream](../decisions/2026-11-25-grpc-acks-pe
 - [x] After approval: the fix, the proto comments, release notes, the tests
   passing.
 - [x] Every Docker backend suite green locally.
-- [ ] CI green on the PR, merged.
+- [x] CI green on the PR (13/13), merged: #23, `7ff9391`.
 
 ## Verification
 
