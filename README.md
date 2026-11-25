@@ -185,7 +185,8 @@ over convenience throughout.
 - [`docs/concepts.md`](docs/concepts.md) — the mental model: the event envelope,
   `sequence` vs `position`, the guard, facets, `decide()`.
 - [`docs/mapping-reference.md`](docs/mapping-reference.md) — every mapping field, per
-  storage kind, with examples.
+  storage kind, with examples, and the [rules for names](docs/mapping-reference.md#names)
+  (namespaces, collections, tables, columns, labels) each backend checks at start-up.
 - [`architecture.md`](architecture.md) — the three-part structure (engine / sources /
   adapters), dependency rules, and open-source vs. product scope.
 - [`docs/producer-contract.md`](docs/producer-contract.md) — the ordering/delivery
