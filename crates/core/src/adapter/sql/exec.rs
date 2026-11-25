@@ -386,6 +386,46 @@ pub struct SqlPlan {
     pub write: SqlWrite,
 }
 
+/// Refuse table and column names that are not plain SQL identifiers
+/// (`[A-Za-z_][A-Za-z0-9_]*`; a table may be schema-qualified, `schema.table`):
+/// they come from mappings and are written into statements as they are. A
+/// SQL adapter calls this from its `StorageAdapter::prepare`.
+pub fn check_identifiers(builder: &SqlRuntimeBuilder) -> Result<(), SqlError> {
+    fn plain(s: &str) -> bool {
+        let mut chars = s.chars();
+        chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    }
+    let mut bad = Vec::new();
+    for (event, m) in builder.mappings() {
+        let table_ok = match m.table.split_once('.') {
+            Some((schema, table)) => plain(schema) && plain(table),
+            None => plain(&m.table),
+        };
+        if !table_ok {
+            bad.push(format!("{event}: table {:?}", m.table));
+        }
+        for column in m.columns.keys().chain(m.primary_key.iter()) {
+            if !plain(column) {
+                bad.push(format!("{event}: column {column:?}"));
+            }
+        }
+    }
+    if bad.is_empty() {
+        return Ok(());
+    }
+    bad.sort();
+    bad.dedup();
+    Err(SqlError::BuildFailed(format!(
+        "SQL mappings name tables or columns that are not plain identifiers \
+         (letters, digits and `_`, not starting with a digit; a table may be \
+         `schema.table`): {}",
+        bad.join(", ")
+    )))
+}
+
 /// Create the guard table in `txn`, a transaction of its own, and commit it.
 ///
 /// A SQL adapter calls this from its `StorageAdapter::prepare`, never inside

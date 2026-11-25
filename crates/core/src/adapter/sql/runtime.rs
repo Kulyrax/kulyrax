@@ -53,6 +53,11 @@ impl SqlRuntimeBuilder {
         Self { mappings }
     }
 
+    /// The mappings this builder projects, by event type.
+    pub fn mappings(&self) -> &HashMap<String, SqlMapping> {
+        &self.mappings
+    }
+
     pub fn get_mapping(&self, event_type: &str) -> Option<&SqlMapping> {
         self.mappings.get(event_type)
     }

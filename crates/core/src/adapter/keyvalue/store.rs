@@ -1,10 +1,14 @@
-use std::path::PathBuf;
+use std::collections::BTreeSet;
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::Value;
 
 use crate::{
-    adapter::file_store::{FileStore, FileTxn},
+    adapter::file_names,
+    adapter::file_store::{FileStore, FileTxn, Layout},
     adapter::keyvalue::adapter::KvError,
     adapter::keyvalue::exec::{self, KvBackend, KvGuard, KvOutcome, KvPlan},
     adapter::keyvalue::runtime::KvRuntimeBuilder,
@@ -39,7 +43,7 @@ impl FileKvStore {
     ) -> Self {
         Self {
             id,
-            store: FileStore::new(root),
+            store: FileStore::with_layout(root, layout(&builder)),
             priority,
             builder,
             upcasters,
@@ -50,6 +54,67 @@ impl FileKvStore {
     fn failure(&self, error: AdapterError) -> AdapterResult {
         AdapterResult::failure(self.id.clone(), StorageKind::KeyValue, error)
     }
+}
+
+/// Where guards live: one directory per namespace, under a directory of
+/// their own, so no namespace name can reach the store's own files.
+const GUARD_DIR: &str = ".conduit/kv";
+
+/// The namespaces the mappings name, each a top-level directory of values.
+fn layout(builder: &KvRuntimeBuilder) -> Layout {
+    let namespaces: Vec<String> = builder
+        .mappings()
+        .values()
+        .map(|m| m.namespace.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let names = namespaces
+        .iter()
+        .map(|ns| ("namespace", ns.clone()))
+        .collect();
+    let claims = namespaces.clone();
+    Layout {
+        kind: "kv",
+        claims,
+        names,
+        upgrade: Box::new(move |root| upgrade(root, &namespaces)),
+    }
+}
+
+/// Up to 0.12.0 guards lived at `.conduit/<namespace>/`, beside the store's
+/// own files: move them under [`GUARD_DIR`] (same names, so every lane is
+/// kept). Then refuse what this version would not have named.
+fn upgrade(root: &Path, namespaces: &[String]) -> io::Result<Vec<String>> {
+    let mut refused = Vec::new();
+    for ns in namespaces {
+        let old = root.join(".conduit").join(ns);
+        let new = root.join(".conduit").join("kv").join(ns);
+        if let Ok(entries) = fs::read_dir(&old) {
+            for entry in entries {
+                let entry = entry?;
+                let name = entry.file_name();
+                if !entry.file_type()?.is_file() || !name.to_string_lossy().ends_with(".guard.json")
+                {
+                    continue;
+                }
+                let target = new.join(&name);
+                if target.exists() {
+                    refused.push(format!(
+                        "both {} and {}",
+                        entry.path().display(),
+                        target.display()
+                    ));
+                    continue;
+                }
+                fs::create_dir_all(&new)?;
+                fs::rename(entry.path(), &target)?;
+            }
+        }
+        file_names::refuse_foreign_names(&root.join(ns), ".json", &mut refused)?;
+        file_names::refuse_foreign_names(&new, ".guard.json", &mut refused)?;
+    }
+    Ok(refused)
 }
 
 impl StorageAdapter for FileKvStore {
@@ -165,14 +230,19 @@ struct FileKvBackend<'a, 't> {
     txn: &'a mut FileTxn<'t>,
 }
 
-/// Value path, keyed by `(namespace, key)` (Phase 14.2).
+/// Value path, keyed by `(namespace, key)` (Phase 14.2). The key comes from
+/// the event, so it is encoded ([`file_names::stem`]); the namespace was
+/// checked when the store was prepared.
 fn value_path(namespace: &str, key: &str) -> String {
-    format!("{namespace}/{key}.json")
+    format!("{namespace}/{}.json", file_names::stem(key))
 }
 
 /// Idempotency guard path, keyed by `(namespace, key)`.
 fn guard_path(namespace: &str, key: &str) -> String {
-    format!(".conduit/{namespace}/{key}.guard.json")
+    format!(
+        "{GUARD_DIR}/{namespace}/{}.guard.json",
+        file_names::stem(key)
+    )
 }
 
 fn write_err(e: std::io::Error) -> KvError {
@@ -183,6 +253,7 @@ impl FileKvBackend<'_, '_> {
     fn write_guard(&mut self, namespace: &str, key: &str, state: &KvGuard) -> Result<(), KvError> {
         let content =
             serde_json::to_string(state).map_err(|e| KvError::WriteFailed(e.to_string()))?;
+        let content = file_names::with_id(content, &file_names::stem(key), key);
         self.txn.write(&guard_path(namespace, key), content);
         Ok(())
     }
@@ -200,6 +271,8 @@ impl KvBackend for FileKvBackend<'_, '_> {
             .map_err(write_err)?
         {
             Some(content) => {
+                file_names::check_id(&content, &file_names::stem(key), key)
+                    .map_err(KvError::WriteFailed)?;
                 let parsed: KvGuard = serde_json::from_str(&content)
                     .map_err(|e| KvError::WriteFailed(format!("corrupt guard sidecar: {e}")))?;
                 Ok(Some(parsed))

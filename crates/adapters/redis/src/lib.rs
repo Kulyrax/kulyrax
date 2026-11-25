@@ -45,13 +45,23 @@ const MAX_ATTEMPTS: u32 = 5;
 const KEY_CHUNK: usize = 1_000;
 
 /// The `config:` block of a `type: redis` adapter entry.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct RedisConfig {
     /// `redis://[:password@]host:port[/db]`; `${ENV_VAR}` references are expanded.
     pub url: String,
     /// Connection pool size (default 4).
     #[serde(default)]
     pub pool_size: Option<u32>,
+}
+
+/// Shows the URL with its password and secret query parameters hidden.
+impl std::fmt::Debug for RedisConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RedisConfig")
+            .field("url", &kulyrax_core::redact::redact_url(&self.url))
+            .field("pool_size", &self.pool_size)
+            .finish()
+    }
 }
 
 /// Registry factory for `type: redis`.
@@ -69,7 +79,8 @@ pub fn factory(
     }
     if redis::Client::open(url.as_str()).is_err() {
         return Err(ConfigError::FactoryConfigInvalid(format!(
-            "redis adapter {id:?}: `url` does not parse: {url}"
+            "redis adapter {id:?}: `url` does not parse: {}",
+            kulyrax_core::redact::redact_url(&url)
         )));
     }
     Ok(Box::new(RedisAdapter::new(
@@ -397,6 +408,31 @@ impl StorageAdapter for RedisAdapter {
     }
     fn priority(&self) -> u32 {
         self.priority
+    }
+
+    /// Refuse namespaces that could make two keys meet: values live at
+    /// `<namespace>:<key>`, so a namespace containing `:` can share keys with
+    /// another (`a:b` + `c` and `a` + `b:c`), and one starting with
+    /// `__kulyrax` can reach the guards (`__kulyrax:guard:…`).
+    fn prepare(&self) -> Result<(), AdapterError> {
+        let mut bad: Vec<String> = self
+            .builder
+            .mappings()
+            .values()
+            .map(|m| m.namespace.clone())
+            .filter(|ns| ns.is_empty() || ns.contains(':') || ns.starts_with("__kulyrax"))
+            .collect();
+        if bad.is_empty() {
+            return Ok(());
+        }
+        bad.sort();
+        bad.dedup();
+        Err(AdapterError::WriteFailed(format!(
+            "redis adapter {:?}: namespaces must be non-empty, contain no `:` and not start \
+             with `__kulyrax`: {}",
+            self.id,
+            bad.join(", ")
+        )))
     }
 
     /// Check out one connection for the batch, `WATCH` the guard of every

@@ -200,8 +200,8 @@ fn run_to_completion(project: &Path) -> Output {
     out
 }
 
-/// Every projected file in the three stores, except the lock and the batch
-/// logs.
+/// Every projected file in the three stores, except the lock, the batch logs
+/// and the layout markers (store metadata, synced when written).
 fn stores(project: &Path) -> BTreeMap<String, String> {
     fn walk(base: &Path, dir: &Path, out: &mut BTreeMap<String, String>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
@@ -214,7 +214,10 @@ fn stores(project: &Path) -> BTreeMap<String, String> {
                 .unwrap()
                 .to_string_lossy()
                 .replace('\\', "/");
-            if rel.ends_with(".conduit/lock") || rel.contains(".conduit/wal") {
+            if rel.ends_with(".conduit/lock")
+                || rel.contains(".conduit/wal")
+                || rel.contains(".conduit/layout")
+            {
                 continue;
             }
             if path.is_dir() {

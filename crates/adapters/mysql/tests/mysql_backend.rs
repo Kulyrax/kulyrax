@@ -748,3 +748,37 @@ fn mysql_batch_redelivery_is_skipped() -> R {
     assert_eq!(my_state(&url, &t)?, before);
     Ok(())
 }
+
+/// Table and column names are written into SQL unquoted: anything but a
+/// plain identifier is refused before any statement runs.
+#[test]
+fn mysql_names_that_are_not_plain_identifiers_are_refused() -> R {
+    require_mysql!(url);
+    for (table, column) in [("users; DROP TABLE x", "name"), ("users", "a b")] {
+        let mut m = HashMap::new();
+        m.insert(
+            "U".to_string(),
+            upsert_mapping(
+                "U",
+                table,
+                &format!("  id: payload.id\n  '{column}': payload.v\n"),
+            ),
+        );
+        let a = MySqlAdapter::new(
+            "mysql".into(),
+            &url,
+            2,
+            10,
+            SqlRuntimeBuilder::new(m),
+            Arc::new(UpcasterRegistry::new()),
+            MigrationPolicy::default(),
+        );
+        let err = a.prepare().err().map(|e| e.to_string());
+        assert!(
+            err.as_deref()
+                .is_some_and(|e| e.contains("not plain identifiers")),
+            "{table:?} {column:?}: {err:?}"
+        );
+    }
+    Ok(())
+}

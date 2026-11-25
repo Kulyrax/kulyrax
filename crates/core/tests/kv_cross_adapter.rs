@@ -219,7 +219,11 @@ value: {}
             .join("u1.done"),
     )?)?;
     let kv_guard: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
-        kv_root.join(".conduit").join("users").join("u1.guard.json"),
+        kv_root
+            .join(".conduit")
+            .join("kv")
+            .join("users")
+            .join("u1.guard.json"),
     )?)?;
 
     assert_eq!(sql_last_sequence, 3);

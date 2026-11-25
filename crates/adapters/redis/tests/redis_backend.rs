@@ -327,7 +327,11 @@ fn kv_cross_backend() -> R {
     );
 
     let file_guard: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
-        dir.path().join(".conduit").join(&ns).join("u1.guard.json"),
+        dir.path()
+            .join(".conduit")
+            .join("kv")
+            .join(&ns)
+            .join("u1.guard.json"),
     )?)?;
     let redis_guard_raw =
         redis_get_raw(&url, &format!("__kulyrax:guard:{ns}:u1")).expect("guard key must exist");
@@ -545,5 +549,31 @@ fn redis_batch_conflict_aborts_the_whole_batch() -> R {
     let u1: serde_json::Value =
         serde_json::from_str(&redis_get_raw(&url, &format!("{ns}:u1")).unwrap_or_default())?;
     assert_eq!(u1["name"], "batch");
+    Ok(())
+}
+
+/// Keys are `<namespace>:<key>` and guards live under `__kulyrax`: a
+/// namespace with `:` or that prefix could reach another namespace's keys.
+#[test]
+fn redis_namespaces_that_could_meet_other_keys_are_refused() -> R {
+    require_redis!(url);
+    for ns in ["a:b", "__kulyrax_guard", ""] {
+        let mut m = HashMap::new();
+        m.insert(
+            "U".into(),
+            kv_mapping(&format!(
+                "event: U\nnamespace: '{ns}'\nversion: 1\nkey: payload.id\non_existing: replace\nvalue:\n  state: payload.state\n"
+            )),
+        );
+        let err = redis_adapter(&url, m)
+            .prepare()
+            .err()
+            .map(|e| e.to_string());
+        assert!(
+            err.as_deref()
+                .is_some_and(|e| e.contains("namespaces must be")),
+            "{ns:?}: {err:?}"
+        );
+    }
     Ok(())
 }

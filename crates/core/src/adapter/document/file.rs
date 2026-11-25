@@ -1,4 +1,6 @@
-use std::path::PathBuf;
+use std::collections::BTreeSet;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -9,7 +11,8 @@ use crate::{
         self, DocumentBackend, DocumentOutcome, DocumentPlan, ProjectionGuard,
     },
     adapter::document::runtime::DocumentRuntimeBuilder,
-    adapter::file_store::{FileStore, FileTxn},
+    adapter::file_names,
+    adapter::file_store::{FileStore, FileTxn, Layout},
     adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter},
     event::Event,
     routing::StorageKind,
@@ -42,7 +45,7 @@ impl FileDocumentAdapter {
     ) -> Self {
         Self {
             id,
-            store: FileStore::new(root),
+            store: FileStore::with_layout(root, layout(&builder)),
             priority,
             builder,
             upcasters,
@@ -53,6 +56,41 @@ impl FileDocumentAdapter {
     fn failure(&self, error: AdapterError) -> AdapterResult {
         AdapterResult::failure(self.id.clone(), StorageKind::Document, error)
     }
+}
+
+/// Where guards live: one directory per collection.
+const GUARD_DIR: &str = ".conduit/entities";
+
+/// The collections the mappings name, each a top-level directory of
+/// documents.
+fn layout(builder: &DocumentRuntimeBuilder) -> Layout {
+    let collections: Vec<String> = builder
+        .mappings()
+        .values()
+        .map(|m| m.collection.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    Layout {
+        kind: "document",
+        claims: collections.clone(),
+        names: collections
+            .iter()
+            .map(|c| ("collection", c.clone()))
+            .collect(),
+        upgrade: Box::new(move |root| upgrade(root, &collections)),
+    }
+}
+
+/// The layout has not moved; refuse the files an earlier version named from
+/// ids this version encodes.
+fn upgrade(root: &Path, collections: &[String]) -> io::Result<Vec<String>> {
+    let mut refused = Vec::new();
+    for c in collections {
+        file_names::refuse_foreign_names(&root.join(c), ".json", &mut refused)?;
+        file_names::refuse_foreign_names(&root.join(GUARD_DIR).join(c), ".done", &mut refused)?;
+    }
+    Ok(refused)
 }
 
 impl StorageAdapter for FileDocumentAdapter {
@@ -177,14 +215,17 @@ struct FileDocumentBackend<'a, 't> {
 /// has its own event type (`OrderCancelled` vs `OrderCreated`) but the same
 /// `collection`, so it points at the same file its create mapping wrote.
 fn output_path(collection: &str, entity_id: &str) -> String {
-    format!("{collection}/{entity_id}.json")
+    format!("{collection}/{}.json", file_names::stem(entity_id))
 }
 
 /// Idempotency guard path, keyed by `(collection, entity_id)` (Phase 11.3,
 /// re-keyed by collection in Phase 13.3) — not `event_id` or `event_type`, so
 /// every event type touching one entity shares one guard.
 fn guard_path(collection: &str, entity_id: &str) -> String {
-    format!(".conduit/entities/{collection}/{entity_id}.done")
+    format!(
+        "{GUARD_DIR}/{collection}/{}.done",
+        file_names::stem(entity_id)
+    )
 }
 
 fn write_err(e: std::io::Error) -> DocumentError {
@@ -200,6 +241,7 @@ impl FileDocumentBackend<'_, '_> {
     ) -> Result<(), DocumentError> {
         let content =
             serde_json::to_string(state).map_err(|e| DocumentError::WriteFailed(e.to_string()))?;
+        let content = file_names::with_id(content, &file_names::stem(entity_id), entity_id);
         self.txn.write(&guard_path(collection, entity_id), content);
         Ok(())
     }
@@ -221,6 +263,8 @@ impl DocumentBackend for FileDocumentBackend<'_, '_> {
             .map_err(write_err)?
         {
             Some(content) => {
+                file_names::check_id(&content, &file_names::stem(entity_id), entity_id)
+                    .map_err(DocumentError::WriteFailed)?;
                 let parsed: ProjectionGuard = serde_json::from_str(&content).map_err(|e| {
                     DocumentError::WriteFailed(format!("corrupt guard sidecar: {e}"))
                 })?;

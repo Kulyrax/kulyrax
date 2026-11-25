@@ -150,7 +150,11 @@ fn tree(root: &Path) -> BTreeMap<String, String> {
                 .unwrap()
                 .to_string_lossy()
                 .replace('\\', "/");
-            if rel == ".conduit/lock" || rel.starts_with(".conduit/wal") {
+            // The store's own files: its lock, batch logs and layout markers.
+            if rel == ".conduit/lock"
+                || rel.starts_with(".conduit/wal")
+                || rel.starts_with(".conduit/layout")
+            {
                 continue;
             }
             if path.is_dir() {

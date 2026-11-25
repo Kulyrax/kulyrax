@@ -38,7 +38,7 @@ use kulyrax_core::runtime::config::{
 use kulyrax_core::upcast::UpcasterRegistry;
 
 /// The `config:` block of a `type: mongodb` adapter entry.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct MongoDbConfig {
     /// `mongodb://[user:pass@]host[:port][/?options]`; `${ENV_VAR}` references
     /// are expanded.
@@ -47,6 +47,17 @@ pub struct MongoDbConfig {
     /// Becomes the `maxPoolSize` connection-string option (default 4).
     #[serde(default)]
     pub pool_size: Option<u32>,
+}
+
+/// Shows the URL with its password and secret query parameters hidden.
+impl std::fmt::Debug for MongoDbConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MongoDbConfig")
+            .field("url", &kulyrax_core::redact::redact_url(&self.url))
+            .field("database", &self.database)
+            .field("pool_size", &self.pool_size)
+            .finish()
+    }
 }
 
 /// Registry factory for `type: mongodb`.
@@ -67,7 +78,10 @@ pub fn factory(
         return Err(invalid("`database` is empty".into()));
     }
     if Client::with_uri_str(&url).is_err() {
-        return Err(invalid(format!("`url` does not parse: {url}")));
+        return Err(invalid(format!(
+            "`url` does not parse: {}",
+            kulyrax_core::redact::redact_url(&url)
+        )));
     }
     Ok(Box::new(MongoDbAdapter::new(
         id.clone(),

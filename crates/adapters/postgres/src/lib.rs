@@ -93,7 +93,7 @@ type ColTypes = HashMap<String, PgColType>;
 /// `kulyrax-core::runtime::config` in Phase 28 (Postgres no longer has a
 /// typed `AdapterConfig` variant; this is parsed by [`factory`] from the
 /// `Custom` entry's raw `config:` sub-value).
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct PostgresConfig {
     /// `postgres://user:pass@host:port/db`. May contain `${ENV_VAR}` references
     /// (Phase 19.2) so credentials stay out of the committed config.
@@ -101,6 +101,16 @@ pub struct PostgresConfig {
     /// r2d2 pool size (default 4).
     #[serde(default)]
     pub pool_size: Option<u32>,
+}
+
+/// Shows the URL with its password and secret query parameters hidden.
+impl std::fmt::Debug for PostgresConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PostgresConfig")
+            .field("url", &kulyrax_core::redact::redact_url(&self.url))
+            .field("pool_size", &self.pool_size)
+            .finish()
+    }
 }
 
 /// Postgres SQL adapter (Phase 19). The first adapter **without** a
@@ -248,6 +258,7 @@ impl StorageAdapter for PostgresAdapter {
             .map_err(|e| AdapterError::WriteFailed(e.clone()))?;
         self.prepared
             .prepare(|| {
+                exec::check_identifiers(&self.builder)?;
                 let mut client = pool
                     .get()
                     .map_err(|e| SqlError::ExecutionFailed(e.to_string()))?;
@@ -1019,7 +1030,8 @@ pub fn factory(
     }
     if url.parse::<postgres::Config>().is_err() {
         return Err(ConfigError::FactoryConfigInvalid(format!(
-            "postgres adapter {id:?}: `url` does not parse: {url}"
+            "postgres adapter {id:?}: `url` does not parse: {}",
+            kulyrax_core::redact::redact_url(&url)
         )));
     }
 

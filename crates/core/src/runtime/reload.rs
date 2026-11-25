@@ -187,9 +187,30 @@ fn decode_result(content: &str, token: &str) -> Option<ReloadOutcome> {
 }
 
 /// Write via a temporary file and rename, so a reader never sees half a file.
+///
+/// Only the owner may read or write it (mode 0600 on Unix): a rejected
+/// reload's reason quotes configuration errors. On Windows the file inherits
+/// the ACL of its folder, `<config folder>/.kulyrax/control/`, so that folder's
+/// permissions decide who can read it.
 fn write_atomically(path: &Path, content: &str) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
-    fs::write(&tmp, content)?;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut f = options.open(&tmp)?;
+    // `mode` applies only when the file is created: a temporary left by an
+    // earlier run keeps its mode, so narrow it too.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        f.set_permissions(fs::Permissions::from_mode(0o600))?;
+    }
+    std::io::Write::write_all(&mut f, content.as_bytes())?;
+    drop(f);
     fs::rename(&tmp, path)
 }
 

@@ -83,7 +83,7 @@ const BULK_MAX_BYTES: usize = 8 * 1024 * 1024;
 // Config
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct ElasticsearchConfig {
     /// `http(s)://host:port`. May contain `${ENV_VAR}` references (the same
     /// pattern every other networked backend's `url` field uses).
@@ -98,6 +98,24 @@ pub struct ElasticsearchConfig {
     /// Request timeout in milliseconds (default 10_000).
     #[serde(default)]
     pub timeout_ms: Option<u64>,
+}
+
+/// Shows the URL redacted and the password as `***`.
+impl std::fmt::Debug for ElasticsearchConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ElasticsearchConfig")
+            .field("url", &kulyrax_core::redact::redact_url(&self.url))
+            .field("username", &self.username)
+            .field(
+                "password",
+                &self
+                    .password
+                    .as_deref()
+                    .map(kulyrax_core::redact::redact_secret),
+            )
+            .field("timeout_ms", &self.timeout_ms)
+            .finish()
+    }
 }
 
 fn es_err(e: reqwest::Error) -> DocumentError {
@@ -226,6 +244,15 @@ impl ElasticsearchAdapter {
             }
             Err(e) => return Err(self.failure(AdapterError::WriteFailed(e.to_string()))),
         };
+        // `.` and `..` are dot segments: a URL parser resolves `/_doc/..` (even
+        // percent-encoded) to another endpoint, so these ids cannot be addressed.
+        // Refused here, on the batch and the per-event path alike.
+        if matches!(projection.entity_id.as_str(), "." | "..") {
+            return Err(self.failure(AdapterError::WriteFailed(format!(
+                "elasticsearch cannot address a document with id {:?}: it is a URL dot segment",
+                projection.entity_id
+            ))));
+        }
         Ok(Planned {
             source_version: projection.source_version,
             projected_version: projection.projected_version,
@@ -838,7 +865,8 @@ pub fn factory(
     }
     if reqwest::Url::parse(&url).is_err() {
         return Err(ConfigError::FactoryConfigInvalid(format!(
-            "elasticsearch adapter {id:?}: `url` does not parse: {url}"
+            "elasticsearch adapter {id:?}: `url` does not parse: {}",
+            kulyrax_core::redact::redact_url(&url)
         )));
     }
     let auth = match (&cfg.username, &cfg.password) {

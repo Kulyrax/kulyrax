@@ -1,14 +1,17 @@
-use std::path::PathBuf;
+use std::collections::BTreeSet;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    adapter::file_store::{FileStore, FileTxn},
+    adapter::file_names,
+    adapter::file_store::{FileStore, FileTxn, Layout},
     adapter::graph::adapter::GraphError,
     adapter::graph::exec::{self, GraphBackend, GraphGuard, GraphOutcome},
-    adapter::graph::mapping::encode_edge_key,
+    adapter::graph::mapping::{GraphMapping, encode_edge_key},
     adapter::graph::runtime::GraphRuntimeBuilder,
     adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter},
     event::Event,
@@ -63,7 +66,7 @@ impl GraphStore {
         Self {
             id,
             priority,
-            store: FileStore::new(root),
+            store: FileStore::with_layout(root, layout(&builder)),
             builder,
             upcasters,
             migration_policy,
@@ -73,7 +76,55 @@ impl GraphStore {
     fn failure(&self, error: AdapterError) -> AdapterResult {
         AdapterResult::failure(self.id.clone(), StorageKind::Graph, error)
     }
+}
 
+/// Nodes and edges live under `nodes/` and `edges/`, one directory per label
+/// and edge type.
+fn layout(builder: &GraphRuntimeBuilder) -> Layout {
+    let mut labels = BTreeSet::new();
+    let mut edge_types = BTreeSet::new();
+    for record in builder.mappings().values().flat_map(GraphMapping::records) {
+        match record {
+            GraphMapping::Node(n) => {
+                labels.insert(n.label.clone());
+            }
+            GraphMapping::Edge(e) => {
+                edge_types.insert(e.edge_type.clone());
+            }
+            GraphMapping::Subgraph(_) => {}
+        }
+    }
+    let names = labels
+        .iter()
+        .map(|l| ("label", l.clone()))
+        .chain(edge_types.iter().map(|t| ("edge type", t.clone())))
+        .collect();
+    let labels: Vec<String> = labels.into_iter().collect();
+    Layout {
+        kind: "graph",
+        claims: vec!["nodes".into(), "edges".into()],
+        names,
+        upgrade: Box::new(move |root| upgrade(root, &labels)),
+    }
+}
+
+/// The layout has not moved; refuse the node files an earlier version named
+/// from ids this version encodes. Edge files were always named in hex.
+fn upgrade(root: &Path, labels: &[String]) -> io::Result<Vec<String>> {
+    let mut refused = Vec::new();
+    for label in labels {
+        file_names::refuse_foreign_names(&root.join("nodes").join(label), ".json", &mut refused)?;
+        file_names::refuse_foreign_names(
+            &root.join(NODE_GUARD_DIR).join(label),
+            ".json",
+            &mut refused,
+        )?;
+    }
+    file_names::refuse_foreign_names(&root.join(INCIDENT_DIR), ".json", &mut refused)?;
+    Ok(refused)
+}
+
+impl GraphStore {
     fn outcome(
         &self,
         outcome: GraphOutcome,
@@ -197,27 +248,42 @@ struct FileGraphBackend<'a, 't> {
 /// Where node guards live; one directory per label.
 const NODE_GUARD_DIR: &str = ".conduit/guard/nodes";
 
+/// Node ids come from events, so they are encoded ([`file_names::stem`]);
+/// labels and edge types were checked when the store was prepared.
 fn node_value_path(label: &str, node_id: &str) -> String {
-    format!("nodes/{label}/{node_id}.json")
+    format!("nodes/{label}/{}.json", file_names::stem(node_id))
 }
 
 fn node_guard_path(label: &str, node_id: &str) -> String {
-    format!("{NODE_GUARD_DIR}/{label}/{node_id}.json")
-}
-
-fn edge_value_path(edge_type: &str, key: &str) -> String {
-    format!("edges/{edge_type}/{}.json", encode_edge_key(key))
-}
-
-fn edge_guard_path(edge_type: &str, key: &str) -> String {
     format!(
-        ".conduit/guard/edges/{edge_type}/{}.json",
-        encode_edge_key(key)
+        "{NODE_GUARD_DIR}/{label}/{}.json",
+        file_names::stem(node_id)
     )
 }
 
+/// An edge's file name: its canonical key in hex (always a plain name), or a
+/// hashed name when that is too long.
+fn edge_stem(key: &str) -> String {
+    let hex = encode_edge_key(key);
+    if hex.len() <= file_names::MAX_STEM {
+        hex
+    } else {
+        file_names::hashed(key)
+    }
+}
+
+fn edge_value_path(edge_type: &str, key: &str) -> String {
+    format!("edges/{edge_type}/{}.json", edge_stem(key))
+}
+
+fn edge_guard_path(edge_type: &str, key: &str) -> String {
+    format!(".conduit/guard/edges/{edge_type}/{}.json", edge_stem(key))
+}
+
+const INCIDENT_DIR: &str = ".conduit/incident";
+
 fn incident_path(node_id: &str) -> String {
-    format!(".conduit/incident/{node_id}.json")
+    format!("{INCIDENT_DIR}/{}.json", file_names::stem(node_id))
 }
 
 fn ge_err(e: std::io::Error) -> GraphError {
@@ -228,16 +294,47 @@ fn invalid(e: serde_json::Error) -> GraphError {
     ge_err(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
+/// Which record a `.conduit/` file belongs to: the file name stem it was
+/// written under and the full id it stands for, so a hashed name can carry
+/// the id (see [`file_names::with_id`]).
+#[derive(Clone, Copy)]
+enum Owner<'a> {
+    Node(&'a str),
+    Edge(&'a str),
+}
+
+impl Owner<'_> {
+    fn stem_and_id(self) -> (String, String) {
+        match self {
+            Owner::Node(id) => (file_names::stem(id), id.to_string()),
+            Owner::Edge(key) => (edge_stem(key), key.to_string()),
+        }
+    }
+}
+
 impl FileGraphBackend<'_, '_> {
-    fn read_guard(&mut self, path: &str) -> Result<Option<GraphGuard>, GraphError> {
-        match self.txn.read(path).map_err(ge_err)? {
+    fn read_owned(&mut self, path: &str, owner: Owner<'_>) -> Result<Option<String>, GraphError> {
+        let Some(content) = self.txn.read(path).map_err(ge_err)? else {
+            return Ok(None);
+        };
+        let (stem, id) = owner.stem_and_id();
+        file_names::check_id(&content, &stem, &id).map_err(GraphError::WriteFailed)?;
+        Ok(Some(content))
+    }
+
+    fn read_guard(
+        &mut self,
+        path: &str,
+        owner: Owner<'_>,
+    ) -> Result<Option<GraphGuard>, GraphError> {
+        match self.read_owned(path, owner)? {
             Some(content) => serde_json::from_str(&content).map(Some).map_err(invalid),
             None => Ok(None),
         }
     }
 
     fn read_incident(&mut self, node_id: &str) -> Result<IncidentIndex, GraphError> {
-        match self.txn.read(&incident_path(node_id)).map_err(ge_err)? {
+        match self.read_owned(&incident_path(node_id), Owner::Node(node_id))? {
             Some(content) => serde_json::from_str(&content).map_err(invalid),
             None => Ok(IncidentIndex::default()),
         }
@@ -249,6 +346,20 @@ impl FileGraphBackend<'_, '_> {
         Ok(())
     }
 
+    /// A `.conduit/` file: under a hashed name it carries the owner's id.
+    fn commit_owned<T: Serialize>(
+        &mut self,
+        path: &str,
+        owner: Owner<'_>,
+        value: &T,
+    ) -> Result<(), GraphError> {
+        let content = serde_json::to_string_pretty(value).map_err(invalid)?;
+        let (stem, id) = owner.stem_and_id();
+        self.txn
+            .write(path, file_names::with_id(content, &stem, &id));
+        Ok(())
+    }
+
     fn add_incident(&mut self, node_id: &str, r: &IncidentRef) -> Result<(), GraphError> {
         let mut idx = self.read_incident(node_id)?;
         if !idx
@@ -257,7 +368,7 @@ impl FileGraphBackend<'_, '_> {
             .any(|e| e.edge_type == r.edge_type && e.key == r.key)
         {
             idx.edges.push(r.clone());
-            self.commit_json(&incident_path(node_id), &idx)?;
+            self.commit_owned(&incident_path(node_id), Owner::Node(node_id), &idx)?;
         }
         Ok(())
     }
@@ -276,7 +387,7 @@ impl FileGraphBackend<'_, '_> {
             if idx.edges.is_empty() {
                 self.txn.remove(&incident_path(node_id));
             } else {
-                self.commit_json(&incident_path(node_id), &idx)?;
+                self.commit_owned(&incident_path(node_id), Owner::Node(node_id), &idx)?;
             }
         }
         Ok(())
@@ -289,7 +400,7 @@ impl GraphBackend for FileGraphBackend<'_, '_> {
         label: &str,
         node_id: &str,
     ) -> Result<Option<GraphGuard>, GraphError> {
-        self.read_guard(&node_guard_path(label, node_id))
+        self.read_guard(&node_guard_path(label, node_id), Owner::Node(node_id))
     }
 
     fn read_edge_guard(
@@ -297,7 +408,7 @@ impl GraphBackend for FileGraphBackend<'_, '_> {
         edge_type: &str,
         key: &str,
     ) -> Result<Option<GraphGuard>, GraphError> {
-        self.read_guard(&edge_guard_path(edge_type, key))
+        self.read_guard(&edge_guard_path(edge_type, key), Owner::Edge(key))
     }
 
     /// Checks every label a node with this id could have been projected
@@ -305,7 +416,8 @@ impl GraphBackend for FileGraphBackend<'_, '_> {
     /// pending in the batch. Small in practice.
     fn node_is_tombstoned(&mut self, node_id: &str) -> Result<bool, GraphError> {
         for label in self.txn.child_dirs(NODE_GUARD_DIR).map_err(ge_err)? {
-            if let Some(g) = self.read_guard(&node_guard_path(&label, node_id))?
+            if let Some(g) =
+                self.read_guard(&node_guard_path(&label, node_id), Owner::Node(node_id))?
                 && g.deleted
             {
                 return Ok(true);
@@ -346,7 +458,11 @@ impl GraphBackend for FileGraphBackend<'_, '_> {
                 self.commit_json(&value_path, properties)?;
             }
         }
-        self.commit_json(&node_guard_path(label, node_id), guard)
+        self.commit_owned(
+            &node_guard_path(label, node_id),
+            Owner::Node(node_id),
+            guard,
+        )
     }
 
     fn write_edge(
@@ -370,7 +486,7 @@ impl GraphBackend for FileGraphBackend<'_, '_> {
                 self.add_incident(endpoint, &r)?;
             }
         }
-        self.commit_json(&edge_guard_path(edge_type, key), guard)
+        self.commit_owned(&edge_guard_path(edge_type, key), Owner::Edge(key), guard)
     }
 
     fn delete_node_cascade(
@@ -384,12 +500,14 @@ impl GraphBackend for FileGraphBackend<'_, '_> {
         for r in &incident.edges {
             self.txn.remove(&edge_value_path(&r.edge_type, &r.key));
             let egp = edge_guard_path(&r.edge_type, &r.key);
-            let mut eg = self.read_guard(&egp)?.unwrap_or_default();
+            let mut eg = self
+                .read_guard(&egp, Owner::Edge(&r.key))?
+                .unwrap_or_default();
             eg.last_sequence = guard.last_sequence;
             eg.last_event_id = guard.last_event_id.clone();
             eg.deleted = true;
             eg.permanent = guard.permanent;
-            self.commit_json(&egp, &eg)?;
+            self.commit_owned(&egp, Owner::Edge(&r.key), &eg)?;
             for other in [&r.from, &r.to] {
                 if other.as_str() != node_id {
                     self.drop_incident(other, &r.edge_type, &r.key)?;
@@ -397,7 +515,11 @@ impl GraphBackend for FileGraphBackend<'_, '_> {
             }
         }
         self.txn.remove(&incident_path(node_id));
-        self.commit_json(&node_guard_path(label, node_id), guard)
+        self.commit_owned(
+            &node_guard_path(label, node_id),
+            Owner::Node(node_id),
+            guard,
+        )
     }
 
     fn delete_edge(
@@ -412,7 +534,7 @@ impl GraphBackend for FileGraphBackend<'_, '_> {
         for endpoint in dedup_pair(from, to) {
             self.drop_incident(endpoint, edge_type, key)?;
         }
-        self.commit_json(&edge_guard_path(edge_type, key), guard)
+        self.commit_owned(&edge_guard_path(edge_type, key), Owner::Edge(key), guard)
     }
 }
 

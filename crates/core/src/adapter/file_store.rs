@@ -20,13 +20,16 @@ use std::sync::{Arc, Mutex, Weak};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::adapter::AdapterError;
+use crate::adapter::{AdapterError, file_names};
 use crate::execution::stages::{self, Stage, timed};
 
 /// Under the store root: the lock file and the batch-log directory.
 const CONDUIT_DIR: &str = ".conduit";
 const LOCK_FILE: &str = "lock";
 const WAL_DIR: &str = "wal";
+/// Under `.conduit/`: one marker per adapter kind whose layout check passed
+/// (see [`Layout`]).
+const LAYOUT_DIR: &str = "layout";
 
 /// Batch log layout: magic, body length (u64 LE), CRC-32 of the body (u32 LE),
 /// then the body: per entry, a tag byte (1 write, 0 remove), the path length
@@ -403,7 +406,7 @@ fn dirs_to_sync(files: &[String]) -> BTreeSet<String> {
 /// process the n-th time it reaches `point`, simulating a crash there. Only
 /// `kulyrax-cli`'s crash tests enable the feature; without it this is empty.
 #[cfg(feature = "crash-points")]
-fn crash_point(point: &str) {
+pub(crate) fn crash_point(point: &str) {
     use std::sync::OnceLock;
     use std::sync::atomic::AtomicU32;
     static TARGET: OnceLock<Option<(String, u32)>> = OnceLock::new();
@@ -424,7 +427,7 @@ fn crash_point(point: &str) {
 
 #[cfg(not(feature = "crash-points"))]
 #[inline(always)]
-fn crash_point(_point: &str) {}
+pub(crate) fn crash_point(_point: &str) {}
 
 // ---------------------------------------------------------------------------
 // The per-root handle: lock, log sequence, sync point
@@ -476,9 +479,45 @@ struct Root {
     sync_jobs: Arc<AtomicU64>,
     /// Set at shutdown: the sync thread stops waiting out `SYNC_DELAY`.
     hurry: Arc<AtomicBool>,
+    /// The top-level directories each adapter on this root writes, by name
+    /// lowercased, with the adapter kind and the name as written: two
+    /// adapters must not share a directory, even one spelled differently
+    /// only by case (one directory on a case-insensitive file system).
+    claims: Mutex<HashMap<String, (&'static str, String)>>,
 }
 
 impl Root {
+    fn claim(&self, kind: &'static str, names: &[String]) -> io::Result<()> {
+        let mut claims = self
+            .claims
+            .lock()
+            .map_err(|_| other("file store claims poisoned by an earlier panic".to_string()))?;
+        // Checked against the root's earlier claims and against this
+        // adapter's own names: `Users` and `users` are one directory on a
+        // case-insensitive file system.
+        let mut staged = claims.clone();
+        let mut conflicts = Vec::new();
+        for name in names {
+            match staged.get(&name.to_lowercase()) {
+                None => {}
+                Some((k, n)) if *k == kind && n == name => {}
+                Some((k, n)) => conflicts.push(format!(
+                    "{kind} {name:?} and {k} {n:?} would share the directory {}",
+                    self.dir.join(name).display()
+                )),
+            }
+            staged.insert(name.to_lowercase(), (kind, name.clone()));
+        }
+        if !conflicts.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{}; give them different names", conflicts.join("; ")),
+            ));
+        }
+        *claims = staged;
+        Ok(())
+    }
+
     fn wal_dir(&self) -> PathBuf {
         self.dir.join(CONDUIT_DIR).join(WAL_DIR)
     }
@@ -708,6 +747,7 @@ fn acquire_root(dir: &Path) -> io::Result<(Arc<Root>, bool)> {
         sync_us: Arc::new(AtomicU64::new(0)),
         sync_jobs: Arc::new(AtomicU64::new(0)),
         hurry: Arc::new(AtomicBool::new(false)),
+        claims: Mutex::new(HashMap::new()),
     });
     roots.retain(|_, w| w.strong_count() > 0);
     roots.insert(key, Arc::downgrade(&root));
@@ -775,17 +815,43 @@ struct StoreState {
     known_dirs: HashSet<String>,
 }
 
+/// What one file adapter keeps under a store root, checked when the store
+/// is prepared, before anything is read or written:
+/// - every mapping name it puts in a path is a plain directory name
+///   ([`file_names::check_config_name`]);
+/// - its top-level directories are its own on the root ([`Root::claim`]);
+/// - until it has passed once (a marker under `.conduit/layout/`),
+///   `upgrade` moves an older layout into place and lists the files an older
+///   scheme wrote that this one cannot read. Any listed file refuses the
+///   start: re-keying it silently would lose its guard.
+pub struct Layout {
+    /// The adapter kind, naming its marker: `kv`, `document` or `graph`.
+    pub kind: &'static str,
+    /// Its top-level directories under the root.
+    pub claims: Vec<String>,
+    /// The mapping names it puts in paths: (what, name).
+    pub names: Vec<(&'static str, String)>,
+    /// Runs on the store root while the store's lock is held.
+    #[allow(clippy::type_complexity)]
+    pub upgrade: Box<dyn Fn(&Path) -> io::Result<Vec<String>> + Send + Sync>,
+}
+
 /// The durable write path shared by the file-backed adapters. See the module
 /// docs.
 pub struct FileStore {
     dir: PathBuf,
+    layout: Option<Layout>,
     state: Mutex<StoreState>,
 }
+
+/// At most this many refused paths are named in the error.
+const SHOW_REFUSED: usize = 20;
 
 impl FileStore {
     pub fn new(dir: PathBuf) -> Self {
         Self {
             dir,
+            layout: None,
             state: Mutex::new(StoreState {
                 root: None,
                 batch: None,
@@ -794,6 +860,69 @@ impl FileStore {
                 known_dirs: HashSet::new(),
             }),
         }
+    }
+
+    /// A store whose adapter's [`Layout`] is checked when it is prepared.
+    pub fn with_layout(dir: PathBuf, layout: Layout) -> Self {
+        Self {
+            layout: Some(layout),
+            ..Self::new(dir)
+        }
+    }
+
+    /// The checks of [`Layout`], after the store's lock is taken and its
+    /// batch logs are replayed.
+    fn check_layout(&self, root: &Root) -> io::Result<()> {
+        let Some(layout) = &self.layout else {
+            return Ok(());
+        };
+        root.claim(layout.kind, &layout.claims)?;
+        let marker = self
+            .dir
+            .join(CONDUIT_DIR)
+            .join(LAYOUT_DIR)
+            .join(layout.kind);
+        if marker.exists() {
+            return Ok(());
+        }
+        let refused = (layout.upgrade)(&self.dir)?;
+        if !refused.is_empty() {
+            let shown: Vec<&str> = refused
+                .iter()
+                .take(SHOW_REFUSED)
+                .map(String::as_str)
+                .collect();
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "file store {} holds {} path(s) this version cannot open as they are: \
+                     files an earlier version named from ids this version names differently \
+                     (uppercase letters, `/`, a leading or trailing `.`, other special \
+                     characters, ids too long for a file name), or a guard under both the old \
+                     and the new layout: {}{}. \
+                     Rebuild the store: move it aside and project the full event history \
+                     into an empty directory",
+                    self.dir.display(),
+                    refused.len(),
+                    shown.join(", "),
+                    if refused.len() > shown.len() {
+                        ", …"
+                    } else {
+                        ""
+                    }
+                ),
+            ));
+        }
+        if let Some(dir) = marker.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        let mut f = File::create(&marker)?;
+        f.write_all(b"1\n")?;
+        f.sync_all()?;
+        if let Some(dir) = marker.parent() {
+            sync_dir(dir)?;
+        }
+        Ok(())
     }
 
     pub fn dir(&self) -> &Path {
@@ -817,11 +946,24 @@ impl FileStore {
         if st.root.is_some() {
             return Ok(());
         }
+        if let Some(layout) = &self.layout {
+            let bad: Vec<String> = layout
+                .names
+                .iter()
+                .filter_map(|(what, name)| file_names::check_config_name(what, name).err())
+                .collect();
+            if !bad.is_empty() {
+                return Err(AdapterError::WriteFailed(bad.join("; ")));
+            }
+        }
         let (root, fresh) = acquire_root(&self.dir).map_err(io_err)?;
         if fresh {
             let next_seq = recover(&root, &mut st.known_dirs).map_err(io_err)?;
             root.state().map_err(io_err)?.next_seq = next_seq;
         }
+        // After recovery (logs replay to the paths they were written with),
+        // and before emptiness is judged (an upgrade may move files).
+        self.check_layout(&root).map_err(io_err)?;
         st.cache_complete = store_is_empty(&self.dir).map_err(io_err)?;
         st.root = Some(root);
         Ok(())
@@ -936,12 +1078,13 @@ impl FileStore {
     }
 }
 
-/// True when `.conduit/` holds nothing but the batch logs and the lock: no
-/// guard has ever been written here.
+/// True when `.conduit/` holds nothing but the batch logs, the lock and the
+/// layout markers: no guard has ever been written here. (Guards are never
+/// written into those directories: mapping names cannot name them.)
 fn store_is_empty(dir: &Path) -> io::Result<bool> {
     for entry in fs::read_dir(dir.join(CONDUIT_DIR))? {
         let name = entry?.file_name();
-        if name != WAL_DIR && name != LOCK_FILE {
+        if name != WAL_DIR && name != LOCK_FILE && name != LAYOUT_DIR {
             return Ok(false);
         }
     }

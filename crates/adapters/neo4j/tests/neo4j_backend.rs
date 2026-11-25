@@ -907,3 +907,26 @@ fn neo4j_subgraph_projects_every_record_in_one_transaction() -> R {
     );
     Ok(())
 }
+
+/// Labels and edge types are written into Cypher between backticks.
+#[test]
+fn neo4j_names_with_a_backtick_are_refused() -> R {
+    require_neo4j!(uri);
+    let label = fresh_label();
+    let mut m = HashMap::new();
+    m.insert(
+        "Prep".into(),
+        graph_mapping(&format!(
+            "kind: node\nevent: Prep\nlabel: '{label}` SET n.x = 1 //'\nkey: payload.id\nversion: 1\nproperties:\n  id: payload.id\n"
+        )),
+    );
+    let err = unprepared_neo4j_adapter(&uri, m)
+        .prepare()
+        .err()
+        .map(|e| e.to_string());
+    assert!(
+        err.as_deref().is_some_and(|e| e.contains("backtick")),
+        "{err:?}"
+    );
+    Ok(())
+}

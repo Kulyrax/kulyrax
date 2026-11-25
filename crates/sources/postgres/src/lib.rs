@@ -53,7 +53,7 @@ fn default_watch_retention_ms() -> u64 {
 }
 
 /// The `config:` block of a `type: postgres_outbox` source.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OutboxConfig {
     /// `postgres://user:pass@host/db`; `${ENV_VAR}` references are expanded.
@@ -81,6 +81,22 @@ pub struct OutboxConfig {
     /// order.
     #[serde(default)]
     pub allow_unverified_sequence: bool,
+}
+
+/// Shows the URL with its password and secret query parameters hidden.
+impl std::fmt::Debug for OutboxConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OutboxConfig")
+            .field("url", &kulyrax_core::redact::redact_url(&self.url))
+            .field("table", &self.table)
+            .field("sequence_column", &self.sequence_column)
+            .field("columns", &self.columns)
+            .field("gap_grace_ms", &self.gap_grace_ms)
+            .field("gap_timeout_ms", &self.gap_timeout_ms)
+            .field("watch_retention_ms", &self.watch_retention_ms)
+            .field("allow_unverified_sequence", &self.allow_unverified_sequence)
+            .finish()
+    }
 }
 
 /// Which column feeds each `Event` field. `metadata` and `version` may be
