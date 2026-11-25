@@ -14,10 +14,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::event::Event;
 
-/// An opaque, source-defined position. Lexicographically comparable **within a
-/// single source** — a source encodes its progress however it likes (a file
-/// name, a zero-padded line number, later a Kafka offset), as long as
-/// `a < b` in string order iff `a` precedes `b` in delivery order.
+/// An opaque resume token, made by one source for that source: a file name, a
+/// line number, an outbox cursor, a gRPC producer's own `position`.
+///
+/// Only the source that made a position may order it, by its own rule. The
+/// run loop never compares positions. It commits each batch at the position
+/// of the batch's **last event in delivery order** (`docs/producer-contract.md`,
+/// §9 "Positions").
+///
+/// **Deprecated: `PartialOrd` and `Ord` are removed in 1.0.** They are text
+/// order, which is not delivery order in general (`"9"` sorts after `"10"`),
+/// so don't use them to order positions. (`#[deprecated]` cannot mark a trait
+/// impl, so this comment is the notice.)
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SourcePosition(pub String);
 
@@ -109,10 +117,13 @@ pub trait EventSource {
     /// [`SourcePosition`] needed to commit past it.
     fn poll(&mut self, max_batch: usize) -> Result<Vec<SourcedEvent>, SourceError>;
 
-    /// Durably record that everything up to and including `position` has been
-    /// projected. Called by the run loop **only after** a batch fully resolves
-    /// (every adapter outcome recorded — success, skip, or DLQ). A committed
-    /// position never moves backward.
+    /// Durably record that everything this source delivered up to and
+    /// including the event at `position` has resolved. `position` is that of
+    /// the last event, in delivery order, of the batch the last `poll`
+    /// returned. Called by the run loop **only after** the batch fully
+    /// resolves (every adapter outcome recorded: success, skip, or DLQ). A
+    /// committed position never moves backward, by the source's own order.
+    /// After a restart the source resumes after it.
     fn commit(&mut self, position: SourcePosition) -> Result<(), SourceError>;
 
     /// The currently committed position, if any (for `kulyrax sources` and

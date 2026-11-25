@@ -75,6 +75,29 @@ Kulyrax is projection-only ([`architecture.md` §1.1](../architecture.md)). It c
 
 **If violated.** The directory source reads a whole file at once; a half-written trailing NDJSON line is a parse error → that line is sent to the dead-letter queue, and the rest of the file continues.
 
+---
+
+## 9. Positions
+
+A **position** is an opaque resume token. One source makes it, for itself: a file name, a line number, an outbox cursor, or a gRPC producer's own `EventEnvelope.position`. Unlike the rules above, most of this section is Kulyrax's side of the contract.
+
+- **Kulyrax never parses or compares positions.** It stores them, echoes them back, and names dead-letter files after them. Only the source that made a position may order it, by its own rule:
+
+  | Source | Position | Ordered by |
+  |---|---|---|
+  | `directory` | `<file>` or `<file>#<index:012>` | file name, then index within the file |
+  | `stdin` | the line number, zero-padded | the number |
+  | `postgres_outbox` | `<after:020>.<late:010>` | exact lookup among the positions it handed out |
+  | gRPC | the producer's `position`, as sent | never ordered: each stream's last committed one is echoed back |
+
+  Positions of different sources, or of different gRPC streams, are never compared. Text order is not delivery order (`"9"` sorts after `"10"`).
+- **A batch is committed at its last event in delivery order.** Committing it means every event the source delivered up to and including that event is resolved: projected, skipped, or dead-lettered. After a restart the source resumes after it. It delivers those events again only if Kulyrax crashed before the commit.
+- **What a gRPC producer sends.** Any token it can resume from. Kulyrax does not require it to increase, or to compare as text. Several events may share one. Each stream's `Ack.position` is the last committed position that stream sent, in its own send order.
+- **The position must not be empty.** A stream that sends an empty position gets empty positions back, and has nothing to resume from. In 0.12.x Kulyrax accepts it and logs a warning once per stream. **From 1.0 the stream is refused with `InvalidArgument`.**
+- **`SourcePosition` has no order.** In 0.12.x the Rust type still derives `PartialOrd`/`Ord` (text order, not delivery order). Both are removed in 1.0; `Eq` stays.
+
+**If violated.** A custom `EventSource` whose batch's last event is not its furthest position is committed at the wrong place. It resumes too early (redelivery, absorbed by the guards) or too late (events skipped).
+
 ## Kafka-specific (once a native Kafka source exists)
 
 **Assumption.** A producer partitions by entity id, so one entity's events land in one partition and Kafka's own per-partition ordering guarantee satisfies rule 3 above. A single consumer-group member reads the whole topic — splitting partitions across multiple Kulyrax instances can move an entity's stream mid-flight and break ordering for it.

@@ -151,6 +151,36 @@ struct IngestService {
     next_stream: AtomicU64,
 }
 
+/// The warning for an event with an empty `position`, once per stream: at the
+/// stream's first such event. Empty positions are accepted in 0.12.x and
+/// refused with `InvalidArgument` from 1.0 (producer contract §9, decision
+/// 2026-11-25-source-position-contract).
+struct EmptyPositionWarning {
+    stream: StreamId,
+    warned: bool,
+}
+
+impl EmptyPositionWarning {
+    fn new(stream: StreamId) -> Self {
+        Self {
+            stream,
+            warned: false,
+        }
+    }
+
+    fn check(&mut self, env: &pb::EventEnvelope) -> Option<String> {
+        if !env.position.is_empty() || std::mem::replace(&mut self.warned, true) {
+            return None;
+        }
+        Some(format!(
+            "kulyrax ingest: warning: stream {} sent an event with an empty position. \
+             Its acks will carry an empty position, so the producer has nothing to resume from. \
+             Kulyrax 1.0 refuses empty positions (InvalidArgument); see docs/producer-contract.md §9",
+            self.stream
+        ))
+    }
+}
+
 type AckStream =
     std::pin::Pin<Box<dyn futures_core::Stream<Item = Result<pb::Ack, Status>> + Send>>;
 
@@ -178,7 +208,11 @@ impl pb::ingest_server::Ingest for IngestService {
         // Reader task: inbound envelopes → bounded channel. `send().await` is
         // where backpressure lands when the engine is behind.
         tokio::spawn(async move {
+            let mut empty_position = EmptyPositionWarning::new(id);
             while let Ok(Some(env)) = inbound.message().await {
+                if let Some(warning) = empty_position.check(&env) {
+                    eprintln!("{warning}");
+                }
                 if ev_tx.send((id, env.into_sourced())).await.is_err() {
                     break; // engine / source dropped
                 }
@@ -664,6 +698,24 @@ mod tests {
         assert_eq!(back.event_type, "UserCreated");
         assert_eq!(back.sequence, 7);
         assert_eq!(back.version, 1);
+    }
+
+    #[test]
+    fn an_empty_position_is_warned_about_once_per_stream() {
+        let at = |position: &str| pb::EventEnvelope {
+            position: position.into(),
+            ..Default::default()
+        };
+        let mut s1 = EmptyPositionWarning::new(1);
+        assert_eq!(s1.check(&at("p1")), None, "a position: no warning");
+        let warning = s1.check(&at("")).expect("the first empty position warns");
+        assert!(warning.contains("stream 1"), "{warning}");
+        assert!(warning.contains("1.0 refuses empty positions"), "{warning}");
+        assert_eq!(s1.check(&at("")), None, "once per stream");
+        assert_eq!(s1.check(&at("p2")), None);
+        // Another stream warns on its own.
+        let mut s2 = EmptyPositionWarning::new(2);
+        assert!(s2.check(&at("")).is_some_and(|w| w.contains("stream 2")));
     }
 
     #[test]
