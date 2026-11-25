@@ -18,9 +18,6 @@ kulyrax-adapter-mongodb = { workspace = true, optional = true }
 kulyrax-adapter-neo4j = { workspace = true, optional = true }
 kulyrax-source-postgres = { workspace = true, optional = true }
 
-[dev-dependencies]
-serde_yaml = "0.9"
-
 [features]
 postgres = ["dep:kulyrax-adapter-postgres"]
 elasticsearch = ["dep:kulyrax-adapter-elasticsearch"]

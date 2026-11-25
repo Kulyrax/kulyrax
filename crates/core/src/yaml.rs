@@ -84,35 +84,19 @@ impl std::error::Error for YamlError {
     }
 }
 
-/// What a YAML document can be read into: any `DeserializeOwned` type.
-///
-/// Only the `yaml-golden` test feature adds a bound (`Debug`, to compare the
-/// two parsers' results); it goes when serde_yaml does.
-#[doc(hidden)]
-#[cfg(not(feature = "yaml-golden"))]
-pub trait Target: DeserializeOwned {}
-#[cfg(not(feature = "yaml-golden"))]
-impl<T: DeserializeOwned> Target for T {}
-
-#[doc(hidden)]
-#[cfg(feature = "yaml-golden")]
-pub trait Target: DeserializeOwned + fmt::Debug {}
-#[cfg(feature = "yaml-golden")]
-impl<T: DeserializeOwned + fmt::Debug> Target for T {}
-
 /// Read a YAML document into `T`. Prefer [`from_file`] or [`from_str_in`],
 /// which put the file name into the error.
-pub fn from_str<T: Target>(input: &str) -> Result<T, YamlError> {
+pub fn from_str<T: DeserializeOwned>(input: &str) -> Result<T, YamlError> {
     parse(input, None)
 }
 
 /// Read a YAML document that came from `file` (used only in errors) into `T`.
-pub fn from_str_in<T: Target>(input: &str, file: &str) -> Result<T, YamlError> {
+pub fn from_str_in<T: DeserializeOwned>(input: &str, file: &str) -> Result<T, YamlError> {
     parse(input, Some(file))
 }
 
 /// Read the YAML file at `path` into `T`.
-pub fn from_file<T: Target>(path: &Path) -> Result<T, YamlError> {
+pub fn from_file<T: DeserializeOwned>(path: &Path) -> Result<T, YamlError> {
     let file = path.display().to_string();
     let input = std::fs::read_to_string(path).map_err(|e| YamlError {
         file: Some(file.clone()),
@@ -136,14 +120,7 @@ fn options() -> serde_saphyr::Options {
     }
 }
 
-fn parse<T: Target>(input: &str, file: Option<&str>) -> Result<T, YamlError> {
-    let result = parse_only::<T>(input, file);
-    #[cfg(feature = "yaml-golden")]
-    golden::compare(input, &result);
-    result
-}
-
-fn parse_only<T: DeserializeOwned>(input: &str, file: Option<&str>) -> Result<T, YamlError> {
+fn parse<T: DeserializeOwned>(input: &str, file: Option<&str>) -> Result<T, YamlError> {
     let mut field = None;
     serde_saphyr::with_deserializer_from_str_with_options(input, options(), |de| {
         serde_path_to_error::deserialize(de).map_err(|e| {
@@ -159,78 +136,6 @@ fn parse_only<T: DeserializeOwned>(input: &str, file: Option<&str>) -> Result<T,
         field,
         kind: Kind::Parse(Box::new(e)),
     })
-}
-
-/// The golden test of the parser change (step 3): every read is made again
-/// with serde_yaml 0.9, into the same type and into `serde_json::Value`, and
-/// the two are compared. Each comparison is one JSON line in
-/// `<KULYRAX_YAML_GOLDEN_LOG>.<process id>` (`same: true|false`, and for a
-/// difference, the input and both results). Nothing is logged when the
-/// variable is unset.
-#[cfg(feature = "yaml-golden")]
-mod golden {
-    use super::*;
-    use std::io::Write;
-
-    pub(super) fn compare<T: Target>(input: &str, new: &Result<T, YamlError>) {
-        let Ok(log) = std::env::var("KULYRAX_YAML_GOLDEN_LOG") else {
-            return;
-        };
-        let mut differences = Vec::new();
-
-        let old: Result<T, serde_yaml::Error> = serde_yaml::from_str(input);
-        match (new, &old) {
-            (Ok(n), Ok(o)) if debug_lines(n) != debug_lines(o) => {
-                differences.push(format!("typed: new {n:#?}, old {o:#?}"));
-            }
-            (Err(e), Ok(o)) => differences.push(format!("typed: new refuses ({e}), old {o:#?}")),
-            (Ok(n), Err(e)) => differences.push(format!("typed: new {n:#?}, old refuses ({e})")),
-            _ => {}
-        }
-
-        let new_value = parse_only::<serde_json::Value>(input, None);
-        let old_value: Result<serde_json::Value, serde_yaml::Error> = serde_yaml::from_str(input);
-        match (&new_value, &old_value) {
-            (Ok(n), Ok(o)) if n != o => differences.push(format!("value: new {n}, old {o}")),
-            (Err(e), Ok(o)) => differences.push(format!("value: new refuses ({e}), old {o}")),
-            (Ok(n), Err(e)) => differences.push(format!("value: new {n}, old refuses ({e})")),
-            _ => {}
-        }
-
-        let entry = if differences.is_empty() {
-            serde_json::json!({ "type": std::any::type_name::<T>(), "same": true })
-        } else {
-            serde_json::json!({
-                "type": std::any::type_name::<T>(),
-                "same": false,
-                "input": input,
-                "differences": differences,
-            })
-        };
-        // One file per process, one writer at a time: test binaries run in
-        // parallel threads, and interleaved appends would garble lines.
-        static WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = WRITE.lock().unwrap_or_else(|e| e.into_inner());
-        let path = format!("{log}.{}", std::process::id());
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-        {
-            let _ = f.write_all(format!("{entry}\n").as_bytes());
-        }
-    }
-
-    /// `{:#?}`, one line per field or entry, sorted: a `HashMap`'s order differs
-    /// between two maps with the same contents.
-    fn debug_lines<T: fmt::Debug>(value: &T) -> Vec<String> {
-        let mut lines: Vec<String> = format!("{value:#?}")
-            .lines()
-            .map(|l| l.trim_end_matches(',').to_string())
-            .collect();
-        lines.sort();
-        lines
-    }
 }
 
 #[cfg(test)]

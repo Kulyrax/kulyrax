@@ -49,9 +49,23 @@ static INDEX_SEQ: AtomicU32 = AtomicU32::new(0);
 fn fresh_index_name() -> String {
     format!(
         "t{}-{}",
-        std::process::id(),
+        run_token(),
         INDEX_SEQ.fetch_add(1, Ordering::Relaxed)
     )
+}
+
+/// The process id and this run's start time. The process id alone repeats:
+/// Windows reuses ids soon, and an index left by an earlier run with the same
+/// id would make `create_index` fail.
+fn run_token() -> &'static str {
+    static TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TOKEN.get_or_init(|| {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        format!("{}x{}", std::process::id(), nanos % 1_000_000_000_000)
+    })
 }
 
 /// A unique, empty index, created with its primary shard active. Left to

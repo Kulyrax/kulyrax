@@ -23,8 +23,10 @@ owner's change 4.
 - [ ] Gated by the golden test:
   - The refusal corpus passes unchanged.
   - The acceptance comparison against serde_yaml 0.9 is re-run. It is removed
-    in step 3, so the move brings it back from git history for the run, with
-    serde_yaml as a temporary dev-dependency. Then it is removed again.
+    in step 3, so the move brings it back from commit `b76405b` for the run:
+    `crates/core/tests/yaml_golden.rs` part 1, and the `yaml-golden` feature in
+    `crates/core/src/yaml.rs` and `crates/core/Cargo.toml`, with serde_yaml as
+    a temporary dependency. Then it is removed again.
   - Every difference goes in the release notes.
 - [ ] Four gates green and every Docker suite green, before 1.0.0-rc.1.
 

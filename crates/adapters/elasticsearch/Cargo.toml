@@ -14,7 +14,6 @@ categories = ["database"]
 kulyrax-core = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_yaml = "0.9"
 
 # Elasticsearch has no official synchronous Rust client and the community
 # `elasticsearch` crate lags ES's own release cadence; the REST surface this

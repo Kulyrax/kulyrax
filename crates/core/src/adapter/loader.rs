@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 ///
 /// Files are read in sorted path order, so a duplicate event is always reported
 /// against the same pair of files.
-pub(crate) fn load_mapping_dir<M: crate::yaml::Target>(
+pub(crate) fn load_mapping_dir<M: serde::de::DeserializeOwned>(
     dir: &Path,
     kind: &str,
     event_of: impl Fn(&M) -> &str,

@@ -286,6 +286,28 @@ jobs:
             exit 1
           fi
 
+  # The YAML parser crates may be named only by kulyrax_core::yaml and its
+  # golden test (decision 2026-11-25-yaml-parser), plus history: the ledger,
+  # the release notes, and the 0.12.0 API snapshot in docs/stability/api/.
+  # Cargo files spell the crate `serde-saphyr`. The names are split here so
+  # this file is not a hit itself.
+  yaml-parser-confined:
+    name: YAML parser only in kulyrax_core::yaml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: grep for the parser crates outside the allowlist
+        run: |
+          crates="serde""_saphyr|serde""_yaml"
+          hits=$(grep -rIlE --exclude-dir=target --exclude-dir=.git "$crates" . \
+            | grep -v -E '^\./docs/ledger/|^\./RELEASES/|^\./docs/stability/api/|^\./crates/core/src/yaml\.rs$|^\./crates/core/tests/yaml_golden\.rs$' || true)
+          if [ -n "$hits" ]; then
+            echo "a YAML parser crate is named outside kulyrax_core::yaml:"
+            echo "$hits"
+            grep -nIE "$crates" $hits
+            exit 1
+          fi
+
   # A real 0.12.1 store, per backend, opened by this version (see
   # crates/cli/tests/rename_migration.rs). 0.12.1 is built from its tag, with
   # crash points so a test can leave a 0.12.1 batch log behind.

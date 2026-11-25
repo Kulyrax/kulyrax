@@ -77,7 +77,7 @@ fn stream() -> Vec<Event> {
     ]
 }
 
-fn yaml<T: kulyrax_core::yaml::Target>(s: &str) -> T {
+fn yaml<T: serde::de::DeserializeOwned>(s: &str) -> T {
     kulyrax_core::yaml::from_str(s).unwrap()
 }
 
