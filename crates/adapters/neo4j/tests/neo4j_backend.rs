@@ -11,6 +11,11 @@
 //! Consolidated into one file, mirroring `pg_backend.rs` (Phase 19.6),
 //! `redis_backend.rs` (Phase 22.5), and `mongo_backend.rs` (Phase 23.5) —
 //! every scenario shares the same skip guard and fresh-label helper.
+//!
+//! Each test owns the whole database while it runs (`common::lease`): one at a
+//! time, wiped before and after.
+
+mod common;
 
 use kulyrax_adapter_neo4j::Neo4jAdapter;
 use kulyrax_core::adapter::StorageAdapter;
@@ -29,26 +34,23 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 type R = Result<(), Box<dyn std::error::Error>>;
 
-fn neo4j_uri() -> Option<String> {
-    std::env::var("KULYRAX_NEO4J_URI")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-}
-
 fn neo4j_user() -> String {
-    std::env::var("KULYRAX_NEO4J_USER").unwrap_or_else(|_| "neo4j".into())
+    common::user()
 }
 
 fn neo4j_password() -> String {
-    std::env::var("KULYRAX_NEO4J_PASSWORD").unwrap_or_else(|_| "kulyrax-test".into())
+    common::password()
 }
 
+/// Skip when `KULYRAX_NEO4J_URI` is unset; otherwise hold the database (wiped)
+/// until the end of the test, and bind `$uri` to it.
 macro_rules! require_neo4j {
     ($uri:ident) => {
-        let Some($uri) = neo4j_uri() else {
+        let Some(lease) = common::lease() else {
             eprintln!("SKIP: KULYRAX_NEO4J_URI not set");
             return Ok(());
         };
+        let $uri = lease.uri().to_string();
     };
 }
 

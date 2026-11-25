@@ -1,12 +1,12 @@
 ---
-status: blocked
+status: in-progress
 ---
 
 # Rename conduit → kulyrax (1.0 plan, step 2)
 
-Blocked only on publishing: the work is done and verified locally, but it builds
-on 0.12.1 (GHSA-6chh-gx4c-448g), which is private until the advisory is
-published. It is pushed to origin and opened as a PR after that.
+GHSA-6chh-gx4c-448g is published and 0.12.1 and 0.12.2 are released. The branch
+is rebased onto main (runbook B1). The test-isolation fix the owner asked for
+(B2) is in, and the branch goes to a PR.
 
 ## Objective
 
@@ -47,12 +47,24 @@ lane kept. A migration killed halfway completes on the next start. Design:
   with the reverse rename per backend.
 - [x] `decide()`, `dispatch.rs` and the dependency graph unchanged; no panic in
   core library code; four gates green; every Docker suite run.
-- [ ] Pushed to origin and PR opened: waits for the advisory.
+- [x] Rebased onto main at 0.12.2 (runbook B1). 0.12.2 persists what 0.12.1
+  does, so the upgrade path stays "from 0.12.1"; the rc.1 notes say it covers
+  0.12.2.
+- [x] Test isolation (owner, runbook B2). No test reads or writes the shared
+  `kulyrax_ci` guard objects:
+  - a schema (Postgres) or database (MySQL, MongoDB) per test binary, checked
+    empty at start;
+  - the ingest and outbox tests too;
+  - the CLI upgrade tests drop what they create;
+  - Neo4j: a test owns the whole database (process and file lock, wipe before
+    and after, a leftover guard fails loudly);
+  - CONTRIBUTING documents one Neo4j container per branch.
+- [ ] Pushed to origin, PR opened, CI green (including `upgrade from 0.12.1` and
+  `old name only in the migration`), merged.
 
 ## Constraints and assumptions
 
-- Builds on 0.12.1 (the layout marker, `.conduit/kv/`), private until
-  GHSA-6chh-gx4c-448g is published. The branch `step2-rename` stays local.
+- Builds on 0.12.1 (the layout marker, `.conduit/kv/`).
 - 0.12.0 key-value stores need one start under 0.12.1 first. Their guards sit
   in `.conduit/<namespace>/`, and a namespace could collide with another
   owner's entry. This is recorded in the decision record and the release notes.
@@ -100,8 +112,21 @@ lane kept. A migration killed halfway completes on the next start. Design:
 | Engine untouched | `git diff --stat HEAD -- crates/core/src/dispatch.rs crates/core/src/runtime/dependency_graph.rs`; `adapter/mod.rs` diff | no changes; `adapter/mod.rs` only gains `pub mod legacy` |
 | No panics in core library code | added lines in `crates/core/src` outside `#[cfg(test)]` | none |
 
-Not run: the new CI jobs (`old-name`, `upgrade-from-0-12-1`). The upgrade job
-needs the `v0.12.1` tag, which exists only after the release.
+After the rebase onto main at 0.12.2 (runbook B1) and the isolation fix (B2):
+
+| Check | Command | Result |
+|---|---|---|
+| Rebase | `git rebase --onto upstream/main eb1ae61 step2-rename` | `eb1ae61` dropped: main's `92aaf59` is the same fix (`git range-diff` differs only in lockfile context). Conflicts resolved, with both sides kept: `ci.yml` (main's audit job, this branch's two jobs); `crates/cli/Cargo.toml` (`rusqlite` 0.43, main's version); `file_store.rs` (the crash hook moved to `crate::crash`; main's DLQ crash points repointed); `stability.md`; `Cargo.lock` |
+| Old name after the rebase | the CI step's grep over tracked files | 1 hit from main: `redacted_errors.rs` waited on `store/.conduit/lock`. Now `.kulyrax/lock` |
+| Gates after the rebase | fmt; clippy `-D warnings`; `cargo test --workspace` | clean; clean; 518 passed, 0 failed |
+| 0.12.1 binary from the tag | `git checkout v0.12.1` in `../kx-0121`; `cargo build -p kulyrax-cli --features kulyrax-core/crash-points --target-dir target/v0121-tag` | `kulyrax 0.12.1` (`12a3f93`). The earlier local binary was built from `eb1ae61`, before the release |
+| Shared guard objects before the run | `docker exec … psql / mysql / mongosh` on `kulyrax_ci` | 0.12-era `conduit_projection_state`: Postgres 534 rows, MySQL 3, MongoDB 168. A test that migrated them would change this |
+| Gates after B2 | fmt; clippy `-D warnings`; `cargo test --workspace` | clean; clean; 518 passed, 0 failed |
+| Every Docker suite after B2, first run | `cargo test -p <crate> -- --test-threads=1`: Postgres, MySQL, Redis, MongoDB, Elasticsearch, this branch's own Neo4j (`bolt://localhost:7688`), outbox, ingest, CLI with `KULYRAX_V0121_BIN` | 0 failures: postgres 30, mysql 25, redis 14, mongodb 21, elasticsearch 11, neo4j 20, source-postgres 14, ingest 14, cli 32. A rerun with `--nocapture` printed no `SKIP` line in the CLI, Neo4j, MongoDB, Postgres, MySQL, ingest or outbox suites |
+| Shared guard objects after the run | the same queries, then `diff` | unchanged |
+
+Not run: the new CI jobs (`old-name`, `upgrade-from-0-12-1`). They run on the
+PR.
 
 ## Risks and open questions
 
@@ -109,13 +134,20 @@ needs the `v0.12.1` tag, which exists only after the release.
   recreate `__ConduitGuard` nodes; the next 1.0 start would then relabel them, or
   refuse if a lane is under both labels. The release notes say to stop all 0.12
   processes first.
-- The upgrade CI job depends on the `v0.12.1` tag existing (after publication).
+- Rust's test harness has no end-of-binary hook. A per-binary schema or
+  database (`kx_run_<binary>`) is therefore dropped when the next run starts,
+  not when its own run ends (the same as the MySQL helper the owner approved).
+  Tests that make one per test drop it at their end.
+- The Postgres adapter reads a table's column types from
+  `information_schema.columns` by table name only, not schema
+  (`crates/adapters/postgres/src/lib.rs`). With the same table name in two
+  schemas, the types merge. It predates this work and is reported to the owner,
+  not fixed here.
 - Local environment notes: on this laptop, use `localhost` for MongoDB (another
   `mongod` sits on `127.0.0.1`). Delete leftover ES test indices before parallel
   runs.
 
 ## Outcome
 
-Implemented and verified on the local branch `step2-rename`, not pushed. Once
-GHSA-6chh-gx4c-448g is published and main has 0.12.1, the branch is rebased onto
-main, pushed to origin, and opened as a PR.
+Implemented and verified on `step2-rename`, rebased onto main at 0.12.2, with
+the test-isolation fix.

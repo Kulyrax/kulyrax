@@ -10,6 +10,8 @@
 //! Consolidated into one file (rather than the seven the phase doc sketches)
 //! because every scenario shares the same skip guard and fresh-table helper.
 
+mod common;
+
 use kulyrax_adapter_postgres::PostgresAdapter;
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
@@ -26,10 +28,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 type R = Result<(), Box<dyn std::error::Error>>;
 
+/// The URL of this binary's own schema, or `None` (skip) when `KULYRAX_PG_URL`
+/// is unset. See `common::isolated_pg_url`.
 fn pg_url() -> Option<String> {
-    std::env::var("KULYRAX_PG_URL")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
+    common::isolated_pg_url()
 }
 
 macro_rules! require_pg {

@@ -4,7 +4,9 @@
 //! `t_0` every run, so in a long-lived database a guard row left by an earlier
 //! run would make an event `Skipped(StaleSequence)`. Instead, each test binary
 //! drops and recreates a database of its own, named after the binary
-//! (`kx_run_mysql_backend`, …), once per run, and every test connects to it.
+//! (`kx_run_mysql_backend`, …), once per run, checks that it is empty, and
+//! every test connects to it. The harness has no end-of-binary hook, so the
+//! database is dropped at the start of the next run.
 //! Nothing piles up across runs. Two concurrent runs of the same binary
 //! against one server would share it; CI runs each binary once.
 
@@ -27,6 +29,14 @@ pub fn mysql_url() -> Option<String> {
         conn.query_drop(format!("DROP DATABASE IF EXISTS {db}"))
             .and_then(|()| conn.query_drop(format!("CREATE DATABASE {db}")))
             .unwrap_or_else(|e| panic!("create the test database {db}: {e}"));
+        // Fail loudly on leftovers: the fresh database holds nothing.
+        let tables: Option<u64> = conn
+            .exec_first(
+                "SELECT count(*) FROM information_schema.tables WHERE table_schema = ?",
+                (&db,),
+            )
+            .unwrap_or_else(|e| panic!("inspect the test database {db}: {e}"));
+        assert_eq!(tables, Some(0), "the fresh test database {db} is not empty");
         let (server, _) = base
             .split_once('?')
             .map_or(base.as_str(), |(u, _)| u)

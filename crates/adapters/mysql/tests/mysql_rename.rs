@@ -37,6 +37,12 @@ fn database(base: &str) -> Result<(String, String), Box<dyn std::error::Error>> 
         .rsplit_once('/')
         .ok_or("KULYRAX_MYSQL_URL has no database")?;
     let url = format!("{server}/{name}");
+    // Fail loudly on leftovers: the fresh database holds nothing.
+    let leftovers = table_types(&url)?;
+    assert!(
+        leftovers.is_empty(),
+        "the fresh test database {name} is not empty: {leftovers:?}"
+    );
     exec(
         &url,
         "CREATE TABLE users (id VARCHAR(64) PRIMARY KEY, v BIGINT)",

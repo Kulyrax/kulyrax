@@ -6,7 +6,10 @@
 //! **Gated on `KULYRAX_NEO4J_URI`.** One test, in steps: Neo4j has one shared
 //! database, and the migration moves every node with the old label, so the
 //! steps must not run concurrently with each other. Each step's lanes use a
-//! label of their own.
+//! label of their own. The test owns the whole database while it runs
+//! (`common::lease`).
+
+mod common;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,11 +25,11 @@ use kulyrax_core::upcast::UpcasterRegistry;
 type R = Result<(), Box<dyn std::error::Error>>;
 
 fn user() -> String {
-    std::env::var("KULYRAX_NEO4J_USER").unwrap_or_else(|_| "neo4j".into())
+    common::user()
 }
 
 fn password() -> String {
-    std::env::var("KULYRAX_NEO4J_PASSWORD").unwrap_or_else(|_| "kulyrax-test".into())
+    common::password()
 }
 
 fn adapter(uri: &str, label: &str) -> Neo4jAdapter {
@@ -108,10 +111,12 @@ fn as_0_12_1(db: &Db, uri: &str, label: &str, ids: &[&str]) -> R {
 
 #[test]
 fn a_0_12_1_neo4j_database_is_relabelled() -> R {
-    let Ok(uri) = std::env::var("KULYRAX_NEO4J_URI") else {
+    // The whole database, wiped before and after (`common::lease`).
+    let Some(lease) = common::lease() else {
         eprintln!("SKIP: KULYRAX_NEO4J_URI not set");
         return Ok(());
     };
+    let uri = lease.uri().to_string();
     let db = Db::connect(&uri)?;
     let pid = std::process::id();
 

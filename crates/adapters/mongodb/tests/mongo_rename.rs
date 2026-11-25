@@ -22,12 +22,25 @@ type R = Result<(), Box<dyn std::error::Error>>;
 
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
-fn fresh_db() -> String {
-    format!(
+/// A database of this test's own, dropped first and checked empty (fail
+/// loudly on leftovers). Each test drops it again at its end.
+fn fresh_db(client: &mongodb::sync::Client) -> String {
+    let db = format!(
         "kx_rename_{}_{}",
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
-    )
+    );
+    client
+        .database(&db)
+        .drop()
+        .run()
+        .unwrap_or_else(|e| panic!("drop the test database {db}: {e}"));
+    let leftovers = collections(client, &db);
+    assert!(
+        leftovers.is_empty(),
+        "the fresh test database {db} is not empty: {leftovers:?}"
+    );
+    db
 }
 
 fn adapter(url: &str, db: &str) -> MongoDbAdapter {
@@ -109,7 +122,7 @@ fn a_0_12_1_mongodb_database_opens_with_every_lane() -> R {
         return Ok(());
     };
     let client = mongodb::sync::Client::with_uri_str(&url)?;
-    let db = fresh_db();
+    let db = fresh_db(&client);
     as_0_12_1(&client, &url, &db)?;
 
     let a = adapter(&url, &db);
@@ -154,7 +167,7 @@ fn both_mongodb_guard_collections_are_refused() -> R {
         return Ok(());
     };
     let client = mongodb::sync::Client::with_uri_str(&url)?;
-    let db = fresh_db();
+    let db = fresh_db(&client);
     as_0_12_1(&client, &url, &db)?;
     client
         .database(&db)
@@ -180,7 +193,7 @@ fn a_tombstone_left_under_its_temporary_name_is_moved_into_place() -> R {
         return Ok(());
     };
     let client = mongodb::sync::Client::with_uri_str(&url)?;
-    let db = fresh_db();
+    let db = fresh_db(&client);
     {
         let a = adapter(&url, &db);
         a.prepare()?;
@@ -217,7 +230,7 @@ fn concurrent_starts_all_migrate() -> R {
         return Ok(());
     };
     let client = mongodb::sync::Client::with_uri_str(&url)?;
-    let db = fresh_db();
+    let db = fresh_db(&client);
     as_0_12_1(&client, &url, &db)?;
     let results: Vec<Result<(), String>> = std::thread::scope(|s| {
         let handles: Vec<_> = (0..8)

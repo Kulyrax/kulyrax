@@ -154,7 +154,6 @@ jobs:
         run: cargo test -p kulyrax-adapter-mongodb --test mongo_backend --test mongo_rename
         env:
           KULYRAX_MONGO_URL: mongodb://localhost:27017/?directConnection=true
-          KULYRAX_MONGO_DB: kulyrax_ci
 
   test-neo4j:
     name: test (neo4j)

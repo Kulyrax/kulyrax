@@ -17,6 +17,9 @@
 //! `--features kulyrax-core/crash-points` (CI builds it from the v0.12.1 tag).
 //! The networked backends are also gated on their usual URLs.
 
+#[path = "support/neo4j.rs"]
+mod neo4j_isolation;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -412,23 +415,31 @@ fn mysql() -> Option<Backend> {
 
 fn mongodb() -> Option<Backend> {
     let url = env("KULYRAX_MONGO_URL")?;
+    let db = unique("kx_upgrade_");
+    let drop_db = db.clone();
     Some(Backend {
         name: "mongodb",
         kind: Kind::Document,
         adapter: format!(
-            "    type: mongodb\n    config:\n      url: \"{url}\"\n      database: {}",
-            unique("kx_upgrade_")
+            "    type: mongodb\n    config:\n      url: \"{url}\"\n      database: {db}"
         ),
         target: "users".into(),
         tombstone: true,
-        cleanup: None,
+        cleanup: Some(Box::new(move || {
+            if let Ok(client) = mongodb::sync::Client::with_uri_str(&url) {
+                let _ = client.database(&drop_db).drop().run();
+            }
+        })),
     })
 }
 
+/// The whole Neo4j database, held (and wiped before and after) for as long as
+/// the backend lives: its cleanup owns the lease.
 fn neo4j() -> Option<Backend> {
-    let uri = env("KULYRAX_NEO4J_URI")?;
-    let user = env("KULYRAX_NEO4J_USER").unwrap_or_else(|| "neo4j".into());
-    let password = env("KULYRAX_NEO4J_PASSWORD").unwrap_or_else(|| "kulyrax-test".into());
+    let lease = neo4j_isolation::lease()?;
+    let uri = lease.uri().to_string();
+    let user = neo4j_isolation::user();
+    let password = neo4j_isolation::password();
     Some(Backend {
         name: "neo4j",
         kind: Kind::Graph,
@@ -437,24 +448,49 @@ fn neo4j() -> Option<Backend> {
         ),
         target: unique("Upgrade"),
         tombstone: false,
-        cleanup: None,
+        cleanup: Some(Box::new(move || {
+            let _ = &lease;
+        })),
     })
 }
 
+/// Deletes every key of the namespace and its guards.
 fn redis() -> Option<Backend> {
     let url = env("KULYRAX_REDIS_URL")?;
+    let ns = unique("upgrade");
+    let target = ns.clone();
+    let server = url.clone();
     Some(Backend {
         name: "redis",
         kind: Kind::KeyValue,
         adapter: format!("    type: redis\n    config:\n      url: {url}"),
-        target: unique("upgrade"),
+        target,
         tombstone: false,
-        cleanup: None,
+        cleanup: Some(Box::new(move || {
+            let Ok(mut conn) =
+                redis::Client::open(server.as_str()).and_then(|c| c.get_connection())
+            else {
+                return;
+            };
+            for pattern in [format!("{ns}:*"), format!("__kulyrax:guard:{ns}:*")] {
+                let keys: Vec<String> = redis::cmd("KEYS")
+                    .arg(&pattern)
+                    .query(&mut conn)
+                    .unwrap_or_default();
+                if !keys.is_empty() {
+                    let _: redis::RedisResult<()> = redis::cmd("DEL").arg(&keys).query(&mut conn);
+                }
+            }
+        })),
     })
 }
 
+/// Deletes the index.
 fn elasticsearch() -> Option<Backend> {
     let url = env("KULYRAX_ELASTICSEARCH_URL")?;
+    let index = unique("upgrade");
+    let target = index.clone();
+    let server = url.clone();
     Some(Backend {
         name: "elasticsearch",
         kind: Kind::Document,
@@ -463,9 +499,13 @@ fn elasticsearch() -> Option<Backend> {
         adapter: format!(
             "    type: elasticsearch\n    config:\n      url: {url}\n      timeout_ms: 60000"
         ),
-        target: unique("upgrade"),
+        target,
         tombstone: false,
-        cleanup: None,
+        cleanup: Some(Box::new(move || {
+            let _ = reqwest::blocking::Client::new()
+                .delete(format!("{server}/{index}"))
+                .send();
+        })),
     })
 }
 

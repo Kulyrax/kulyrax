@@ -3,6 +3,8 @@
 //! on a background thread (it is sync); the client runs on its own tokio
 //! runtime (`kulyrax_ingest::start` must not be called from an async context).
 
+mod common;
+
 use kulyrax_adapter_elasticsearch::ElasticsearchAdapter;
 use kulyrax_adapter_postgres::PostgresAdapter;
 use kulyrax_client::{EventEnvelope, Producer};
@@ -392,10 +394,8 @@ fn grpc_vs_directory_converge() {
 /// convention as each adapter's own `*_backend.rs` suite.
 #[test]
 fn grpc_dlq_count_reflects_a_real_cross_backend_failure() {
-    let Some(pg_url) = std::env::var("KULYRAX_PG_URL")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-    else {
+    // This binary's own schema: its guard table is never the shared one.
+    let Some(pg_url) = common::isolated_pg_url() else {
         eprintln!("SKIP: KULYRAX_PG_URL not set");
         return;
     };
@@ -413,9 +413,7 @@ fn grpc_dlq_count_reflects_a_real_cross_backend_failure() {
     {
         let mut c = postgres::Client::connect(&pg_url, postgres::NoTls).unwrap();
         c.batch_execute(&format!(
-            "DROP TABLE IF EXISTS {table}; \
-             CREATE TABLE {table} (id text primary key, name text); \
-             DELETE FROM kulyrax_projection_state WHERE target_table = '{table}'"
+            "CREATE TABLE {table} (id text primary key, name text)"
         ))
         .unwrap();
     }

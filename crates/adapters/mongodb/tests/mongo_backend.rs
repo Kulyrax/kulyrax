@@ -1,8 +1,8 @@
 //! MongoDB backend integration scenarios.
 //!
-//! **Gated on `KULYRAX_MONGO_URL`** (`mongodb://[user:pass@]host[:port]`,
-//! optionally `KULYRAX_MONGO_DB` for the database name, default
-//! `kulyrax_test`). When unset every test prints a skip line and returns
+//! **Gated on `KULYRAX_MONGO_URL`** (`mongodb://[user:pass@]host[:port]`).
+//! Every test works in this binary's own database, `kx_run_mongo_backend`
+//! (see `mongo_db`). When unset every test prints a skip line and returns
 //! `Ok` — the hermetic file-backed document suite stays the default and CI
 //! without a MongoDB replica set stays green. Point it at a throwaway
 //! single-node replica set (`docker run --rm -p 27017:27017 mongo:7 --replSet
@@ -38,8 +38,34 @@ fn mongo_url() -> Option<String> {
         .filter(|s| !s.trim().is_empty())
 }
 
+/// This binary's own database, `kx_run_mongo_backend`, dropped once per run
+/// and checked empty before any test uses it, so no test reads or writes the
+/// shared database's guard collection. The harness has no
+/// end-of-binary hook, so the database is dropped at the start of the next
+/// run. Call it only after `require_mongo!`.
 fn mongo_db() -> String {
-    std::env::var("KULYRAX_MONGO_DB").unwrap_or_else(|_| "kulyrax_test".into())
+    static DB: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    DB.get_or_init(|| {
+        let db = format!("kx_run_{}", env!("CARGO_CRATE_NAME"));
+        let url = mongo_url().unwrap_or_else(|| panic!("KULYRAX_MONGO_URL is not set"));
+        let client = mongo_client(&url).unwrap_or_else(|e| panic!("connect to MongoDB: {e}"));
+        let handle = client.database(&db);
+        handle
+            .drop()
+            .run()
+            .unwrap_or_else(|e| panic!("drop the test database {db}: {e}"));
+        // Fail loudly on leftovers: the fresh database holds nothing.
+        let leftovers = handle
+            .list_collection_names()
+            .run()
+            .unwrap_or_else(|e| panic!("inspect the test database {db}: {e}"));
+        assert!(
+            leftovers.is_empty(),
+            "the fresh test database {db} is not empty: {leftovers:?}"
+        );
+        db
+    })
+    .clone()
 }
 
 macro_rules! require_mongo {

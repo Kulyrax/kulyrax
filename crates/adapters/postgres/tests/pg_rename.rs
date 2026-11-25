@@ -30,8 +30,19 @@ fn schema(base: &str) -> Result<(String, String), Box<dyn std::error::Error>> {
     );
     let mut c = postgres::Client::connect(base, postgres::NoTls)?;
     c.batch_execute(&format!(
-        "DROP SCHEMA IF EXISTS {name} CASCADE; CREATE SCHEMA {name};
-         CREATE TABLE {name}.users (id text PRIMARY KEY, v bigint)"
+        "DROP SCHEMA IF EXISTS {name} CASCADE; CREATE SCHEMA {name}"
+    ))?;
+    // Fail loudly on leftovers: the fresh schema holds nothing.
+    let objects: i64 = c
+        .query_one(
+            "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = $1",
+            &[&name],
+        )?
+        .get(0);
+    assert_eq!(objects, 0, "the fresh test schema {name} is not empty");
+    c.batch_execute(&format!(
+        "CREATE TABLE {name}.users (id text PRIMARY KEY, v bigint)"
     ))?;
     let sep = if base.contains('?') { '&' } else { '?' };
     Ok((
