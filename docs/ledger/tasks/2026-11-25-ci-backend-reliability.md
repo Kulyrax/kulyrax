@@ -26,6 +26,11 @@ Release follow-up (b), before 0.12.1 and the rename land: CI fully green.
   (the case that failed).
 - [ ] In CI: each suite green 3 times (re-runs) once the branch is pushed, after
   PR #12 is merged.
+- [x] A `cargo audit` CI job over the workspace and every example lockfile,
+  failing on vulnerabilities and on unsound, yanked or unmaintained crates.
+  Unmaintained crates with no fix are ignored in `.cargo/audit.toml`, each with
+  a reason, what pulls it in, and a revisit date. It goes green once the deps
+  and rusqlite PRs are in (this branch merges after them).
 - [x] Four gates green.
 
 ## Constraints and assumptions
@@ -47,6 +52,7 @@ Release follow-up (b), before 0.12.1 and the rename land: CI fully green.
 | Lint | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
 | Build | `cargo build --workspace` | clean |
 | Tests | `cargo test --workspace --no-fail-fast` | 420 passed, 0 failed (backend suites skip without their URLs; they ran above) |
+| Audit job, locally | the job's loop (`cargo audit --file <lock> --deny unsound --deny unmaintained --deny yanked` from the root, so `.cargo/audit.toml` applies) on the rusqlite branch with its updated lockfiles | the ignores apply to every lockfile, example ones included (checked: `embedded`'s unsafe-libyaml is ignored from the root, denied when run from the example's own directory). The remaining failures were exactly what the deps PR fixes |
 
 ## Risks and open questions
 

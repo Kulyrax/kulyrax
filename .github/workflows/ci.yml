@@ -233,6 +233,27 @@ jobs:
         env:
           KULYRAX_ELASTICSEARCH_URL: http://localhost:9200
 
+  # Advisories: fails on a vulnerability, an unsound or yanked crate, or a newly
+  # unmaintained one. Known unmaintained crates with no fix are ignored in
+  # .cargo/audit.toml, each with a reason and a revisit date. Checks the
+  # workspace lockfile and every example's.
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: cargo audit (workspace and examples)
+        run: |
+          status=0
+          for lock in Cargo.lock $(git ls-files 'examples/**/Cargo.lock'); do
+            echo "== $lock"
+            cargo audit --file "$lock" --deny unsound --deny unmaintained --deny yanked || status=1
+          done
+          exit $status
+
   msrv:
     name: MSRV (1.89)
     runs-on: ubuntu-latest
