@@ -1778,8 +1778,11 @@ dependencies = [
  "kulyrax-backends",
  "kulyrax-core",
  "kulyrax-ingest",
+ "neo4rs",
+ "postgres",
  "serde_json",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]

@@ -1,6 +1,7 @@
-//! Phase 17.6 (15.5): a batch whose files are named so the events arrive out of
-//! sequence order — the run loop stable-sorts by `sequence` before dispatch, so
-//! the final state is the highest-sequence value.
+//! A batch whose files are named so one entity's events arrive out of sequence
+//! order (3, 1, 2). They are dispatched in that delivery order, not re-sorted
+//! (decision 2026-11-25-batch-order); under `on_existing: replace` the guard
+//! lane still leaves the highest-sequence value: 1 and 2 arrive stale.
 
 mod common;
 
@@ -11,7 +12,7 @@ use kulyrax_core::source::directory::DirectorySource;
 use tempfile::tempdir;
 
 #[test]
-fn batch_is_sorted_by_sequence_before_dispatch() {
+fn out_of_order_events_of_one_entity_converge_under_replace() {
     let dir = tempdir().unwrap();
     let db = dir.path().join("test.db");
     init_db(&db);

@@ -69,6 +69,11 @@ jobs:
         run: cargo test -p kulyrax-adapter-postgres --test pg_backend
         env:
           KULYRAX_PG_URL: postgres://postgres:kulyrax@localhost:5432/kulyrax_ci
+      # The F-01 regression; its foreign-key case runs here.
+      - name: cargo test -p kulyrax-cli --test ordering
+        run: cargo test -p kulyrax-cli --test ordering -- --test-threads=1
+        env:
+          KULYRAX_PG_URL: postgres://postgres:kulyrax@localhost:5432/kulyrax_ci
       - name: examples/postgres matches expected/
         run: bash examples/postgres/run.sh
         env:
@@ -172,6 +177,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: cargo test -p kulyrax-adapter-neo4j --test neo4j_backend
         run: cargo test -p kulyrax-adapter-neo4j --test neo4j_backend
+        env:
+          KULYRAX_NEO4J_URI: bolt://localhost:7687
+          KULYRAX_NEO4J_USER: neo4j
+          KULYRAX_NEO4J_PASSWORD: kulyrax-test
+      # The F-01 regression (delivery order, not a sort by sequence); its
+      # graph case runs here, the others skip without Postgres.
+      - name: cargo test -p kulyrax-cli --test ordering
+        run: cargo test -p kulyrax-cli --test ordering -- --test-threads=1
         env:
           KULYRAX_NEO4J_URI: bolt://localhost:7687
           KULYRAX_NEO4J_USER: neo4j

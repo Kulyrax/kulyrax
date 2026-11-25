@@ -130,26 +130,26 @@ pub struct SourceRunReport {
     pub timings: StageTimings,
 }
 
-/// One pass of dispatching a sorted batch.
+/// One pass of dispatching a batch.
 struct BatchOutcome {
     created: u64,
     updated: u64,
     deleted: u64,
     skipped: u64,
     failed: u64,
-    /// Indices into the sorted batch whose dispatch status was `Failed`.
+    /// Indices into the batch whose dispatch status was `Failed`.
     hard_failures: Vec<usize>,
     /// The batch transaction was rolled back and the batch dispatched one
     /// event at a time instead.
     fell_back: bool,
 }
 
-/// Dispatch a sorted batch: in one transaction per adapter when `batched`
+/// Dispatch a batch, in delivery order: in one transaction per adapter when `batched`
 /// (see [`crate::batch`]), falling back to one event at a time if that rolls
 /// back; one event at a time otherwise.
 #[allow(clippy::too_many_arguments)]
-fn dispatch_sorted(
-    sorted: &[SourcedEvent],
+fn dispatch_source_batch(
+    batch: &[SourcedEvent],
     batched: bool,
     adapters: &mut [Box<dyn StorageAdapter>],
     failure_policy: crate::runtime::config::FailurePolicy,
@@ -169,7 +169,7 @@ fn dispatch_sorted(
     };
     reports.clear();
     if batched {
-        let events: Vec<&Event> = sorted.iter().map(|se| &se.event).collect();
+        let events: Vec<&Event> = batch.iter().map(|se| &se.event).collect();
         match dispatch_batch(
             &events,
             adapters,
@@ -182,7 +182,7 @@ fn dispatch_sorted(
         }
     }
     if !batched || o.fell_back {
-        for se in sorted {
+        for se in batch {
             reports.push(dispatch(
                 &se.event,
                 adapters,
@@ -192,7 +192,7 @@ fn dispatch_sorted(
             ));
         }
     }
-    for (idx, (report, se)) in reports.iter_mut().zip(sorted).enumerate() {
+    for (idx, (report, se)) in reports.iter_mut().zip(batch).enumerate() {
         report.source_id = Some(source_id.to_string());
         report.source_position = Some(se.position.0.clone());
         for ar in &report.adapter_reports {
@@ -426,16 +426,18 @@ fn run_loop(
             progressed = true;
             any_full |= batch.len() >= opts.max_batch;
 
-            // Phase 15.5 (as in replay): a stable sort by `sequence` delivers
-            // every entity's events in the order `decide()` needs.
-            let mut sorted = batch;
-            sorted.sort_by_key(|se| se.event.sequence);
-            let position_to = sorted
+            // Dispatched in delivery order, never re-batch: `sequence` is per
+            // entity (producer contract §1), so sorting a batch by it reorders
+            // different entities against each other (an edge before its nodes,
+            // a child row before its parent) and makes the outcome depend on
+            // where batches happen to split. `decide()` resolves each entity's
+            // own order through its guard lane (decision 2026-11-25-batch-order).
+            let position_to = batch
                 .iter()
                 .map(|se| se.position.clone())
                 .max()
                 .unwrap_or_else(|| SourcePosition(String::new()));
-            let position_from = sorted.iter().map(|se| se.position.0.clone()).min();
+            let position_from = batch.iter().map(|se| se.position.0.clone()).min();
             let source_id = source.id().to_string();
 
             let mut retries = 0u32;
@@ -444,8 +446,8 @@ fn run_loop(
                 // A batch that failed once is retried one event at a time:
                 // the batch transaction would only roll back again.
                 let o = timed(Stage::Dispatch, || {
-                    dispatch_sorted(
-                        &sorted,
+                    dispatch_source_batch(
+                        &batch,
                         retries == 0,
                         &mut adapters,
                         failure_policy,
@@ -463,7 +465,7 @@ fn run_loop(
                     match &opts.dlq_dir {
                         Some(dir) => {
                             for &idx in &o.hard_failures {
-                                dlq_write(dir, &sorted[idx], &reports_buf[idx])?;
+                                dlq_write(dir, &batch[idx], &reports_buf[idx])?;
                             }
                             let n = o.hard_failures.len() as u64;
                             break (o, true, n);
@@ -474,16 +476,16 @@ fn run_loop(
                 retries += 1;
             };
 
-            report.events_processed += sorted.len() as u64;
+            report.events_processed += batch.len() as u64;
             report.events_failed += o.hard_failures.len() as u64;
-            report.events_succeeded += sorted.len() as u64 - o.hard_failures.len() as u64;
+            report.events_succeeded += batch.len() as u64 - o.hard_failures.len() as u64;
             report.events_dlq += dlq_count;
 
             report.batches.push(BatchSummary {
                 source_id: source_id.clone(),
                 position_from,
                 position_to: position_to.0.clone(),
-                events: sorted.len() as u64,
+                events: batch.len() as u64,
                 created: o.created,
                 updated: o.updated,
                 deleted: o.deleted,
@@ -496,7 +498,7 @@ fn run_loop(
             });
 
             if committed {
-                for (se, event_report) in sorted.iter().zip(reports_buf.iter()) {
+                for (se, event_report) in batch.iter().zip(reports_buf.iter()) {
                     source.on_resolved(se, event_report);
                 }
                 timed(Stage::Checkpoint, || {
