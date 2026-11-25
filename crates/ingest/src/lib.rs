@@ -44,6 +44,7 @@ const ACK_BOUND: usize = 256;
 const CURRENT_ACK_PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum IngestError {
     Bind(String),
     Runtime(std::io::Error),
@@ -77,17 +78,12 @@ impl pb::EventEnvelope {
         } else {
             format!("{}-{}", self.event_type, self.sequence)
         };
-        SourcedEvent {
-            event: Event {
-                event_id,
-                event_type: self.event_type,
-                payload: self.payload,
-                metadata: self.metadata.into_iter().collect(),
-                version: if self.version == 0 { 1 } else { self.version },
-                sequence: self.sequence,
-            },
-            position: SourcePosition(self.position),
-        }
+        SourcedEvent::new(
+            Event::new(event_id, self.event_type, self.sequence, self.payload)
+                .with_metadata(self.metadata.into_iter().collect())
+                .with_version(if self.version == 0 { 1 } else { self.version }),
+            SourcePosition(self.position),
+        )
     }
 }
 
@@ -356,6 +352,7 @@ impl EventSource for GrpcSource {
 
 /// A running gRPC server. Keep it alive for as long as the source is polled;
 /// [`GrpcServer::shutdown`] stops it gracefully.
+#[non_exhaustive]
 pub struct GrpcServer {
     runtime: tokio::runtime::Runtime,
     shutdown: watch::Sender<bool>,
@@ -528,6 +525,7 @@ fn prepare_unix_socket_path(path: &std::path::Path) -> Result<(), IngestError> {
 // ---------------------------------------------------------------------------
 
 /// Options for [`serve`].
+#[non_exhaustive]
 pub struct ServeOptions {
     pub listen: String,
     pub max_batch: usize,
@@ -554,6 +552,7 @@ impl Default for ServeOptions {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ServeError {
     Pipeline(kulyrax_core::pipeline::PipelineError),
     Ingest(IngestError),
@@ -607,14 +606,16 @@ pub fn serve(
         eprintln!("kulyrax ingest: listening on unix:{}", p.display());
     }
 
-    let run_opts = kulyrax_core::SourceRunOptions {
-        mode: kulyrax_core::RunMode::Continuous {
+    let run_opts = {
+        let mut o = kulyrax_core::SourceRunOptions::default();
+        o.dlq_dir = opts.dlq_dir.clone();
+        o.max_batch = opts.max_batch;
+        o.max_batch_delay = opts.max_batch_delay;
+        o.mode = kulyrax_core::RunMode::Continuous {
             poll_interval: opts.poll_interval,
-        },
-        max_batch: opts.max_batch,
-        retry_budget: opts.retry_budget,
-        max_batch_delay: opts.max_batch_delay,
-        dlq_dir: opts.dlq_dir.clone(),
+        };
+        o.retry_budget = opts.retry_budget;
+        o
     };
 
     // `kulyrax reload` swaps config, routing and mappings between batches.
@@ -631,7 +632,8 @@ pub fn serve(
             kulyrax_core::runtime::ReloadOutcome::Rejected { reason } => eprintln!(
                 "kulyrax ingest: reload rejected, keeping the previous configuration: {reason}"
             ),
-            kulyrax_core::runtime::ReloadOutcome::NotPickedUp => {}
+            // `ReloadOutcome` is `#[non_exhaustive]`; nothing else is reported.
+            _ => {}
         },
     );
     let result =

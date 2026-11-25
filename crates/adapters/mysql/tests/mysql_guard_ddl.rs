@@ -66,14 +66,12 @@ fn upsert_mapping(event: &str, table: &str, cols: &str) -> SqlMapping {
 }
 
 fn ev(event_type: &str, seq: u64, payload: serde_json::Value) -> Event {
-    Event {
-        event_id: format!("evt-{event_type}-{seq}"),
-        event_type: event_type.into(),
-        payload: payload.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-{event_type}-{seq}"),
+        event_type,
+        seq,
+        payload.to_string(),
+    )
 }
 
 #[test]

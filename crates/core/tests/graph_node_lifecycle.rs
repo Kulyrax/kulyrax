@@ -15,36 +15,30 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 fn registered(seq: u64, name: &str) -> Event {
-    Event {
-        event_id: format!("evt-reg-{seq}"),
-        event_type: "UserRegistered".to_string(),
-        payload: format!(r#"{{ "user_id": "u1", "name": "{name}" }}"#),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-reg-{seq}"),
+        "UserRegistered".to_string(),
+        seq,
+        format!(r#"{{ "user_id": "u1", "name": "{name}" }}"#),
+    )
 }
 
 fn renamed(seq: u64, name: &str) -> Event {
-    Event {
-        event_id: format!("evt-rename-{seq}"),
-        event_type: "UserRenamed".to_string(),
-        payload: format!(r#"{{ "user_id": "u1", "name": "{name}" }}"#),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-rename-{seq}"),
+        "UserRenamed".to_string(),
+        seq,
+        format!(r#"{{ "user_id": "u1", "name": "{name}" }}"#),
+    )
 }
 
 fn deregistered(seq: u64) -> Event {
-    Event {
-        event_id: format!("evt-dereg-{seq}"),
-        event_type: "UserDeregistered".to_string(),
-        payload: r#"{ "user_id": "u1" }"#.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-dereg-{seq}"),
+        "UserDeregistered".to_string(),
+        seq,
+        r#"{ "user_id": "u1" }"#.to_string(),
+    )
 }
 
 fn mappings() -> HashMap<String, GraphMapping> {

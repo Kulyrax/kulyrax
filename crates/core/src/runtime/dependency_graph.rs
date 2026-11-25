@@ -14,6 +14,7 @@ pub struct AdapterExecutionMeta {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DependencyOrderError {
     /// Adapters involved in a cycle (always sorted by id).
     Cycle { adapters: Vec<AdapterId> },

@@ -43,6 +43,7 @@ impl std::fmt::Display for SourcePosition {
 
 /// One event plus the position needed to commit past it.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SourcedEvent {
     pub event: Event,
     pub position: SourcePosition,
@@ -50,6 +51,7 @@ pub struct SourcedEvent {
 
 /// Failure reading from or checkpointing a source.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum SourceError {
     Io(std::io::Error),
     Parse(String),
@@ -180,5 +182,13 @@ pub fn lock_source(
             path.display()
         ))),
         Err(std::fs::TryLockError::Error(e)) => Err(SourceError::Io(e)),
+    }
+}
+
+impl SourcedEvent {
+    /// An event and the position to commit past it. `SourcedEvent` is
+    /// `#[non_exhaustive]`; a source builds it with this.
+    pub fn new(event: Event, position: SourcePosition) -> Self {
+        Self { event, position }
     }
 }

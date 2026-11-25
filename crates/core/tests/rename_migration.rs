@@ -27,14 +27,12 @@ use kulyrax_core::runtime::config::MigrationPolicy;
 use kulyrax_core::upcast::UpcasterRegistry;
 
 fn ev(event_type: &str, id: &str, seq: u64) -> Event {
-    Event {
-        event_id: format!("e-{seq}-{}", id.len()),
-        event_type: event_type.into(),
-        payload: serde_json::json!({ "id": id, "v": seq }).to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("e-{seq}-{}", id.len()),
+        event_type,
+        seq,
+        serde_json::json!({ "id": id, "v": seq }).to_string(),
+    )
 }
 
 fn kv(root: &Path, namespaces: &[&str]) -> FileKvStore {

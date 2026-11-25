@@ -41,15 +41,12 @@ impl Project {
 }
 
 fn user(seq: u64, id: &str, name: &str) -> Event {
-    Event {
-        event_id: format!("evt-{id}-{seq}"),
-        event_type: "UserUpserted".into(),
-        payload: serde_json::json!({ "id": id, "name": name, "email": format!("{name}@x") })
-            .to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-{id}-{seq}"),
+        "UserUpserted",
+        seq,
+        serde_json::json!({ "id": id, "name": name, "email": format!("{name}@x") }).to_string(),
+    )
 }
 
 fn history() -> Vec<Event> {
@@ -289,10 +286,7 @@ fn rebuild_refuses_to_swap_when_another_writer_projected() {
     for e in history() {
         assert!(live.handle(&e).is_success());
     }
-    let tables = [ShadowTable {
-        table: "users".into(),
-        shadow: "users__kulyrax_rebuild".into(),
-    }];
+    let tables = [ShadowTable::new("users", "users__kulyrax_rebuild")];
     let rebuilder = live.shadow_rebuild().expect("SQLite supports rebuilds");
     let before = rebuilder.start_rebuild(&tables).unwrap();
 

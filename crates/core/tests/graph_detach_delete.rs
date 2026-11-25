@@ -17,36 +17,30 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 fn registered(seq: u64, id: &str) -> Event {
-    Event {
-        event_id: format!("evt-reg-{id}-{seq}"),
-        event_type: "UserRegistered".to_string(),
-        payload: format!(r#"{{ "user_id": "{id}", "name": "{id}" }}"#),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-reg-{id}-{seq}"),
+        "UserRegistered".to_string(),
+        seq,
+        format!(r#"{{ "user_id": "{id}", "name": "{id}" }}"#),
+    )
 }
 
 fn followed(seq: u64, from: &str, to: &str) -> Event {
-    Event {
-        event_id: format!("evt-follow-{from}-{to}-{seq}"),
-        event_type: "UserFollowed".to_string(),
-        payload: format!(r#"{{ "follower": "{from}", "followee": "{to}", "ts": "t{seq}" }}"#),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-follow-{from}-{to}-{seq}"),
+        "UserFollowed".to_string(),
+        seq,
+        format!(r#"{{ "follower": "{from}", "followee": "{to}", "ts": "t{seq}" }}"#),
+    )
 }
 
 fn deregistered(seq: u64, id: &str) -> Event {
-    Event {
-        event_id: format!("evt-dereg-{id}-{seq}"),
-        event_type: "UserDeregistered".to_string(),
-        payload: format!(r#"{{ "user_id": "{id}" }}"#),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-dereg-{id}-{seq}"),
+        "UserDeregistered".to_string(),
+        seq,
+        format!(r#"{{ "user_id": "{id}" }}"#),
+    )
 }
 
 fn mappings() -> HashMap<String, GraphMapping> {

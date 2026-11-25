@@ -29,14 +29,12 @@ fn failure_message(outcome: &AdapterOutcome) -> String {
 }
 
 fn event_with_non_scalar_id(payload: &str) -> Event {
-    Event {
-        event_id: "evt-1".to_string(),
-        event_type: "UserCreated".to_string(),
-        payload: payload.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: 1,
-    }
+    Event::new(
+        "evt-1".to_string(),
+        "UserCreated".to_string(),
+        1,
+        payload.to_string(),
+    )
 }
 
 #[test]

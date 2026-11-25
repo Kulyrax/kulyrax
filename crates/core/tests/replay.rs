@@ -6,7 +6,7 @@ use kulyrax_core::event::Event;
 use kulyrax_core::execution::ExecutionStatus;
 use kulyrax_core::replay::{ReplayContext, ReplayRunOptions, events_from_path};
 use kulyrax_core::runtime::config::{
-    AdapterConfig, FailurePolicy, FileAdapterConfig, FileConfig, KulyraxConfig, RoutingConfig,
+    AdapterConfig, FailurePolicy, FileAdapterConfig, FileConfig, KulyraxConfig,
     SqliteAdapterConfig, SqliteConfig,
 };
 
@@ -71,12 +71,9 @@ document:
 
 /// File-backed SQLite so all replay events share one DB (unlike :memory: per handle).
 fn sample_config(doc_root: &Path, sqlite_path: &Path) -> KulyraxConfig {
-    KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "routing.yaml".into(),
-        },
-        adapters: vec![
+    KulyraxConfig::new(
+        "routing.yaml",
+        vec![
             AdapterConfig::Sqlite(SqliteAdapterConfig {
                 id: "sql-primary".into(),
                 priority: 10,
@@ -96,10 +93,7 @@ fn sample_config(doc_root: &Path, sqlite_path: &Path) -> KulyraxConfig {
                 depends_on: vec![],
             }),
         ],
-        failure_policy: FailurePolicy::FailFast,
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    }
+    )
 }
 
 fn user_created_mappings() -> (
@@ -160,28 +154,12 @@ fn replay_directory_sorted_order_two_user_created() {
 
     fs::write(
         events_dir.join("02_second.json"),
-        serde_json::to_string(&Event {
-            event_id: "e2".into(),
-            event_type: "UserCreated".into(),
-            payload: r#"{"id":"u2"}"#.into(),
-            metadata: HashMap::new(),
-            version: 1,
-            sequence: 1,
-        })
-        .unwrap(),
+        serde_json::to_string(&Event::new("e2", "UserCreated", 1, r#"{"id":"u2"}"#)).unwrap(),
     )
     .unwrap();
     fs::write(
         events_dir.join("01_first.json"),
-        serde_json::to_string(&Event {
-            event_id: "e1".into(),
-            event_type: "UserCreated".into(),
-            payload: r#"{"id":"u1"}"#.into(),
-            metadata: HashMap::new(),
-            version: 1,
-            sequence: 1,
-        })
-        .unwrap(),
+        serde_json::to_string(&Event::new("e1", "UserCreated", 1, r#"{"id":"u1"}"#)).unwrap(),
     )
     .unwrap();
 
@@ -210,22 +188,8 @@ fn replay_ndjson_file() {
     fs::create_dir_all(tmp.path().join("docs")).unwrap();
 
     let f = tmp.path().join("events.ndjson");
-    let e1 = Event {
-        event_id: "n1".into(),
-        event_type: "UserCreated".into(),
-        payload: r#"{"id":"a"}"#.into(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: 1,
-    };
-    let e2 = Event {
-        event_id: "n2".into(),
-        event_type: "UserCreated".into(),
-        payload: r#"{"id":"b"}"#.into(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: 1,
-    };
+    let e1 = Event::new("n1", "UserCreated", 1, r#"{"id":"a"}"#);
+    let e2 = Event::new("n2", "UserCreated", 1, r#"{"id":"b"}"#);
     fs::write(
         &f,
         format!(
@@ -262,28 +226,12 @@ fn replay_fail_fast_stops_after_second_event_failure() {
 
     fs::write(
         events_dir.join("01_ok.json"),
-        serde_json::to_string(&Event {
-            event_id: "ok1".into(),
-            event_type: "UserCreated".into(),
-            payload: r#"{"id":"u1"}"#.into(),
-            metadata: HashMap::new(),
-            version: 1,
-            sequence: 1,
-        })
-        .unwrap(),
+        serde_json::to_string(&Event::new("ok1", "UserCreated", 1, r#"{"id":"u1"}"#)).unwrap(),
     )
     .unwrap();
     fs::write(
         events_dir.join("02_fail.json"),
-        serde_json::to_string(&Event {
-            event_id: "bad".into(),
-            event_type: "FailingEvent".into(),
-            payload: "{}".into(),
-            metadata: HashMap::new(),
-            version: 1,
-            sequence: 1,
-        })
-        .unwrap(),
+        serde_json::to_string(&Event::new("bad", "FailingEvent", 1, "{}")).unwrap(),
     )
     .unwrap();
 
@@ -321,15 +269,7 @@ fn replay_continue_on_error_processes_all() {
     ] {
         fs::write(
             events_dir.join(name),
-            serde_json::to_string(&Event {
-                event_id: eid.into(),
-                event_type: etype.into(),
-                payload: payload.into(),
-                metadata: HashMap::new(),
-                version: 1,
-                sequence: 1,
-            })
-            .unwrap(),
+            serde_json::to_string(&Event::new(eid, etype, 1, payload)).unwrap(),
         )
         .unwrap();
     }
@@ -363,14 +303,12 @@ fn replay_max_per_event_summaries_caps_success_rows() {
     for (i, id) in ["u1", "u2"].iter().enumerate() {
         fs::write(
             events_dir.join(format!("{}.json", i)),
-            serde_json::to_string(&Event {
-                event_id: format!("e{}", i),
-                event_type: "UserCreated".into(),
-                payload: format!(r#"{{"id":"{}"}}"#, id),
-                metadata: HashMap::new(),
-                version: 1,
-                sequence: 1,
-            })
+            serde_json::to_string(&Event::new(
+                format!("e{}", i),
+                "UserCreated",
+                1,
+                format!(r#"{{"id":"{}"}}"#, id),
+            ))
             .unwrap(),
         )
         .unwrap();
@@ -383,9 +321,10 @@ fn replay_max_per_event_summaries_caps_success_rows() {
 
     let mut iter = events_from_path(&events_dir).unwrap();
     let mut ctx = ReplayContext::new(&config, rules, sql, doc, HashMap::new(), HashMap::new());
-    let opts = ReplayRunOptions {
-        max_per_event_summaries: Some(1),
-        ..Default::default()
+    let opts = {
+        let mut o = ReplayRunOptions::default();
+        o.max_per_event_summaries = Some(1);
+        o
     };
     let report = ctx.run_stream_with_options(&mut iter, &opts).unwrap();
 
@@ -405,15 +344,7 @@ fn replay_validate_routing_fails_unknown_event_type() {
     let f = tmp.path().join("e.json");
     fs::write(
         &f,
-        serde_json::to_string(&Event {
-            event_id: "x".into(),
-            event_type: "NotInRouting".into(),
-            payload: "{}".into(),
-            metadata: HashMap::new(),
-            version: 1,
-            sequence: 1,
-        })
-        .unwrap(),
+        serde_json::to_string(&Event::new("x", "NotInRouting", 1, "{}")).unwrap(),
     )
     .unwrap();
 
@@ -424,9 +355,10 @@ fn replay_validate_routing_fails_unknown_event_type() {
 
     let mut iter = events_from_path(&f).unwrap();
     let mut ctx = ReplayContext::new(&config, rules, sql, doc, HashMap::new(), HashMap::new());
-    let opts = ReplayRunOptions {
-        validate_routing: true,
-        ..Default::default()
+    let opts = {
+        let mut o = ReplayRunOptions::default();
+        o.validate_routing = true;
+        o
     };
     let report = ctx.run_stream_with_options(&mut iter, &opts).unwrap();
 
@@ -443,12 +375,9 @@ fn replay_user_created_writes_two_sqlite_adapters() {
     init_sqlite_users_table(&db_master);
     init_sqlite_users_table(&db_slave);
 
-    let config = KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "routing.yaml".into(),
-        },
-        adapters: vec![
+    let config = KulyraxConfig::new(
+        "routing.yaml",
+        vec![
             AdapterConfig::Sqlite(SqliteAdapterConfig {
                 id: "pgsql_master".into(),
                 priority: 10,
@@ -468,10 +397,7 @@ fn replay_user_created_writes_two_sqlite_adapters() {
                 depends_on: vec![],
             }),
         ],
-        failure_policy: FailurePolicy::FailFast,
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    };
+    );
     config.validate().unwrap();
     let (sql, _) = user_created_mappings();
     let doc = HashMap::new();
@@ -484,15 +410,7 @@ fn replay_user_created_writes_two_sqlite_adapters() {
     let f = tmp.path().join("e.json");
     fs::write(
         &f,
-        serde_json::to_string(&Event {
-            event_id: "e1".into(),
-            event_type: "UserCreated".into(),
-            payload: r#"{"id":"u1"}"#.into(),
-            metadata: HashMap::new(),
-            version: 1,
-            sequence: 1,
-        })
-        .unwrap(),
+        serde_json::to_string(&Event::new("e1", "UserCreated", 1, r#"{"id":"u1"}"#)).unwrap(),
     )
     .unwrap();
 

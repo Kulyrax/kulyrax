@@ -120,14 +120,12 @@ fn graph_mapping(yaml: &str) -> GraphMapping {
 }
 
 fn ev(event_type: &str, seq: u64, payload: serde_json::Value) -> Event {
-    Event {
-        event_id: format!("evt-{event_type}-{seq}"),
-        event_type: event_type.into(),
-        payload: payload.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-{event_type}-{seq}"),
+        event_type,
+        seq,
+        payload.to_string(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -647,9 +645,11 @@ fn batch_mappings(label: &str, etype: &str) -> HashMap<String, GraphMapping> {
 /// across labels, so no two runs, past or present, may share ids.
 fn batch_stream(p: &str) -> Vec<Event> {
     use serde_json::json;
-    let e = |kind: &str, seq: u64, payload: serde_json::Value| Event {
-        event_id: format!("evt-{kind}-{seq}-{}", payload),
-        ..ev(kind, seq, payload)
+    let e = |kind: &str, seq: u64, payload: serde_json::Value| {
+        let event_id = format!("evt-{kind}-{seq}-{}", payload);
+        let mut o = ev(kind, seq, payload);
+        o.event_id = event_id;
+        o
     };
     let (n1, n2, n3, hot) = (
         format!("{p}n1"),
@@ -801,16 +801,17 @@ fn subgraph_mapping(order: &str, customer: &str, placed: &str) -> HashMap<String
 }
 
 fn order_placed(seq: u64, order: &str, customer: serde_json::Value, cid: &str) -> Event {
-    Event {
-        event_id: format!("evt-order-{order}-{seq}"),
-        ..ev(
+    {
+        let mut o = ev(
             "OrderPlaced",
             seq,
             serde_json::json!({
                 "order_id": order, "customer_id": cid, "customer": customer,
                 "total": seq * 10, "at": format!("t{seq}"),
             }),
-        )
+        );
+        o.event_id = format!("evt-order-{order}-{seq}");
+        o
     }
 }
 

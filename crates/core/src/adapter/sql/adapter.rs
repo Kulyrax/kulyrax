@@ -2,6 +2,7 @@ use std::fmt;
 
 /// SQL-side adapter / builder errors
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum SqlError {
     MappingNotFound(String),
     BuildFailed(String),

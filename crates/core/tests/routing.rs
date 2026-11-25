@@ -13,14 +13,12 @@ fn test_routing() -> HashMap<String, Vec<AdapterId>> {
 }
 
 fn test_event(event_type: &str) -> Event {
-    Event {
-        event_id: "evt-1".to_string(),
-        event_type: event_type.to_string(),
-        payload: "{}".to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: 1,
-    }
+    Event::new(
+        "evt-1".to_string(),
+        event_type.to_string(),
+        1,
+        "{}".to_string(),
+    )
 }
 
 #[test]

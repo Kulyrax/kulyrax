@@ -23,36 +23,30 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 fn created(seq: u64) -> Event {
-    Event {
-        event_id: format!("evt-created-{seq}"),
-        event_type: "UserCreated".to_string(),
-        payload: r#"{ "id": "u1", "display_name": "Ada" }"#.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-created-{seq}"),
+        "UserCreated".to_string(),
+        seq,
+        r#"{ "id": "u1", "display_name": "Ada" }"#.to_string(),
+    )
 }
 
 fn email_changed(seq: u64, email: &str) -> Event {
-    Event {
-        event_id: format!("evt-email-{seq}"),
-        event_type: "UserEmailChanged".to_string(),
-        payload: format!(r#"{{ "id": "u1", "email": "{email}" }}"#),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-email-{seq}"),
+        "UserEmailChanged".to_string(),
+        seq,
+        format!(r#"{{ "id": "u1", "email": "{email}" }}"#),
+    )
 }
 
 fn logged_in(seq: u64, at: &str) -> Event {
-    Event {
-        event_id: format!("evt-login-{seq}"),
-        event_type: "UserLoggedIn".to_string(),
-        payload: format!(r#"{{ "id": "u1", "last_login": "{at}" }}"#),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-login-{seq}"),
+        "UserLoggedIn".to_string(),
+        seq,
+        format!(r#"{{ "id": "u1", "last_login": "{at}" }}"#),
+    )
 }
 
 fn stream() -> Vec<Event> {

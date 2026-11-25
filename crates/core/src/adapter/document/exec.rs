@@ -29,6 +29,7 @@ use crate::execution::stages::{Stage, timed};
 /// the file sidecar (JSON) and the MongoDB guard document (BSON) — no backend
 /// gets its own guard schema.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ProjectionGuard {
     #[serde(default)]
     pub last_sequence: u64,
@@ -44,6 +45,7 @@ pub struct ProjectionGuard {
 
 /// One named-facet lane inside a [`ProjectionGuard`] (Phase 15.2).
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct FacetGuard {
     pub last_sequence: u64,
     pub last_event_id: String,
@@ -141,6 +143,7 @@ pub trait DocumentBackend {
 /// What [`project`] resolved to — the adapter maps this onto an `AdapterResult`
 /// with the version metadata it already holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DocumentOutcome {
     Created,
     Updated,
@@ -150,6 +153,7 @@ pub enum DocumentOutcome {
 
 /// Everything [`project`] needs from the runtime builder — the resolved
 /// identity, document, and the mapping's gating fields.
+#[non_exhaustive]
 pub struct DocumentPlan {
     pub collection: String,
     pub entity_id: String,
@@ -283,4 +287,21 @@ pub fn project<B: DocumentBackend>(
         WriteDecision::Update => DocumentOutcome::Updated,
         _ => unreachable!("skip and delete decisions returned above"),
     })
+}
+
+/// A projection, ready to write: what every document backend does with the
+/// output of the document runtime ([`DocumentProjection`](crate::adapter::document::runtime::DocumentProjection)).
+/// `DocumentPlan` is `#[non_exhaustive]`; build it this way.
+impl From<crate::adapter::document::runtime::DocumentProjection> for DocumentPlan {
+    fn from(p: crate::adapter::document::runtime::DocumentProjection) -> Self {
+        Self {
+            collection: p.collection,
+            entity_id: p.entity_id,
+            document: p.document,
+            on_existing: p.on_existing,
+            operation: p.operation,
+            permanent: p.permanent,
+            facet: p.facet,
+        }
+    }
 }

@@ -72,9 +72,10 @@ fn run(
     let (root, stop) = (root.to_path_buf(), Arc::clone(stop));
     let outcomes = Arc::new(Mutex::new(Vec::new()));
     thread::spawn(move || {
-        let opts = SourceRunOptions {
-            mode,
-            ..SourceRunOptions::default()
+        let opts = {
+            let mut o = SourceRunOptions::default();
+            o.mode = mode;
+            o
         };
         run_source_loop(
             &root.join("config.yaml"),

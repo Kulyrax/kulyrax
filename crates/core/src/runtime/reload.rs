@@ -36,6 +36,7 @@ pub fn control_dir(config_path: &Path) -> PathBuf {
 
 /// What the running process did with a reload request.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ReloadOutcome {
     Applied {
         message: String,

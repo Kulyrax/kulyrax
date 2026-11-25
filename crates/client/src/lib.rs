@@ -20,6 +20,7 @@ pub use pb::{Ack, EventEnvelope};
 /// Read this before treating any `Ack` as a success signal — see
 /// [`Ack::outcome`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum AckOutcome {
     /// `ack_protocol_version >= 1` and `dlq_events == 0`: every event this
     /// batch covers reached every adapter it was routed to.
@@ -53,6 +54,7 @@ impl Ack {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ClientError {
     Connect(String),
     /// Boxed — `tonic::Status` is large and would bloat every `Result` here.

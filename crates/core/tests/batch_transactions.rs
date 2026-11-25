@@ -96,14 +96,12 @@ fn ev(sequence: u64, event_type: &str, id: &str, field: Option<(&str, &str)>) ->
     if let Some((k, v)) = field {
         payload[k] = serde_json::Value::String(v.to_string());
     }
-    Event {
-        event_id: format!("{event_type}-{id}-{sequence}"),
-        event_type: event_type.to_string(),
-        payload: payload.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
+    Event::new(
+        format!("{event_type}-{id}-{sequence}"),
+        event_type.to_string(),
         sequence,
-    }
+        payload.to_string(),
+    )
 }
 
 /// Several entities, each going through most of the guard rules within one
@@ -196,13 +194,11 @@ fn replay(db: &Path, events: Vec<Event>, max_batch: usize) -> ReplayReport {
         HashMap::new(),
         HashMap::new(),
     );
-    ctx.run_stream_with_options(
-        events.into_iter().map(Ok),
-        &ReplayRunOptions {
-            max_batch: Some(max_batch),
-            ..Default::default()
-        },
-    )
+    ctx.run_stream_with_options(events.into_iter().map(Ok), &{
+        let mut o = ReplayRunOptions::default();
+        o.max_batch = Some(max_batch);
+        o
+    })
     .unwrap()
 }
 
@@ -341,12 +337,14 @@ fn failing_event_is_isolated_and_the_rest_lands() {
             routing(&["sql-primary"]),
             vec![Box::new(sqlite("sql-primary", &db))],
             vec![src],
-            &SourceRunOptions {
-                mode: RunMode::Once,
-                max_batch,
-                retry_budget: 0,
-                max_batch_delay: std::time::Duration::ZERO,
-                dlq_dir: Some(tmp.path().join(format!("{name}-dlq"))),
+            &{
+                let mut o = SourceRunOptions::default();
+                o.dlq_dir = Some(tmp.path().join(format!("{name}-dlq")));
+                o.max_batch = max_batch;
+                o.max_batch_delay = std::time::Duration::ZERO;
+                o.mode = RunMode::Once;
+                o.retry_budget = 0;
+                o
             },
             &AtomicBool::new(false),
         )
@@ -447,12 +445,14 @@ fn failed_commit_falls_back_without_loss_or_doubling() {
             }),
         ],
         vec![src],
-        &SourceRunOptions {
-            mode: RunMode::Once,
-            max_batch: 1000,
-            retry_budget: 0,
-            max_batch_delay: std::time::Duration::ZERO,
-            dlq_dir: None,
+        &{
+            let mut o = SourceRunOptions::default();
+            o.dlq_dir = None;
+            o.max_batch = 1000;
+            o.max_batch_delay = std::time::Duration::ZERO;
+            o.mode = RunMode::Once;
+            o.retry_budget = 0;
+            o
         },
         &AtomicBool::new(false),
     )
@@ -532,12 +532,14 @@ fn entity_written_by_a_fallback_is_still_guarded_later() {
         routing(&["sql-primary"]),
         vec![Box::new(sqlite("sql-primary", &db))],
         vec![src],
-        &SourceRunOptions {
-            mode: RunMode::Once,
-            max_batch: 2,
-            max_batch_delay: std::time::Duration::ZERO,
-            retry_budget: 0,
-            dlq_dir: Some(tmp.path().join("dlq")),
+        &{
+            let mut o = SourceRunOptions::default();
+            o.dlq_dir = Some(tmp.path().join("dlq"));
+            o.max_batch = 2;
+            o.max_batch_delay = std::time::Duration::ZERO;
+            o.mode = RunMode::Once;
+            o.retry_budget = 0;
+            o
         },
         &AtomicBool::new(false),
     )

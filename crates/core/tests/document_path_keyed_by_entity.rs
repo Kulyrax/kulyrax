@@ -47,14 +47,12 @@ document:
     );
 
     // event_id is deliberately unrelated to the entity id resolved from the payload.
-    let event = Event {
-        event_id: "evt-completely-unrelated".to_string(),
-        event_type: "UserCreated".to_string(),
-        payload: r#"{ "id": "entity-42" }"#.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: 1,
-    };
+    let event = Event::new(
+        "evt-completely-unrelated".to_string(),
+        "UserCreated".to_string(),
+        1,
+        r#"{ "id": "entity-42" }"#.to_string(),
+    );
 
     let result = adapter.handle(&event);
     assert!(result.is_success(), "{:?}", result.outcome);

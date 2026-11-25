@@ -17,7 +17,7 @@ use kulyrax_core::execution::{AdapterOutcome, ExecutionStatus};
 use kulyrax_core::routing::StorageKind;
 use kulyrax_core::runtime::KulyraxRuntime;
 use kulyrax_core::runtime::config::{
-    AdapterConfig, ConfigError, CustomAdapterConfig, KulyraxConfig, RoutingConfig,
+    AdapterConfig, ConfigError, CustomAdapterConfig, KulyraxConfig,
 };
 
 struct CountingAdapter {
@@ -43,23 +43,13 @@ impl StorageAdapter for CountingAdapter {
 }
 
 fn user_created_event() -> Event {
-    Event {
-        event_id: "evt-1".into(),
-        event_type: "UserCreated".into(),
-        payload: "{}".into(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: 1,
-    }
+    Event::new("evt-1", "UserCreated", 1, "{}")
 }
 
 fn config_with_one_custom_adapter(type_name: &str) -> KulyraxConfig {
-    KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "routing.yaml".into(),
-        },
-        adapters: vec![AdapterConfig::Custom(CustomAdapterConfig {
+    KulyraxConfig::new(
+        "routing.yaml",
+        vec![AdapterConfig::Custom(CustomAdapterConfig {
             type_name: type_name.into(),
             id: "sql-primary".into(),
             priority: 10,
@@ -67,10 +57,7 @@ fn config_with_one_custom_adapter(type_name: &str) -> KulyraxConfig {
             capabilities: None,
             depends_on: vec![],
         })],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    }
+    )
 }
 
 fn routing_to_sql_primary() -> HashMap<String, Vec<String>> {

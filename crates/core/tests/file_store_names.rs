@@ -27,14 +27,12 @@ use kulyrax_core::runtime::config::MigrationPolicy;
 use kulyrax_core::upcast::UpcasterRegistry;
 
 fn ev(event_type: &str, id: &str, seq: u64) -> Event {
-    Event {
-        event_id: format!("e-{seq}-{}", id.len()),
-        event_type: event_type.into(),
-        payload: serde_json::json!({ "id": id, "v": seq }).to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("e-{seq}-{}", id.len()),
+        event_type,
+        seq,
+        serde_json::json!({ "id": id, "v": seq }).to_string(),
+    )
 }
 
 fn kv(root: &Path, namespaces: &[&str]) -> FileKvStore {
@@ -251,9 +249,10 @@ fn long_ids_get_hashed_names_with_the_id_inside() {
             outcome(&g, &ev("U", &long, 5)),
             AdapterOutcome::Created
         ));
-        let edge = Event {
-            payload: serde_json::json!({ "id": long, "to": longer, "v": 1 }).to_string(),
-            ..ev("E", "", 6)
+        let edge = {
+            let mut o = ev("E", "", 6);
+            o.payload = serde_json::json!({ "id": long, "to": longer, "v": 1 }).to_string();
+            o
         };
         assert!(matches!(outcome(&g, &edge), AdapterOutcome::Created));
     }
@@ -396,10 +395,10 @@ impl kulyrax_core::source::EventSource for Hostile {
             return Ok(Vec::new());
         }
         self.sent = true;
-        Ok(vec![kulyrax_core::source::SourcedEvent {
-            event: ev("U", "u1", 1),
-            position: kulyrax_core::source::SourcePosition("../../outside".into()),
-        }])
+        Ok(vec![kulyrax_core::SourcedEvent::new(
+            ev("U", "u1", 1),
+            kulyrax_core::source::SourcePosition("../../outside".into()),
+        )])
     }
     fn commit(
         &mut self,
@@ -435,12 +434,14 @@ fn a_dlq_file_stays_in_the_dlq_directory() {
         HashMap::new(),
         HashMap::new(),
         vec![Box::new(Hostile { sent: false })],
-        &kulyrax_core::SourceRunOptions {
-            mode: kulyrax_core::RunMode::Once,
-            max_batch: 10,
-            retry_budget: 0,
-            max_batch_delay: std::time::Duration::ZERO,
-            dlq_dir: Some(dlq.clone()),
+        &{
+            let mut o = kulyrax_core::SourceRunOptions::default();
+            o.dlq_dir = Some(dlq.clone());
+            o.max_batch = 10;
+            o.max_batch_delay = std::time::Duration::ZERO;
+            o.mode = kulyrax_core::RunMode::Once;
+            o.retry_budget = 0;
+            o
         },
         &std::sync::atomic::AtomicBool::new(false),
     )

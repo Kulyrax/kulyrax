@@ -19,25 +19,21 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 fn tag_assigned(sequence: u64, post_id: &str, tag_id: &str) -> Event {
-    Event {
-        event_id: format!("evt-assign-{sequence}"),
-        event_type: "TagAssigned".to_string(),
-        payload: format!(r#"{{ "post_id": "{}", "tag_id": "{}" }}"#, post_id, tag_id),
-        metadata: HashMap::new(),
-        version: 1,
+    Event::new(
+        format!("evt-assign-{sequence}"),
+        "TagAssigned".to_string(),
         sequence,
-    }
+        format!(r#"{{ "post_id": "{}", "tag_id": "{}" }}"#, post_id, tag_id),
+    )
 }
 
 fn tag_removed(sequence: u64, post_id: &str, tag_id: &str) -> Event {
-    Event {
-        event_id: format!("evt-remove-{sequence}"),
-        event_type: "TagRemoved".to_string(),
-        payload: format!(r#"{{ "post_id": "{}", "tag_id": "{}" }}"#, post_id, tag_id),
-        metadata: HashMap::new(),
-        version: 1,
+    Event::new(
+        format!("evt-remove-{sequence}"),
+        "TagRemoved".to_string(),
         sequence,
-    }
+        format!(r#"{{ "post_id": "{}", "tag_id": "{}" }}"#, post_id, tag_id),
+    )
 }
 
 #[test]

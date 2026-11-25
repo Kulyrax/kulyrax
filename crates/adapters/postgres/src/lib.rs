@@ -643,11 +643,11 @@ impl PostgresTxn<'_> {
 }
 
 fn guard_state(row: &postgres::Row, from: usize) -> GuardState {
-    GuardState {
-        last_sequence: row.get::<_, i64>(from) as u64,
-        deleted: row.get(from + 1),
-        permanent: row.get(from + 2),
-    }
+    GuardState::new(
+        row.get::<_, i64>(from) as u64,
+        row.get(from + 1),
+        row.get(from + 2),
+    )
 }
 
 impl SqlTxn for PostgresTxn<'_> {
@@ -956,12 +956,12 @@ impl SqlTxn for PostgresTxn<'_> {
             .first()
             .ok_or_else(|| SqlError::ExecutionFailed("guard fingerprint returned no row".into()))?;
         let sum: String = row.get(1);
-        Ok(GuardFingerprint {
-            lanes: row.get(0),
-            sequence_sum: sum.parse().map_err(|e| {
+        Ok(GuardFingerprint::new(
+            row.get(0),
+            sum.parse().map_err(|e| {
                 SqlError::ExecutionFailed(format!("guard sequence sum {sum:?}: {e}"))
             })?,
-        })
+        ))
     }
 
     /// Blocks every other writer, and reader, of `tables` until the swap
@@ -1152,11 +1152,11 @@ mod tests {
             capabilities: None,
             depends_on: Vec::new(),
         };
-        let ctx = AdapterBuildContext {
-            mappings: Default::default(),
-            upcasters: Arc::new(UpcasterRegistry::new()),
-            migration_policy: MigrationPolicy::default(),
-        };
+        let ctx = AdapterBuildContext::new(
+            Default::default(),
+            Arc::new(UpcasterRegistry::new()),
+            MigrationPolicy::default(),
+        );
         let result = factory(&entry, &ctx);
         assert!(matches!(result, Err(ConfigError::FactoryConfigInvalid(_))));
     }

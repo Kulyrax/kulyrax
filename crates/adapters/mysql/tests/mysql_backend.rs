@@ -81,14 +81,12 @@ fn upsert_mapping(event: &str, table: &str, cols: &str) -> SqlMapping {
 }
 
 fn ev(event_type: &str, seq: u64, payload: serde_json::Value) -> Event {
-    Event {
-        event_id: format!("evt-{event_type}-{seq}"),
-        event_type: event_type.into(),
-        payload: payload.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-{event_type}-{seq}"),
+        event_type,
+        seq,
+        payload.to_string(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -587,12 +585,14 @@ fn batch_mappings(prefix: &str, table: &str) -> HashMap<String, SqlMapping> {
 /// One entity's lifecycle, a second entity deleted before it exists, and two
 /// keys that differ only in case, all meant for one batch.
 fn batch_stream(prefix: &str) -> Vec<Event> {
-    let e = |kind: &str, seq: u64, payload: serde_json::Value| Event {
-        event_id: format!(
+    let e = |kind: &str, seq: u64, payload: serde_json::Value| {
+        let event_id = format!(
             "evt-{prefix}{kind}-{}-{seq}",
             payload["id"].as_str().unwrap_or("")
-        ),
-        ..ev(&format!("{prefix}{kind}"), seq, payload)
+        );
+        let mut o = ev(&format!("{prefix}{kind}"), seq, payload);
+        o.event_id = event_id;
+        o
     };
     use serde_json::json;
     vec![

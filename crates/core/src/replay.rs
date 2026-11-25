@@ -28,6 +28,7 @@ use crate::runtime::dependency_graph::{AdapterExecutionMeta, adapter_metadata_ma
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ReplayLoadError {
     Io(std::io::Error),
     Json(String),
@@ -100,6 +101,7 @@ pub fn events_from_path(path: impl AsRef<Path>) -> Result<EventsFromPath, Replay
     }
 }
 
+#[non_exhaustive]
 pub enum EventsFromPath {
     Directory {
         paths: Vec<PathBuf>,
@@ -173,6 +175,7 @@ impl Iterator for EventsFromPath {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct PerEventReplaySummary {
     pub event_id: String,
     pub event_type: String,
@@ -184,6 +187,7 @@ fn default_replay_report_version() -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ReplayReport {
     #[serde(default = "default_replay_report_version")]
     pub report_version: String,
@@ -246,6 +250,7 @@ impl ReplayReport {
 
 /// Optional replay behavior: cap per-event rows, progress, strict routing.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct ReplayRunOptions {
     /// When `Some(n)`, only the first `n` successful events get a `per_event` row; failures are always recorded.
     /// `None` = record every event (default).

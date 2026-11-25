@@ -3,20 +3,15 @@
 //! their independent sequence gates).
 
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
-use kulyrax_core::runtime::config::{
-    KulyraxConfig, RoutingConfig, SqliteAdapterConfig, SqliteConfig,
-};
+use kulyrax_core::runtime::config::{KulyraxConfig, SqliteAdapterConfig, SqliteConfig};
 use kulyrax_core::validate_projection_config;
 
 use std::collections::HashMap;
 
 fn config() -> KulyraxConfig {
-    KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "r.json".into(),
-        },
-        adapters: vec![kulyrax_core::runtime::config::AdapterConfig::Sqlite(
+    KulyraxConfig::new(
+        "r.json",
+        vec![kulyrax_core::runtime::config::AdapterConfig::Sqlite(
             SqliteAdapterConfig {
                 id: "sql-primary".into(),
                 priority: 10,
@@ -30,10 +25,7 @@ fn config() -> KulyraxConfig {
                 depends_on: vec![],
             },
         )],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    }
+    )
 }
 
 fn sql(event: &str, facet: &str, col: &str) -> SqlMapping {

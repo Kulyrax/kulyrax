@@ -31,6 +31,7 @@ use crate::execution::stages::{Stage, timed};
 /// all, so a single JSON blob (even as a string) couldn't be compared in a
 /// Cypher `WHERE`.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct GraphGuard {
     #[serde(default)]
     pub last_sequence: u64,
@@ -45,6 +46,7 @@ pub struct GraphGuard {
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct GraphFacetGuard {
     pub last_sequence: u64,
     pub last_event_id: String,
@@ -178,6 +180,7 @@ pub trait GraphBackend {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum GraphOutcome {
     Created,
     Updated,
@@ -185,6 +188,7 @@ pub enum GraphOutcome {
     Skipped(SkipReason),
 }
 
+#[non_exhaustive]
 pub struct NodePlan {
     pub label: String,
     pub node_id: String,
@@ -195,6 +199,7 @@ pub struct NodePlan {
     pub facet: String,
 }
 
+#[non_exhaustive]
 pub struct EdgePlan {
     pub edge_type: String,
     pub from: String,
@@ -463,4 +468,22 @@ pub fn project_edge<B: GraphBackend>(
         WriteDecision::Update => GraphOutcome::Updated,
         _ => unreachable!("skip and delete decisions returned above"),
     })
+}
+
+impl GraphFacetGuard {
+    /// One facet's guard lane on a node. `GraphFacetGuard` is
+    /// `#[non_exhaustive]`; build it with this.
+    pub fn new(
+        last_sequence: u64,
+        last_event_id: impl Into<String>,
+        deleted: bool,
+        permanent: bool,
+    ) -> Self {
+        Self {
+            last_sequence,
+            last_event_id: last_event_id.into(),
+            deleted,
+            permanent,
+        }
+    }
 }

@@ -85,6 +85,7 @@ const FILES: &[(&str, &str)] = &[
 ];
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum InitError {
     /// Nothing was written because these files already exist.
     WouldOverwrite(Vec<PathBuf>),

@@ -19,6 +19,7 @@ use crate::runtime::dependency_graph::{
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ValidationIssue {
     InvalidSqlMapping {
         event: String,

@@ -11,7 +11,7 @@
 use kulyrax_client::{Ack, EventEnvelope, Producer};
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::runtime::config::{
-    AdapterConfig, KulyraxConfig, RoutingConfig, SqliteAdapterConfig, SqliteConfig,
+    AdapterConfig, KulyraxConfig, SqliteAdapterConfig, SqliteConfig,
 };
 use kulyrax_core::{RunMode, SourceRunOptions, SourceRunReport};
 
@@ -31,12 +31,9 @@ fn init_users(db: &Path) {
 }
 
 fn config(db: &Path) -> KulyraxConfig {
-    KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "r.json".into(),
-        },
-        adapters: vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
+    KulyraxConfig::new(
+        "r.json",
+        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
             id: "sql".into(),
             priority: 10,
             config: SqliteConfig {
@@ -45,10 +42,7 @@ fn config(db: &Path) -> KulyraxConfig {
             capabilities: None,
             depends_on: vec![],
         })],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    }
+    )
 }
 
 fn routing() -> HashMap<String, Vec<String>> {
@@ -112,14 +106,16 @@ impl Harness {
                 HashMap::new(),
                 HashMap::new(),
                 vec![Box::new(source)],
-                &SourceRunOptions {
-                    mode: RunMode::Continuous {
+                &{
+                    let mut o = SourceRunOptions::default();
+                    o.dlq_dir = Some(dlq);
+                    o.max_batch = 64;
+                    o.max_batch_delay = Duration::from_millis(200);
+                    o.mode = RunMode::Continuous {
                         poll_interval: Duration::from_millis(20),
-                    },
-                    max_batch: 64,
-                    retry_budget: 0,
-                    max_batch_delay: Duration::from_millis(200),
-                    dlq_dir: Some(dlq),
+                    };
+                    o.retry_budget = 0;
+                    o
                 },
                 &stop2,
             )

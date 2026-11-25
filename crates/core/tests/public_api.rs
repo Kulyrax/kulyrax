@@ -4,8 +4,7 @@ use kulyrax_core::event::Event;
 use kulyrax_core::execute_event;
 use kulyrax_core::routing::{AdapterId, load_routing};
 use kulyrax_core::runtime::config::{
-    AdapterConfig, FailurePolicy, FileAdapterConfig, FileConfig, KulyraxConfig, RoutingConfig,
-    SqliteAdapterConfig, SqliteConfig,
+    AdapterConfig, FileAdapterConfig, FileConfig, KulyraxConfig, SqliteAdapterConfig, SqliteConfig,
 };
 
 use std::collections::HashMap;
@@ -35,12 +34,9 @@ fn execute_event_runs_without_panic() {
     // -----------------------------
     // Config
     // -----------------------------
-    let config = KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "routing.yaml".into(),
-        },
-        adapters: vec![
+    let config = KulyraxConfig::new(
+        "routing.yaml",
+        vec![
             AdapterConfig::Sqlite(SqliteAdapterConfig {
                 id: "sql-primary".into(),
                 priority: 10,
@@ -60,10 +56,7 @@ fn execute_event_runs_without_panic() {
                 depends_on: vec![],
             }),
         ],
-        failure_policy: FailurePolicy::FailFast,
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    };
+    );
 
     config.validate().expect("config must be valid");
 
@@ -108,14 +101,7 @@ document:
     // -----------------------------
     // Event
     // -----------------------------
-    let event = Event {
-        event_id: "evt-1".into(),
-        event_type: "UserCreated".into(),
-        payload: r#"{ "id": "u1" }"#.into(),
-        metadata: Default::default(),
-        version: 1,
-        sequence: 1,
-    };
+    let event = Event::new("evt-1", "UserCreated", 1, r#"{ "id": "u1" }"#);
 
     // -----------------------------
     // Execute

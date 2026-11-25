@@ -14,6 +14,7 @@ use serde_json::{Map, Value};
 /// `to` / `discriminator`, and `records`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum GraphMapping {
     Node(GraphNodeMapping),
     Edge(GraphEdgeMapping),
@@ -27,6 +28,7 @@ pub enum GraphMapping {
 /// sequence; the adapter applies all of them in one transaction, so a record
 /// that fails leaves nothing of the event behind.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct GraphSubgraphMapping {
     pub event: String,
     pub version: u32,
@@ -78,6 +80,7 @@ impl<'de> Deserialize<'de> for GraphSubgraphMapping {
 
 /// `kind: node` — a node *is* an entity, so facets (Phase 15) apply verbatim.
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct GraphNodeMapping {
     pub event: String,
     pub label: String,
@@ -104,6 +107,7 @@ pub struct GraphNodeMapping {
 /// optional `discriminator` for parallel edges (a multigraph). Edges are not
 /// faceted.
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct GraphEdgeMapping {
     pub event: String,
     pub edge_type: String,
@@ -130,6 +134,7 @@ pub struct GraphEdgeMapping {
 /// A resolved graph record — the single node or edge a `GraphMapping` emits
 /// for one event, plus its projected properties.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ResolvedRecord {
     Node {
         label: String,

@@ -5,20 +5,16 @@
 
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::runtime::config::{
-    AdapterCapability, AdapterConfig, KulyraxConfig, RoutingConfig, SqliteAdapterConfig,
-    SqliteConfig,
+    AdapterCapability, AdapterConfig, KulyraxConfig, SqliteAdapterConfig, SqliteConfig,
 };
 use kulyrax_core::validate_projection_config;
 
 use std::collections::HashMap;
 
 fn config() -> KulyraxConfig {
-    KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "r.json".into(),
-        },
-        adapters: vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
+    KulyraxConfig::new(
+        "r.json",
+        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
             id: "sql-primary".into(),
             priority: 10,
             config: SqliteConfig {
@@ -27,10 +23,7 @@ fn config() -> KulyraxConfig {
             capabilities: Some(vec![AdapterCapability::Write, AdapterCapability::Upsert]),
             depends_on: vec![],
         })],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    }
+    )
 }
 
 #[test]

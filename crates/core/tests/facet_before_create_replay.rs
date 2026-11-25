@@ -9,9 +9,7 @@ use kulyrax_core::adapter::document::mapping::DocumentMapping;
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::event::Event;
 use kulyrax_core::replay::{ReplayContext, events_from_path};
-use kulyrax_core::runtime::config::{
-    AdapterConfig, FailurePolicy, FileAdapterConfig, FileConfig, KulyraxConfig, RoutingConfig,
-};
+use kulyrax_core::runtime::config::{AdapterConfig, FileAdapterConfig, FileConfig, KulyraxConfig};
 
 use std::collections::HashMap;
 use std::fs;
@@ -62,37 +60,30 @@ fn replay_follows_file_order_so_a_facet_before_its_create_is_skipped() {
     // File name order puts the facet event first; its sequence (5) is higher.
     fs::write(
         events_dir.join("01-email.json"),
-        serde_json::to_string(&Event {
-            event_id: "e-email".into(),
-            event_type: "UserEmailChanged".into(),
-            payload: r#"{"id":"u1","email":"ada@x.com"}"#.into(),
-            metadata: HashMap::new(),
-            version: 1,
-            sequence: 5,
-        })
+        serde_json::to_string(&Event::new(
+            "e-email",
+            "UserEmailChanged",
+            5,
+            r#"{"id":"u1","email":"ada@x.com"}"#,
+        ))
         .unwrap(),
     )
     .unwrap();
     fs::write(
         events_dir.join("02-create.json"),
-        serde_json::to_string(&Event {
-            event_id: "e-create".into(),
-            event_type: "UserCreated".into(),
-            payload: r#"{"id":"u1","display_name":"Ada"}"#.into(),
-            metadata: HashMap::new(),
-            version: 1,
-            sequence: 1,
-        })
+        serde_json::to_string(&Event::new(
+            "e-create",
+            "UserCreated",
+            1,
+            r#"{"id":"u1","display_name":"Ada"}"#,
+        ))
         .unwrap(),
     )
     .unwrap();
 
-    let config = KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "routing.yaml".into(),
-        },
-        adapters: vec![AdapterConfig::File(FileAdapterConfig {
+    let config = KulyraxConfig::new(
+        "routing.yaml",
+        vec![AdapterConfig::File(FileAdapterConfig {
             id: "doc-readmodel".into(),
             priority: 10,
             config: FileConfig {
@@ -101,10 +92,7 @@ fn replay_follows_file_order_so_a_facet_before_its_create_is_skipped() {
             capabilities: None,
             depends_on: vec![],
         })],
-        failure_policy: FailurePolicy::FailFast,
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    };
+    );
     config.validate().unwrap();
 
     let mut rules: HashMap<String, Vec<String>> = HashMap::new();

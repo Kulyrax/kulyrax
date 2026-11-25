@@ -89,14 +89,12 @@ fn upsert_mapping(event: &str, table: &str, cols: &str) -> SqlMapping {
 }
 
 fn ev(event_type: &str, seq: u64, payload: serde_json::Value) -> Event {
-    Event {
-        event_id: format!("evt-{event_type}-{seq}"),
-        event_type: event_type.into(),
-        payload: payload.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-{event_type}-{seq}"),
+        event_type,
+        seq,
+        payload.to_string(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -601,12 +599,14 @@ fn batch_mappings(prefix: &str, table: &str) -> HashMap<String, SqlMapping> {
 /// One entity's lifecycle and a second entity deleted before it exists, all
 /// meant for one batch.
 fn batch_stream(prefix: &str) -> Vec<Event> {
-    let e = |kind: &str, seq: u64, payload: serde_json::Value| Event {
-        event_id: format!(
+    let e = |kind: &str, seq: u64, payload: serde_json::Value| {
+        let event_id = format!(
             "evt-{prefix}{kind}-{}-{seq}",
             payload["id"].as_str().unwrap_or("")
-        ),
-        ..ev(&format!("{prefix}{kind}"), seq, payload)
+        );
+        let mut o = ev(&format!("{prefix}{kind}"), seq, payload);
+        o.event_id = event_id;
+        o
     };
     use serde_json::json;
     vec![
@@ -754,38 +754,42 @@ fn pg_bulk_repeated_keys_in_one_batch() -> R {
         for round in 0..5 {
             for key in ["a", "b", "c"] {
                 let s = next();
-                events.push(Event {
-                    event_id: format!("evt-{prefix}-{key}-{s}"),
-                    ..ev(
+                events.push({
+                    let mut o = ev(
                         &format!("{prefix}Up"),
                         s,
                         json!({ "id": key, "name": format!("{key}{round}") }),
-                    )
+                    );
+                    o.event_id = format!("evt-{prefix}-{key}-{s}");
+                    o
                 });
                 let s = next();
-                events.push(Event {
-                    event_id: format!("evt-{prefix}-{key}-{s}"),
-                    ..ev(
+                events.push({
+                    let mut o = ev(
                         &format!("{prefix}Mail"),
                         s,
                         json!({ "id": key, "email": format!("{key}{round}@x") }),
-                    )
+                    );
+                    o.event_id = format!("evt-{prefix}-{key}-{s}");
+                    o
                 });
             }
             if round == 2 {
                 // Delete `b` mid-batch; the next rounds re-create it.
                 let s = next();
-                events.push(Event {
-                    event_id: format!("evt-{prefix}-b-{s}"),
-                    ..ev(&format!("{prefix}Del"), s, json!({ "id": "b" }))
+                events.push({
+                    let mut o = ev(&format!("{prefix}Del"), s, json!({ "id": "b" }));
+                    o.event_id = format!("evt-{prefix}-b-{s}");
+                    o
                 });
             }
         }
         // And delete `c` at the end, for good.
         let s = next();
-        events.push(Event {
-            event_id: format!("evt-{prefix}-c-{s}"),
-            ..ev(&format!("{prefix}Del"), s, json!({ "id": "c" }))
+        events.push({
+            let mut o = ev(&format!("{prefix}Del"), s, json!({ "id": "c" }));
+            o.event_id = format!("evt-{prefix}-c-{s}");
+            o
         });
         events
     };
@@ -837,13 +841,14 @@ fn pg_bulk_failure_fails_the_commit_and_per_event_isolates_it() -> R {
     let events: Vec<Event> = ["ok1", "bad", "ok2"]
         .iter()
         .enumerate()
-        .map(|(i, name)| Event {
-            event_id: format!("evt-F-{i}"),
-            ..ev(
+        .map(|(i, name)| {
+            let mut o = ev(
                 "FUp",
                 1,
                 serde_json::json!({ "id": format!("u{i}"), "name": name }),
-            )
+            );
+            o.event_id = format!("evt-F-{i}");
+            o
         })
         .collect();
     let refs: Vec<&Event> = events.iter().collect();
@@ -867,10 +872,10 @@ fn pg_bulk_failure_fails_the_commit_and_per_event_isolates_it() -> R {
 
 /// `t`'s shadow table, and the guard lanes a rebuild of `t` would swap.
 fn shadow_of(t: &str) -> [kulyrax_core::adapter::sql::exec::ShadowTable; 1] {
-    [kulyrax_core::adapter::sql::exec::ShadowTable {
-        table: t.to_string(),
-        shadow: format!("{t}__kulyrax_rebuild"),
-    }]
+    [kulyrax_core::adapter::sql::exec::ShadowTable::new(
+        t,
+        format!("{t}__kulyrax_rebuild"),
+    )]
 }
 
 fn pg_exists(url: &str, table: &str) -> Result<bool, Box<dyn std::error::Error>> {

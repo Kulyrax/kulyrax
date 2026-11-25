@@ -39,11 +39,11 @@ fn the_factory_error_hides_the_secrets() {
         capabilities: None,
         depends_on: Vec::new(),
     };
-    let ctx = AdapterBuildContext {
-        mappings: Default::default(),
-        upcasters: Arc::new(UpcasterRegistry::new()),
-        migration_policy: MigrationPolicy::default(),
-    };
+    let ctx = AdapterBuildContext::new(
+        Default::default(),
+        Arc::new(UpcasterRegistry::new()),
+        MigrationPolicy::default(),
+    );
     let err = factory(&entry, &ctx)
         .err()
         .expect("an unparseable uri is refused");

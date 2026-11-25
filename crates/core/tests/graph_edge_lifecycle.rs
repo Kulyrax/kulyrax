@@ -14,25 +14,21 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 fn followed(seq: u64) -> Event {
-    Event {
-        event_id: format!("evt-follow-{seq}"),
-        event_type: "UserFollowed".to_string(),
-        payload: r#"{ "follower": "u1", "followee": "u2", "ts": "t1" }"#.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-follow-{seq}"),
+        "UserFollowed".to_string(),
+        seq,
+        r#"{ "follower": "u1", "followee": "u2", "ts": "t1" }"#.to_string(),
+    )
 }
 
 fn unfollowed(seq: u64) -> Event {
-    Event {
-        event_id: format!("evt-unfollow-{seq}"),
-        event_type: "UserUnfollowed".to_string(),
-        payload: r#"{ "follower": "u1", "followee": "u2" }"#.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-unfollow-{seq}"),
+        "UserUnfollowed".to_string(),
+        seq,
+        r#"{ "follower": "u1", "followee": "u2" }"#.to_string(),
+    )
 }
 
 fn mappings() -> HashMap<String, GraphMapping> {

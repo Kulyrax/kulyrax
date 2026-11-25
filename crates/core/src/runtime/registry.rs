@@ -22,6 +22,7 @@ use crate::source::{EventSource, SourceError};
 use crate::upcast::UpcasterRegistry;
 
 /// What a source factory needs beyond its own config entry.
+#[non_exhaustive]
 pub struct SourceBuildContext {
     /// The config file's directory: relative paths in the entry resolve
     /// against it, as for the built-in sources.
@@ -94,6 +95,7 @@ impl SourceRegistry {
 
 /// Every loaded projection mapping, one table per storage kind.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct MappingSet {
     pub sql: HashMap<String, SqlMapping>,
     pub document: HashMap<String, DocumentMapping>,
@@ -103,6 +105,7 @@ pub struct MappingSet {
 
 /// What a factory needs beyond its own config entry. Handed over at build
 /// time, so a factory can be registered before or after mappings load.
+#[non_exhaustive]
 pub struct AdapterBuildContext {
     pub mappings: MappingSet,
     pub upcasters: Arc<UpcasterRegistry>,
@@ -153,6 +156,35 @@ impl AdapterRegistry {
     ) -> Option<Result<Box<dyn StorageAdapter>, ConfigError>> {
         let factory = self.factories.get(&entry.type_name)?;
         Some(factory(entry, ctx))
+    }
+}
+
+impl AdapterBuildContext {
+    /// What a factory is handed: the loaded mappings, the upcasters and the
+    /// migration policy. `AdapterBuildContext` is `#[non_exhaustive]`; build
+    /// it with this (Kulyrax does, and a factory's tests can).
+    pub fn new(
+        mappings: MappingSet,
+        upcasters: Arc<UpcasterRegistry>,
+        migration_policy: MigrationPolicy,
+    ) -> Self {
+        Self {
+            mappings,
+            upcasters,
+            migration_policy,
+        }
+    }
+}
+
+impl SourceBuildContext {
+    /// What a source factory is handed: the config file's directory, and
+    /// whether this is only an inspection (`kulyrax sources`).
+    /// `SourceBuildContext` is `#[non_exhaustive]`; build it with this.
+    pub fn new(base_dir: impl Into<PathBuf>, inspect: bool) -> Self {
+        Self {
+            base_dir: base_dir.into(),
+            inspect,
+        }
     }
 }
 

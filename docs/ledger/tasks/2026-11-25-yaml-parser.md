@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # Replace serde_yaml (1.0 plan, step 3)
@@ -35,7 +35,7 @@ unsafe code, YAML 1.1 vs 1.2 parsing, line numbers in errors, and
   recorded: [2026-11-25-yaml-parser-3x](2026-11-25-yaml-parser-3x.md).
 - [x] C7: serde_yaml removed, along with the `unsafe-libyaml` audit ignore.
 - [x] Every difference goes in the release notes.
-- [ ] Four gates green; every Docker suite green; PR merged.
+- [x] Four gates green; every Docker suite green; PR merged: #27, `3df837c` (CI 16/16).
 
 ## Constraints and assumptions
 
@@ -83,7 +83,7 @@ Implementation (runbook C2–C7), on `docs/yaml-parser` from `d04ca00`:
 | Real errors from the binary | `kulyrax run` with a bad config and a bad mapping, 1.0 and 0.12.1 | 1.0 printed the error with `Debug`, so the snippet came out as `\n` escapes. Fixed: `main` prints with `Display`, exit code still 1. A config error inside an adapter entry points at the entry (`adapters[0]`, its first line), as 0.12's did (`adapters`, line 5). A mapping error points at the field and line. Both samples are in the release notes |
 | Golden mode over every Docker suite | `cargo test -p <crate> --features kulyrax-core/yaml-golden -- --test-threads=1`, every backend URL set (Neo4j on this branch's 7688), and `KULYRAX_V0121_BIN` | postgres 30, mysql 25, redis 14, mongodb 21, elasticsearch 11, neo4j 20, source-postgres 14, ingest 14, cli 32, all passed. **1,342 comparisons across 150 processes: 1,342 same, 0 different, 0 malformed** |
 | clippy, first run | `cargo clippy --workspace --all-targets -- -D warnings` | `result_large_err`: `YamlError` was 160 bytes. Fixed: the parser's error is boxed. Then clean, with and without `yaml-golden` |
-| Golden stage in CI | PR #27 at `b76405b` (serde_yaml still present; `yaml_golden.rs` with both halves) | see the CI row below |
+| CI on PR #27 | the PR's checks | golden stage `b76405b` (serde_yaml still present, `yaml_golden.rs` with both halves): 15/15 green. Removal `0574fab`: 16/16, including the new `YAML parser only in kulyrax_core::yaml`. Merged as `3df837c` |
 | C7: serde_yaml gone | `grep -c 'name = "serde_yaml"'` and `"unsafe-libyaml"` in every lockfile | 0 in `Cargo.lock` and each example's lockfile |
 | C5 check, locally | the CI job's grep | no hits outside the allowlist |
 | `cargo audit` without the `unsafe-libyaml` ignore | `cargo audit --file <lock> --deny unsound --deny unmaintained --deny yanked`, every lockfile | exit 0 for all 7 |

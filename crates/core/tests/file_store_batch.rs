@@ -35,14 +35,12 @@ fn ev(sequence: u64, event_type: &str, id: &str, field: Option<(&str, &str)>) ->
     if let Some((k, v)) = field {
         payload[k] = serde_json::Value::String(v.to_string());
     }
-    Event {
-        event_id: format!("{event_type}-{id}-{sequence}"),
-        event_type: event_type.to_string(),
-        payload: payload.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
+    Event::new(
+        format!("{event_type}-{id}-{sequence}"),
+        event_type.to_string(),
         sequence,
-    }
+        payload.to_string(),
+    )
 }
 
 /// Several entities, each taken through most of the guard rules, with

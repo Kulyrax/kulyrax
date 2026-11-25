@@ -470,11 +470,7 @@ impl SqlTxn for MySqlTxn<'_> {
                 (table.to_string(), entity_key.to_string(), facet.to_string()),
             )
             .map_err(my_err)?;
-        Ok(row.map(|(seq, deleted, permanent)| GuardState {
-            last_sequence: seq as u64,
-            deleted,
-            permanent,
-        }))
+        Ok(row.map(|(seq, deleted, permanent)| GuardState::new(seq as u64, deleted, permanent)))
     }
 
     fn has_guard_rows(&mut self, table: &str) -> Result<bool, SqlError> {
@@ -525,11 +521,7 @@ impl SqlTxn for MySqlTxn<'_> {
                 .exec(sql.as_str(), mysql::Params::Positional(params))
                 .map_err(my_err)?;
             for (key, facet, seq, deleted, permanent) in rows {
-                let state = GuardState {
-                    last_sequence: seq as u64,
-                    deleted,
-                    permanent,
-                };
+                let state = GuardState::new(seq as u64, deleted, permanent);
                 found.insert((key, facet), state);
             }
         }
@@ -684,11 +676,11 @@ mod tests {
             capabilities: None,
             depends_on: Vec::new(),
         };
-        let ctx = AdapterBuildContext {
-            mappings: Default::default(),
-            upcasters: Arc::new(UpcasterRegistry::new()),
-            migration_policy: MigrationPolicy::default(),
-        };
+        let ctx = AdapterBuildContext::new(
+            Default::default(),
+            Arc::new(UpcasterRegistry::new()),
+            MigrationPolicy::default(),
+        );
         factory(&entry, &ctx)
     }
 

@@ -25,6 +25,7 @@ use crate::execution::stages::{Stage, timed};
 /// unchanged); named-facet lanes live in `facets`. Serialized as-is for both the
 /// file sidecar and the Redis guard key — no backend gets its own guard schema.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct KvGuard {
     #[serde(default)]
     pub last_sequence: u64,
@@ -40,6 +41,7 @@ pub struct KvGuard {
 
 /// One named-facet lane inside a [`KvGuard`] (Phase 15.2).
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct KvFacetGuard {
     pub last_sequence: u64,
     pub last_event_id: String,
@@ -125,6 +127,7 @@ pub trait KvBackend {
 /// What [`project`] resolved to — the adapter maps this onto an `AdapterResult`
 /// with the version metadata it already holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum KvOutcome {
     Created,
     Updated,
@@ -134,6 +137,7 @@ pub enum KvOutcome {
 
 /// Everything [`project`] needs from the runtime builder — the resolved
 /// identity, value, and the mapping's gating fields.
+#[non_exhaustive]
 pub struct KvPlan {
     pub namespace: String,
     pub entity_key: String,
@@ -281,4 +285,21 @@ pub fn project<B: KvBackend>(
         WriteDecision::Update => KvOutcome::Updated,
         _ => unreachable!("skip and delete decisions returned above"),
     })
+}
+
+/// A projection, ready to write: what every key-value backend does with the
+/// output of the key-value runtime. `KvPlan` is `#[non_exhaustive]`; build it
+/// this way.
+impl From<crate::adapter::keyvalue::runtime::KvProjection> for KvPlan {
+    fn from(p: crate::adapter::keyvalue::runtime::KvProjection) -> Self {
+        Self {
+            namespace: p.namespace,
+            entity_key: p.entity_key,
+            value: p.value,
+            on_existing: p.on_existing,
+            operation: p.operation,
+            permanent: p.permanent,
+            facet: p.facet,
+        }
+    }
 }

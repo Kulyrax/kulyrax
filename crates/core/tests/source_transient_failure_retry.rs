@@ -82,12 +82,14 @@ fn transient_failure_is_retried_and_committed_once() {
 
     let src: Box<dyn EventSource> =
         Box::new(DirectorySource::new("dir", &events, dir.path().join("state")).unwrap());
-    let opts = SourceRunOptions {
-        mode: RunMode::Once,
-        max_batch: 256,
-        retry_budget: 3,
-        max_batch_delay: std::time::Duration::ZERO,
-        dlq_dir: None,
+    let opts = {
+        let mut o = SourceRunOptions::default();
+        o.dlq_dir = None;
+        o.max_batch = 256;
+        o.max_batch_delay = std::time::Duration::ZERO;
+        o.mode = RunMode::Once;
+        o.retry_budget = 3;
+        o
     };
     let stop = AtomicBool::new(false);
     let report = run_sources_with_adapters(
@@ -154,12 +156,14 @@ fn failure_in_the_fallback_is_retried() {
     };
     let src: Box<dyn EventSource> =
         Box::new(DirectorySource::new("dir", &events, dir.path().join("state")).unwrap());
-    let opts = SourceRunOptions {
-        mode: RunMode::Once,
-        max_batch: 256,
-        retry_budget: 3,
-        max_batch_delay: std::time::Duration::ZERO,
-        dlq_dir: None,
+    let opts = {
+        let mut o = SourceRunOptions::default();
+        o.dlq_dir = None;
+        o.max_batch = 256;
+        o.max_batch_delay = std::time::Duration::ZERO;
+        o.mode = RunMode::Once;
+        o.retry_budget = 3;
+        o
     };
     let report = run_sources_with_adapters(
         &config(&db),

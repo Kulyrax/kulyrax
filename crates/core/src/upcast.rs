@@ -27,6 +27,7 @@ pub trait Upcaster: Send + Sync {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum UpcastError {
     /// An upcaster's transform function failed.
     UpcastFailed {

@@ -9,19 +9,16 @@ use kulyrax_core::adapter::graph::mapping::GraphMapping;
 use kulyrax_core::adapter::keyvalue::mapping::KvMapping;
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::runtime::config::{
-    AdapterCapability, AdapterConfig, GraphAdapterConfig, GraphConfig, KulyraxConfig, RoutingConfig,
+    AdapterCapability, AdapterConfig, GraphAdapterConfig, GraphConfig, KulyraxConfig,
 };
 use kulyrax_core::validate_projection_config;
 
 use std::collections::HashMap;
 
 fn config_with_graph_capabilities(capabilities: Option<Vec<AdapterCapability>>) -> KulyraxConfig {
-    KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "r.json".into(),
-        },
-        adapters: vec![AdapterConfig::Graph(GraphAdapterConfig {
+    KulyraxConfig::new(
+        "r.json",
+        vec![AdapterConfig::Graph(GraphAdapterConfig {
             id: "graph-social".into(),
             priority: 10,
             config: GraphConfig {
@@ -30,10 +27,7 @@ fn config_with_graph_capabilities(capabilities: Option<Vec<AdapterCapability>>) 
             capabilities,
             depends_on: vec![],
         })],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    }
+    )
 }
 
 fn delete_node_mapping() -> GraphMapping {

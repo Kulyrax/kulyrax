@@ -51,6 +51,7 @@ pub trait ShadowRebuild {
 
 /// What [`rebuild`] did.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct RebuildReport {
     /// The tables rebuilt and swapped in.
     pub tables: Vec<String>,

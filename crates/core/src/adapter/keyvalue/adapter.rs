@@ -4,6 +4,7 @@ use std::fmt;
 /// to `DocumentError` / `SqlError` — same four cases, same meaning, just
 /// named for the third storage kind (Phase 14).
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum KvError {
     /// No mapping exists for the given event type
     MappingNotFound(String),

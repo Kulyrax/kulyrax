@@ -18,6 +18,7 @@ use crate::routing::StorageKind;
 /// Overall status of a single event dispatch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum ExecutionStatus {
     Succeeded,
     Failed,
@@ -29,6 +30,7 @@ pub enum ExecutionStatus {
 /// from a stale-sequence rejection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum AdapterOutcome {
     /// A new entity was written (creation, or a resurrection — Phase 13.4).
     Created,
@@ -47,6 +49,7 @@ pub enum AdapterOutcome {
 /// itself, not here (Phase 12.1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum AdapterReportError {
     WriteFailed { message: String },
     UnsupportedVersion { message: String },
@@ -81,6 +84,7 @@ impl From<&AdapterError> for AdapterReportError {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ExecutionReport {
     /// Schema version for forward evolution.
     #[serde(default = "default_report_version")]
@@ -203,6 +207,7 @@ impl ExecutionReport {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct AdapterExecutionReport {
     /// Adapter id from config.
     pub adapter_id: String,

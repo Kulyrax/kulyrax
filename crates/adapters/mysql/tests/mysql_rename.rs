@@ -85,14 +85,12 @@ fn adapter(url: &str) -> MySqlAdapter {
 }
 
 fn ev(id: &str, seq: u64) -> Event {
-    Event {
-        event_id: format!("e-{id}-{seq}"),
-        event_type: "U".into(),
-        payload: serde_json::json!({ "id": id, "v": seq }).to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("e-{id}-{seq}"),
+        "U",
+        seq,
+        serde_json::json!({ "id": id, "v": seq }).to_string(),
+    )
 }
 
 fn stale(o: &AdapterOutcome) -> bool {

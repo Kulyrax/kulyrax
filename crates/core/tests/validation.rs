@@ -4,7 +4,7 @@ use kulyrax_core::adapter::document::mapping::DocumentMapping;
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::runtime::config::{
     AdapterCapability, AdapterConfig, CustomAdapterConfig, FileAdapterConfig, FileConfig,
-    KulyraxConfig, RoutingConfig, SqliteAdapterConfig, SqliteConfig,
+    KulyraxConfig, SqliteAdapterConfig, SqliteConfig,
 };
 use kulyrax_core::{
     ValidationIssue, ValidationReport, validate_projection_config,
@@ -14,12 +14,9 @@ use kulyrax_core::{
 use std::collections::HashMap;
 
 fn base_config() -> KulyraxConfig {
-    KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "r.json".into(),
-        },
-        adapters: vec![
+    KulyraxConfig::new(
+        "r.json",
+        vec![
             AdapterConfig::Sqlite(SqliteAdapterConfig {
                 id: "sql-primary".into(),
                 priority: 10,
@@ -39,10 +36,7 @@ fn base_config() -> KulyraxConfig {
                 depends_on: vec![],
             }),
         ],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    }
+    )
 }
 
 fn sql_uc() -> SqlMapping {
@@ -273,12 +267,9 @@ fn rejects_unrouted_sql_mapping() {
 
 #[test]
 fn rejects_sql_mapping_when_route_has_only_file_adapters() {
-    let config = KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "r.json".into(),
-        },
-        adapters: vec![AdapterConfig::File(FileAdapterConfig {
+    let config = KulyraxConfig::new(
+        "r.json",
+        vec![AdapterConfig::File(FileAdapterConfig {
             id: "doc-readmodel".into(),
             priority: 10,
             config: FileConfig {
@@ -287,10 +278,7 @@ fn rejects_sql_mapping_when_route_has_only_file_adapters() {
             capabilities: None,
             depends_on: vec![],
         })],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    };
+    );
     config.validate().unwrap();
     let mut sql = HashMap::new();
     let mut sm = sql_uc();
@@ -316,12 +304,9 @@ fn rejects_sql_mapping_when_route_has_only_file_adapters() {
 
 #[test]
 fn rejects_document_mapping_without_file_on_route() {
-    let config = KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "r.json".into(),
-        },
-        adapters: vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
+    let config = KulyraxConfig::new(
+        "r.json",
+        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
             id: "sql-primary".into(),
             priority: 10,
             config: SqliteConfig {
@@ -330,10 +315,7 @@ fn rejects_document_mapping_without_file_on_route() {
             capabilities: None,
             depends_on: vec![],
         })],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    };
+    );
     config.validate().unwrap();
     let mut sql = HashMap::new();
     let mut sm = sql_uc();
@@ -417,12 +399,9 @@ fn rejects_duplicate_adapter_on_same_route() {
 
 #[test]
 fn rejects_duplicate_adapter_ids_in_config() {
-    let config = KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "r.json".into(),
-        },
-        adapters: vec![
+    let config = KulyraxConfig::new(
+        "r.json",
+        vec![
             AdapterConfig::Sqlite(SqliteAdapterConfig {
                 id: "sql-primary".into(),
                 priority: 10,
@@ -451,10 +430,7 @@ fn rejects_duplicate_adapter_ids_in_config() {
                 depends_on: vec![],
             }),
         ],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    };
+    );
     let mut sql = HashMap::new();
     sql.insert("UserCreated".to_string(), sql_uc());
     let mut doc = HashMap::new();
@@ -848,12 +824,9 @@ fn phase15_rejects_facet_identity_that_differs_from_the_entity() {
 }
 
 fn config_with_custom_adapter(type_name: &str) -> KulyraxConfig {
-    KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "routing.yaml".into(),
-        },
-        adapters: vec![AdapterConfig::Custom(CustomAdapterConfig {
+    KulyraxConfig::new(
+        "routing.yaml",
+        vec![AdapterConfig::Custom(CustomAdapterConfig {
             type_name: type_name.into(),
             id: "custom".into(),
             priority: 10,
@@ -861,10 +834,7 @@ fn config_with_custom_adapter(type_name: &str) -> KulyraxConfig {
             capabilities: None,
             depends_on: vec![],
         })],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    }
+    )
 }
 
 fn routing_to_custom() -> HashMap<String, Vec<String>> {

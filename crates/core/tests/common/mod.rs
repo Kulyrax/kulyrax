@@ -5,19 +5,16 @@
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::event::Event;
 use kulyrax_core::runtime::config::{
-    AdapterConfig, KulyraxConfig, RoutingConfig, SqliteAdapterConfig, SqliteConfig,
+    AdapterConfig, KulyraxConfig, SqliteAdapterConfig, SqliteConfig,
 };
 
 use std::collections::HashMap;
 use std::path::Path;
 
 pub fn config(db_path: &Path) -> KulyraxConfig {
-    KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "routing.yaml".into(),
-        },
-        adapters: vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
+    KulyraxConfig::new(
+        "routing.yaml",
+        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
             id: "sql-primary".into(),
             priority: 10,
             config: SqliteConfig {
@@ -26,10 +23,7 @@ pub fn config(db_path: &Path) -> KulyraxConfig {
             capabilities: None,
             depends_on: vec![],
         })],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    }
+    )
 }
 
 pub fn routing() -> HashMap<String, Vec<String>> {
@@ -57,14 +51,12 @@ pub fn init_db(db_path: &Path) {
 }
 
 pub fn user_event(sequence: u64, id: &str, name: &str) -> Event {
-    Event {
-        event_id: format!("evt-{id}-{sequence}"),
-        event_type: "UserUpserted".to_string(),
-        payload: format!(r#"{{ "id": "{id}", "name": "{name}" }}"#),
-        metadata: HashMap::new(),
-        version: 1,
+    Event::new(
+        format!("evt-{id}-{sequence}"),
+        "UserUpserted".to_string(),
         sequence,
-    }
+        format!(r#"{{ "id": "{id}", "name": "{name}" }}"#),
+    )
 }
 
 pub fn write_event_file(dir: &Path, name: &str, event: &Event) {
@@ -78,12 +70,14 @@ pub fn run_once(
     sources: Vec<Box<dyn kulyrax_core::source::EventSource>>,
     opts: Option<kulyrax_core::SourceRunOptions>,
 ) -> Result<kulyrax_core::SourceRunReport, kulyrax_core::SourceError> {
-    let opts = opts.unwrap_or(kulyrax_core::SourceRunOptions {
-        mode: kulyrax_core::RunMode::Once,
-        max_batch: 256,
-        retry_budget: 2,
-        max_batch_delay: std::time::Duration::ZERO,
-        dlq_dir: None,
+    let opts = opts.unwrap_or({
+        let mut o = kulyrax_core::SourceRunOptions::default();
+        o.dlq_dir = None;
+        o.max_batch = 256;
+        o.max_batch_delay = std::time::Duration::ZERO;
+        o.mode = kulyrax_core::RunMode::Once;
+        o.retry_budget = 2;
+        o
     });
     let stop = std::sync::atomic::AtomicBool::new(false);
     kulyrax_core::run_sources(

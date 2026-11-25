@@ -38,12 +38,14 @@ fn run(root: &Path, dlq: &Path, sources: Vec<Box<dyn EventSource>>) -> u64 {
         HashMap::new(),
         HashMap::new(),
         sources,
-        &SourceRunOptions {
-            mode: RunMode::Once,
-            max_batch: 100,
-            retry_budget: 0,
-            max_batch_delay: std::time::Duration::ZERO,
-            dlq_dir: Some(dlq.to_path_buf()),
+        &{
+            let mut o = SourceRunOptions::default();
+            o.dlq_dir = Some(dlq.to_path_buf());
+            o.max_batch = 100;
+            o.max_batch_delay = std::time::Duration::ZERO;
+            o.mode = RunMode::Once;
+            o.retry_budget = 0;
+            o
         },
         &AtomicBool::new(false),
     )
@@ -134,10 +136,10 @@ impl EventSource for Once {
 }
 
 fn event(id: &str, position: &str) -> SourcedEvent {
-    SourcedEvent {
-        event: serde_json::from_str(&line(id, 7)).expect("event"),
-        position: SourcePosition(position.into()),
-    }
+    SourcedEvent::new(
+        serde_json::from_str(&line(id, 7)).expect("event"),
+        SourcePosition(position.into()),
+    )
 }
 
 /// The same event dead-lettered twice (redelivered after a crash, or replayed)

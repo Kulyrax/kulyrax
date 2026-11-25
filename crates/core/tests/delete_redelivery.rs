@@ -26,25 +26,21 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 fn create_event() -> Event {
-    Event {
-        event_id: "evt-create".to_string(),
-        event_type: "UserCreated".to_string(),
-        payload: r#"{ "id": "u1", "state": "s1" }"#.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: 1,
-    }
+    Event::new(
+        "evt-create".to_string(),
+        "UserCreated".to_string(),
+        1,
+        r#"{ "id": "u1", "state": "s1" }"#.to_string(),
+    )
 }
 
 fn delete_event(sequence: u64) -> Event {
-    Event {
-        event_id: format!("evt-delete-{sequence}"),
-        event_type: "UserDeleted".to_string(),
-        payload: r#"{ "id": "u1" }"#.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
+    Event::new(
+        format!("evt-delete-{sequence}"),
+        "UserDeleted".to_string(),
         sequence,
-    }
+        r#"{ "id": "u1" }"#.to_string(),
+    )
 }
 
 #[test]

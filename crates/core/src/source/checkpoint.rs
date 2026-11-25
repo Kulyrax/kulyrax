@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use super::{SourceError, SourcePosition};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Checkpoint {
     pub position: SourcePosition,
     /// ISO-8601-ish wall time the commit was written (observability only).

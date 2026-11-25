@@ -10,20 +10,17 @@ use kulyrax_core::source::EventSource;
 use kulyrax_core::source::directory::DirectorySource;
 use kulyrax_core::{RunMode, SourceRunOptions, StoppedReason};
 
-use std::collections::HashMap;
 use tempfile::tempdir;
 
 /// A `UserUpserted` event missing `payload.name` → the SQL mapping's
 /// `resolve_path` fails deterministically, every time.
 fn poison(seq: u64, id: &str) -> Event {
-    Event {
-        event_id: format!("evt-poison-{seq}"),
-        event_type: "UserUpserted".to_string(),
-        payload: format!(r#"{{ "id": "{id}" }}"#),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-poison-{seq}"),
+        "UserUpserted".to_string(),
+        seq,
+        format!(r#"{{ "id": "{id}" }}"#),
+    )
 }
 
 #[test]
@@ -40,12 +37,14 @@ fn poison_event_is_dlqd_and_batch_commits() {
 
     let src: Box<dyn EventSource> =
         Box::new(DirectorySource::new("dir", &events, dir.path().join("state")).unwrap());
-    let opts = SourceRunOptions {
-        mode: RunMode::Once,
-        max_batch: 256,
-        retry_budget: 1,
-        max_batch_delay: std::time::Duration::ZERO,
-        dlq_dir: Some(dlq.clone()),
+    let opts = {
+        let mut o = SourceRunOptions::default();
+        o.dlq_dir = Some(dlq.clone());
+        o.max_batch = 256;
+        o.max_batch_delay = std::time::Duration::ZERO;
+        o.mode = RunMode::Once;
+        o.retry_budget = 1;
+        o
     };
     let report = run_once(&db, vec![src], Some(opts)).unwrap();
 

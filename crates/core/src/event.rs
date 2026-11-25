@@ -7,6 +7,7 @@ fn default_event_version() -> u32 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Event {
     pub event_id: String,
     pub event_type: String,
@@ -25,6 +26,38 @@ pub struct Event {
 }
 
 impl Event {
+    /// An event with no metadata, at payload schema version 1. Add the rest with
+    /// [`with_metadata`](Self::with_metadata) and [`with_version`](Self::with_version).
+    /// `Event` is `#[non_exhaustive]`: build it with this, not a struct literal,
+    /// so a field added later is not a breaking change.
+    pub fn new(
+        event_id: impl Into<String>,
+        event_type: impl Into<String>,
+        sequence: u64,
+        payload: impl Into<String>,
+    ) -> Self {
+        Self {
+            event_id: event_id.into(),
+            event_type: event_type.into(),
+            payload: payload.into(),
+            metadata: HashMap::new(),
+            version: default_event_version(),
+            sequence,
+        }
+    }
+
+    /// The event with `metadata` in place of its current metadata.
+    pub fn with_metadata(mut self, metadata: HashMap<String, String>) -> Self {
+        self.metadata = metadata;
+        self
+    }
+
+    /// The event at payload schema version `version`.
+    pub fn with_version(mut self, version: u32) -> Self {
+        self.version = version;
+        self
+    }
+
     pub fn id(&self) -> &str {
         &self.event_id
     }

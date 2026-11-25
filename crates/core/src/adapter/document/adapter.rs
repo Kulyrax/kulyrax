@@ -2,6 +2,7 @@ use std::fmt;
 
 /// Errors related to document projection and writing
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DocumentError {
     /// No mapping exists for the given event type
     MappingNotFound(String),

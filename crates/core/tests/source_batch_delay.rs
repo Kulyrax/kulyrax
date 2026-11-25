@@ -45,9 +45,11 @@ impl EventSource for Trickle {
         let start = self.next;
         self.next += n;
         Ok((start..start + n)
-            .map(|i| SourcedEvent {
-                event: user_event(1, &format!("u{i}"), "x"),
-                position: SourcePosition(format!("{i:06}")),
+            .map(|i| {
+                SourcedEvent::new(
+                    user_event(1, &format!("u{i}"), "x"),
+                    SourcePosition(format!("{i:06}")),
+                )
             })
             .collect())
     }
@@ -97,12 +99,14 @@ fn poll_gaps(mode: RunMode, per_poll: usize, max_batch: usize, delay: Duration) 
         routing(),
         vec![Box::new(Accept)],
         vec![Box::new(source)],
-        &SourceRunOptions {
-            mode,
-            max_batch,
-            max_batch_delay: delay,
-            retry_budget: 0,
-            dlq_dir: None,
+        &{
+            let mut o = SourceRunOptions::default();
+            o.dlq_dir = None;
+            o.max_batch = max_batch;
+            o.max_batch_delay = delay;
+            o.mode = mode;
+            o.retry_budget = 0;
+            o
         },
         &stop,
     )

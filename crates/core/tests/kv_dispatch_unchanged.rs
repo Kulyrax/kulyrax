@@ -46,14 +46,7 @@ fn test_routing() -> HashMap<String, Vec<AdapterId>> {
 }
 
 fn test_event() -> Event {
-    Event {
-        event_id: "evt-1".into(),
-        event_type: "UserCacheSynced".into(),
-        payload: "{}".into(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: 1,
-    }
+    Event::new("evt-1", "UserCacheSynced", 1, "{}")
 }
 
 #[test]
