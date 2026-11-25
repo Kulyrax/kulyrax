@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # Review F-05: the source-position ordering contract (runbook R3)
@@ -46,7 +46,7 @@ Decision: [2026-11-25-source-position-contract](../decisions/2026-11-25-source-p
   - the `SourcePosition` and `commit()` docs.
 - [x] 0.12.2 release notes: behaviour change, the empty-position warning,
   `Ord` deprecation, fixes.
-- [ ] Gates and every Docker suite green; CI green; merged.
+- [x] Gates and every Docker suite green; CI green (13/13); merged: #24, `a24d440`.
 - Carried to Phase D (D1/D2):
   - refuse empty gRPC positions with `InvalidArgument`;
   - remove `PartialOrd`/`Ord` from `SourcePosition`;

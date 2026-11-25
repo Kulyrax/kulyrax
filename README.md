@@ -206,7 +206,7 @@ database backend.
 
 ## Status
 
-Latest release notes: **[`RELEASES/v0.12.1.md`](RELEASES/v0.12.1.md)** (a security release; see its Security section).
+Latest release notes: **[`RELEASES/v0.12.2.md`](RELEASES/v0.12.2.md)** (behaviour changes from the 1.0 review; read them before you upgrade). The last security release is [`v0.12.1`](RELEASES/v0.12.1.md).
 
 Kulyrax is in an **alpha** phase — core architecture and execution semantics are stable,
 but public APIs may still evolve. Intended for early feedback, not production
