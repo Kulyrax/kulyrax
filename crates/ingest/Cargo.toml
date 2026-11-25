@@ -28,7 +28,7 @@ protoc-bin-vendored = "3"
 kulyrax-client = { workspace = true }
 serde_json = "1.0"
 serde_yaml = "0.9"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 tempfile = "3"
 
 # For grpc_dlq_count_reflects_a_real_cross_backend_failure: a genuine

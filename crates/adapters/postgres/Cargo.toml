@@ -29,5 +29,5 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 # For pg_backend.rs's sql_cross_backend convergence test against the
 # in-tree SQLite adapter — a dev-only, one-directional dependency back onto
 # kulyrax-core (see Phase 28's plan notes: this is not a cycle).
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 tempfile = "3"

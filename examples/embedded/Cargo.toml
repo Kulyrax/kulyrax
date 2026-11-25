@@ -7,4 +7,4 @@ publish = false
 [dependencies]
 kulyrax-core = { path = "../../crates/core" }
 serde_yaml = "0.9"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
