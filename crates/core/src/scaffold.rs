@@ -107,7 +107,14 @@ impl fmt::Display for InitError {
     }
 }
 
-impl std::error::Error for InitError {}
+impl std::error::Error for InitError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            InitError::Io(e) => Some(e),
+            InitError::WouldOverwrite(_) => None,
+        }
+    }
+}
 
 impl From<io::Error> for InitError {
     fn from(e: io::Error) -> Self {

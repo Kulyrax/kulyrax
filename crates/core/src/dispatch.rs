@@ -4,7 +4,7 @@ use std::time::SystemTime;
 use crate::adapter::{AdapterOutcome, StorageAdapter};
 use crate::event::Event;
 use crate::execution::stages::{Stage, timed};
-use crate::execution::{AdapterExecutionReport, AdapterReportError, ExecutionReport};
+use crate::execution::{AdapterExecutionReport, AdapterFailure, ExecutionReport};
 use crate::routing::{AdapterId, StorageKind, route_with_rules};
 use crate::runtime::config::FailurePolicy;
 use crate::runtime::dependency_graph::{
@@ -26,7 +26,7 @@ fn dependency_order_failure_report(
     .with_source_version(event.version());
     let adapter_report =
         AdapterExecutionReport::new("_dispatch".to_string(), StorageKind::Sql, started_at)
-            .finish_failed(started_at, AdapterReportError::WriteFailed { message });
+            .finish_failed(started_at, AdapterFailure::WriteFailed { message });
     report.push_adapter_report(adapter_report);
     report.finish(started_at)
 }

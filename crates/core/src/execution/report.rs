@@ -44,35 +44,35 @@ pub enum AdapterOutcome {
     Failed,
 }
 
-/// Structured error for adapter execution. Populated only when `outcome` is
+/// Why an adapter failed, as the report records it. Populated only when `outcome` is
 /// [`AdapterOutcome::Failed`] — skips carry their reason on the outcome
 /// itself, not here (Phase 12.1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum AdapterReportError {
+pub enum AdapterFailure {
     WriteFailed { message: String },
     UnsupportedVersion { message: String },
 }
 
-impl From<AdapterError> for AdapterReportError {
+impl From<AdapterError> for AdapterFailure {
     fn from(e: AdapterError) -> Self {
         match e {
-            AdapterError::WriteFailed(msg) => AdapterReportError::WriteFailed { message: msg },
+            AdapterError::WriteFailed(msg) => AdapterFailure::WriteFailed { message: msg },
             AdapterError::UnsupportedVersion(msg) => {
-                AdapterReportError::UnsupportedVersion { message: msg }
+                AdapterFailure::UnsupportedVersion { message: msg }
             }
         }
     }
 }
 
-impl From<&AdapterError> for AdapterReportError {
+impl From<&AdapterError> for AdapterFailure {
     fn from(e: &AdapterError) -> Self {
         match e {
-            AdapterError::WriteFailed(msg) => AdapterReportError::WriteFailed {
+            AdapterError::WriteFailed(msg) => AdapterFailure::WriteFailed {
                 message: msg.clone(),
             },
-            AdapterError::UnsupportedVersion(msg) => AdapterReportError::UnsupportedVersion {
+            AdapterError::UnsupportedVersion(msg) => AdapterFailure::UnsupportedVersion {
                 message: msg.clone(),
             },
         }
@@ -227,7 +227,7 @@ pub struct AdapterExecutionReport {
     pub outcome: AdapterOutcome,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<AdapterReportError>,
+    pub error: Option<AdapterFailure>,
 
     /// Event payload version this adapter observed (Phase 10.3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -302,7 +302,7 @@ impl AdapterExecutionReport {
     }
 
     /// Finish with failure.
-    pub fn finish_failed(mut self, finished_at: SystemTime, error: AdapterReportError) -> Self {
+    pub fn finish_failed(mut self, finished_at: SystemTime, error: AdapterFailure) -> Self {
         self.finish_at(finished_at);
         self.outcome = AdapterOutcome::Failed;
         self.error = Some(error);
@@ -380,7 +380,7 @@ mod tests {
             AdapterExecutionReport::new("doc".to_string(), StorageKind::Document, started)
                 .finish_failed(
                     finished,
-                    AdapterReportError::WriteFailed {
+                    AdapterFailure::WriteFailed {
                         message: "boom".to_string(),
                     },
                 ),
@@ -407,7 +407,7 @@ mod tests {
                 .with_versions(Some(1), Some(2))
                 .finish_failed(
                     finished,
-                    AdapterReportError::UnsupportedVersion {
+                    AdapterFailure::UnsupportedVersion {
                         message: "no upcaster chain".to_string(),
                     },
                 ),
@@ -469,27 +469,27 @@ mod tests {
     fn adapter_error_conversions_preserve_message() {
         let err = AdapterError::WriteFailed("oops".to_string());
 
-        let by_ref: AdapterReportError = (&err).into();
+        let by_ref: AdapterFailure = (&err).into();
         assert_eq!(
             by_ref,
-            AdapterReportError::WriteFailed {
+            AdapterFailure::WriteFailed {
                 message: "oops".to_string()
             }
         );
 
-        let owned: AdapterReportError = err.into();
+        let owned: AdapterFailure = err.into();
         assert_eq!(
             owned,
-            AdapterReportError::WriteFailed {
+            AdapterFailure::WriteFailed {
                 message: "oops".to_string()
             }
         );
 
-        let unsupported: AdapterReportError =
+        let unsupported: AdapterFailure =
             AdapterError::UnsupportedVersion("no upcaster chain".to_string()).into();
         assert_eq!(
             unsupported,
-            AdapterReportError::UnsupportedVersion {
+            AdapterFailure::UnsupportedVersion {
                 message: "no upcaster chain".to_string()
             }
         );

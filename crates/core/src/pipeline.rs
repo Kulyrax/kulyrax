@@ -47,12 +47,17 @@ use std::sync::atomic::AtomicBool;
 #[non_exhaustive]
 pub enum PipelineError {
     Io(std::io::Error),
-    ConfigParse(String),
+    /// `config.yaml` did not parse; the error names the file, the field and
+    /// the line.
+    ConfigParse(crate::yaml::YamlError),
     Config(ConfigError),
-    Mapping(String),
-    Routing(String),
+    /// A mapping directory could not be loaded.
+    Mapping(LoadError),
+    /// The routing file could not be loaded.
+    Routing(LoadError),
     Validation(ValidationReport),
-    EventParse(String),
+    /// An event file (`run --event`) is not a valid event.
+    EventParse(serde_json::Error),
     Replay(ReplayLoadError),
     Source(SourceError),
     AdapterBuild(Vec<AdapterBuildFailure>),
@@ -67,12 +72,12 @@ impl fmt::Display for PipelineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PipelineError::Io(e) => write!(f, "{}", e),
-            PipelineError::ConfigParse(msg) => write!(f, "failed to parse config: {}", msg),
+            PipelineError::ConfigParse(e) => write!(f, "failed to parse config: {e}"),
             PipelineError::Config(e) => write!(f, "{}", e),
-            PipelineError::Mapping(msg) => write!(f, "{}", msg),
-            PipelineError::Routing(msg) => write!(f, "{}", msg),
+            PipelineError::Mapping(e) => write!(f, "{e}"),
+            PipelineError::Routing(e) => write!(f, "{e}"),
             PipelineError::Validation(report) => write!(f, "{}", report),
-            PipelineError::EventParse(msg) => write!(f, "failed to parse event: {}", msg),
+            PipelineError::EventParse(e) => write!(f, "failed to parse event: {e}"),
             PipelineError::Replay(e) => write!(f, "{}", e),
             PipelineError::Source(e) => write!(f, "{}", e),
             PipelineError::AdapterBuild(failures) => {
@@ -98,11 +103,56 @@ impl std::error::Error for PipelineError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             PipelineError::Io(e) => Some(e),
+            PipelineError::ConfigParse(e) => Some(e),
             PipelineError::Config(e) => Some(e),
+            PipelineError::Mapping(e) | PipelineError::Routing(e) => Some(e),
+            PipelineError::EventParse(e) => Some(e),
             PipelineError::Validation(e) => Some(e),
             PipelineError::Replay(e) => Some(e),
             PipelineError::Source(e) => Some(e),
             _ => None,
+        }
+    }
+}
+
+/// Why a mapping directory or the routing file could not be loaded. `Display`
+/// is the message alone; [`std::error::Error::source`] is the YAML or I/O
+/// error underneath, when there is one.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum LoadError {
+    /// A file that did not parse. `context` says which kind of file
+    /// (`Invalid sql mapping`); the error names the file, field and line.
+    Parse {
+        context: String,
+        source: crate::yaml::YamlError,
+    },
+    /// A file or directory that could not be read; `context` names it.
+    Read {
+        context: String,
+        source: std::io::Error,
+    },
+    /// Anything else: a duplicate mapping, a routing file with the wrong
+    /// extension.
+    Invalid(String),
+}
+
+impl fmt::Display for LoadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LoadError::Parse { context, source } => write!(f, "{context}: {source}"),
+            LoadError::Read { context, source } => write!(f, "{context}: {source}"),
+            LoadError::Invalid(message) => write!(f, "{message}"),
+        }
+    }
+}
+
+impl std::error::Error for LoadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            LoadError::Parse { source, .. } => Some(source),
+            LoadError::Read { source, .. } => Some(source),
+            LoadError::Invalid(_) => None,
         }
     }
 }
@@ -154,7 +204,7 @@ pub fn load_config(path: &Path) -> Result<KulyraxConfig, PipelineError> {
     let input = fs::read_to_string(path)?;
     // The error names the file, the field and the line.
     let config: KulyraxConfig = crate::yaml::from_str_in(&input, &path.display().to_string())
-        .map_err(|e| PipelineError::ConfigParse(e.to_string()))?;
+        .map_err(PipelineError::ConfigParse)?;
     config.validate()?;
     Ok(config)
 }
@@ -197,7 +247,7 @@ pub fn load_mappings(mappings_dir: &Path) -> Result<LoadedMappings, PipelineErro
 /// Load a single [Event] from a JSON file.
 pub fn load_event(path: &Path) -> Result<Event, PipelineError> {
     let raw = fs::read_to_string(path)?;
-    serde_json::from_str(&raw).map_err(|e| PipelineError::EventParse(e.to_string()))
+    serde_json::from_str(&raw).map_err(PipelineError::EventParse)
 }
 
 /// A fully loaded and cross-validated project: config, mappings, and routing rules.
@@ -435,10 +485,10 @@ pub fn run_source_loop(
         false,
     )?;
     if sources.is_empty() {
-        return Err(PipelineError::Mapping(
+        return Err(PipelineError::Mapping(LoadError::Invalid(
             "no sources configured — add `sources:` to the config, or use `run --event <file>`"
                 .to_string(),
-        ));
+        )));
     }
     if matches!(opts.mode, RunMode::Once) {
         return Ok(runtime.run_sources(sources, opts, stop)?);

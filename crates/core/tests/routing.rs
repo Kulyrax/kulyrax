@@ -64,7 +64,9 @@ fn json_routing_file_is_rejected_with_conversion_guidance() {
     let path = dir.path().join("routing.json");
     std::fs::write(&path, r#"{"UserCreated": ["sql-primary"]}"#).expect("write");
 
-    let err = load_routing(&path).expect_err("JSON routing is rejected");
+    let err = load_routing(&path)
+        .expect_err("JSON routing is rejected")
+        .to_string();
     assert!(err.contains("no longer supported"), "{err}");
     assert!(err.contains("routing.yaml"), "{err}");
 }
@@ -75,7 +77,9 @@ fn routing_file_must_be_yaml() {
     let path = dir.path().join("routing.txt");
     std::fs::write(&path, "UserCreated: [sql-primary]\n").expect("write");
 
-    let err = load_routing(&path).expect_err("non-YAML extension is rejected");
+    let err = load_routing(&path)
+        .expect_err("non-YAML extension is rejected")
+        .to_string();
     assert!(err.contains("must end in .yaml or .yml"), "{err}");
 }
 
@@ -95,7 +99,9 @@ fn invalid_routing_yaml_names_the_file() {
     let path = dir.path().join("routing.yaml");
     std::fs::write(&path, "UserCreated: sql-primary\n").expect("write");
 
-    let err = load_routing(&path).expect_err("a scalar instead of a list is rejected");
+    let err = load_routing(&path)
+        .expect_err("a scalar instead of a list is rejected")
+        .to_string();
     assert!(
         err.starts_with("Invalid routing file") && err.contains("routing.yaml"),
         "{err}"

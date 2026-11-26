@@ -8,6 +8,6 @@ use crate::adapter::loader::load_mapping_dir;
 /// keyed by event type. See `docs/mapping-reference.md` for the file rules.
 pub fn load_graph_mappings<P: AsRef<Path>>(
     dir: P,
-) -> Result<HashMap<String, GraphMapping>, String> {
+) -> Result<HashMap<String, GraphMapping>, crate::pipeline::LoadError> {
     load_mapping_dir(dir.as_ref(), "graph", |m: &GraphMapping| m.event())
 }

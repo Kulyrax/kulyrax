@@ -52,7 +52,10 @@ pub fn route_with_rules(event: &Event, rules: &HashMap<String, Vec<AdapterId>>) 
 ///
 /// Every file a user writes is YAML, so a JSON routing file is rejected with
 /// a message saying how to convert it rather than a bare parse error.
-pub fn load_routing<P: AsRef<Path>>(path: P) -> Result<HashMap<String, Vec<AdapterId>>, String> {
+pub fn load_routing<P: AsRef<Path>>(
+    path: P,
+) -> Result<HashMap<String, Vec<AdapterId>>, crate::pipeline::LoadError> {
+    use crate::pipeline::LoadError;
     let path = path.as_ref();
     let extension = path
         .extension()
@@ -61,24 +64,30 @@ pub fn load_routing<P: AsRef<Path>>(path: P) -> Result<HashMap<String, Vec<Adapt
     match extension.as_deref() {
         Some("yaml" | "yml") => {}
         Some("json") => {
-            return Err(format!(
+            return Err(LoadError::Invalid(format!(
                 "JSON routing files are no longer supported ({}). Rename it to \
                  routing.yaml, write each entry as `EventType: [adapter-id, ...]`, \
                  and point `routing: file:` in the config at it",
                 path.display()
-            ));
+            )));
         }
         _ => {
-            return Err(format!(
+            return Err(LoadError::Invalid(format!(
                 "Routing file must end in .yaml or .yml: {}",
                 path.display()
-            ));
+            )));
         }
     }
 
-    let data = fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read routing file {}: {e}", path.display()))?;
+    let data = fs::read_to_string(path).map_err(|source| LoadError::Read {
+        context: format!("Failed to read routing file {}", path.display()),
+        source,
+    })?;
     // The error names the file, the field and the line.
-    crate::yaml::from_str_in(&data, &path.display().to_string())
-        .map_err(|e| format!("Invalid routing file: {e}"))
+    crate::yaml::from_str_in(&data, &path.display().to_string()).map_err(|source| {
+        LoadError::Parse {
+            context: "Invalid routing file".to_string(),
+            source,
+        }
+    })
 }

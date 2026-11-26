@@ -1,9 +1,7 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use kulyrax_core::adapter::SkipReason;
 use kulyrax_core::execution::stages::StageTimings;
-use kulyrax_core::execution::{
-    AdapterOutcome, AdapterReportError, ExecutionReport, ExecutionStatus,
-};
+use kulyrax_core::execution::{AdapterFailure, AdapterOutcome, ExecutionReport, ExecutionStatus};
 use kulyrax_core::pipeline;
 use kulyrax_core::replay::{ReplayReport, ReplayRunOptions};
 use kulyrax_core::routing::StorageKind;
@@ -1060,10 +1058,10 @@ fn format_storage_kind(kind: StorageKind) -> &'static str {
     }
 }
 
-fn extract_error(err: Option<&AdapterReportError>) -> &str {
+fn extract_error(err: Option<&AdapterFailure>) -> &str {
     match err {
-        Some(AdapterReportError::WriteFailed { message }) => message,
-        Some(AdapterReportError::UnsupportedVersion { message }) => message,
+        Some(AdapterFailure::WriteFailed { message }) => message,
+        Some(AdapterFailure::UnsupportedVersion { message }) => message,
         _ => "unknown",
     }
 }

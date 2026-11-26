@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::pipeline::LoadError;
+
 /// Load every mapping file under `dir` into a table keyed by event type.
 ///
 /// Mapping files end in `.yaml` or `.yml` (any case) and may sit in
@@ -16,7 +18,7 @@ pub(crate) fn load_mapping_dir<M: serde::de::DeserializeOwned>(
     dir: &Path,
     kind: &str,
     event_of: impl Fn(&M) -> &str,
-) -> Result<HashMap<String, M>, String> {
+) -> Result<HashMap<String, M>, LoadError> {
     let mut files = Vec::new();
     collect_mapping_files(dir, kind, &mut files)?;
     files.sort();
@@ -24,18 +26,25 @@ pub(crate) fn load_mapping_dir<M: serde::de::DeserializeOwned>(
     let mut mappings = HashMap::new();
     let mut sources: HashMap<String, PathBuf> = HashMap::new();
     for path in files {
-        let content =
-            fs::read_to_string(&path).map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
+        let content = fs::read_to_string(&path).map_err(|source| LoadError::Read {
+            context: format!("Failed to read {path:?}"),
+            source,
+        })?;
         // The error names the file, the field and the line.
-        let mapping: M = crate::yaml::from_str_in(&content, &path.display().to_string())
-            .map_err(|e| format!("Invalid {kind} mapping: {e}"))?;
+        let mapping: M =
+            crate::yaml::from_str_in(&content, &path.display().to_string()).map_err(|source| {
+                LoadError::Parse {
+                    context: format!("Invalid {kind} mapping"),
+                    source,
+                }
+            })?;
 
         let event = event_of(&mapping).to_string();
         if let Some(first) = sources.get(&event) {
-            return Err(format!(
+            return Err(LoadError::Invalid(format!(
                 "Duplicate {} mapping for event '{}' in {:?} and {:?}",
                 kind, event, first, path
-            ));
+            )));
         }
         sources.insert(event.clone(), path);
         mappings.insert(event, mapping);
@@ -44,17 +53,24 @@ pub(crate) fn load_mapping_dir<M: serde::de::DeserializeOwned>(
     Ok(mappings)
 }
 
-fn collect_mapping_files(dir: &Path, kind: &str, files: &mut Vec<PathBuf>) -> Result<(), String> {
-    let entries = fs::read_dir(dir)
-        .map_err(|e| format!("Failed to read {} mappings dir {:?}: {}", kind, dir, e))?;
+fn collect_mapping_files(
+    dir: &Path,
+    kind: &str,
+    files: &mut Vec<PathBuf>,
+) -> Result<(), LoadError> {
+    let unreadable = |source| LoadError::Read {
+        context: format!("Failed to read {kind} mappings dir {dir:?}"),
+        source,
+    };
+    let entries = fs::read_dir(dir).map_err(unreadable)?;
 
     for entry in entries {
-        let entry = entry.map_err(|e| e.to_string())?;
+        let entry = entry.map_err(unreadable)?;
         if entry.file_name().to_string_lossy().starts_with('.') {
             continue;
         }
         let path = entry.path();
-        let file_type = entry.file_type().map_err(|e| e.to_string())?;
+        let file_type = entry.file_type().map_err(unreadable)?;
         if file_type.is_dir() {
             collect_mapping_files(&path, kind, files)?;
         } else if is_yaml(&path) {
@@ -87,7 +103,7 @@ mod tests {
         fs::write(&path, format!("event: {event}\ntable: {relative}\n")).expect("write mapping");
     }
 
-    fn load(root: &Path) -> Result<HashMap<String, TestMapping>, String> {
+    fn load(root: &Path) -> Result<HashMap<String, TestMapping>, LoadError> {
         load_mapping_dir(root, "SQL", |m: &TestMapping| m.event.as_str())
     }
 
@@ -137,7 +153,9 @@ mod tests {
         write(dir.path(), "orders/a.yaml", "OrderCreated");
         write(dir.path(), "z.yml", "OrderCreated");
 
-        let err = load(dir.path()).expect_err("duplicate is rejected");
+        let err = load(dir.path())
+            .expect_err("duplicate is rejected")
+            .to_string();
         assert!(
             err.contains("Duplicate SQL mapping for event 'OrderCreated'"),
             "{err}"
@@ -148,7 +166,9 @@ mod tests {
     #[test]
     fn missing_directory_names_the_kind_and_path() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let err = load(&dir.path().join("absent")).expect_err("missing dir is an error");
+        let err = load(&dir.path().join("absent"))
+            .expect_err("missing dir is an error")
+            .to_string();
         assert!(err.starts_with("Failed to read SQL mappings dir"), "{err}");
         assert!(err.contains("absent"), "{err}");
     }
@@ -157,7 +177,9 @@ mod tests {
     fn invalid_yaml_names_the_file() {
         let dir = tempfile::tempdir().expect("tempdir");
         fs::write(dir.path().join("broken.yaml"), "event: [unclosed").expect("write");
-        let err = load(dir.path()).expect_err("invalid YAML is an error");
+        let err = load(dir.path())
+            .expect_err("invalid YAML is an error")
+            .to_string();
         assert!(
             err.starts_with("Invalid SQL mapping: ")
                 && err.contains("broken.yaml")

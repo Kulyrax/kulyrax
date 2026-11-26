@@ -48,7 +48,7 @@ use crate::{
 
 /// Re-export at crate root so users can `use kulyrax_core::ExecutionReport`.
 pub use execution::report::{
-    AdapterExecutionReport, AdapterOutcome, AdapterReportError, ExecutionReport, ExecutionStatus,
+    AdapterExecutionReport, AdapterFailure, AdapterOutcome, ExecutionReport, ExecutionStatus,
 };
 
 /// Phase 10.2 upcaster registry for schema evolution.

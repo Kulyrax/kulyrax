@@ -22,6 +22,26 @@ pub enum DependencyOrderError {
     MissingAdapterMeta { adapter_id: AdapterId },
 }
 
+/// The same wording as the dispatch failure report.
+impl std::fmt::Display for DependencyOrderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DependencyOrderError::Cycle { adapters } => {
+                write!(
+                    f,
+                    "cyclic adapter dependencies among: {}",
+                    adapters.join(", ")
+                )
+            }
+            DependencyOrderError::MissingAdapterMeta { adapter_id } => {
+                write!(f, "no adapter metadata for routed id {adapter_id:?}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DependencyOrderError {}
+
 /// Single pass over config adapters.
 pub fn adapter_metadata_map(config: &KulyraxConfig) -> HashMap<AdapterId, AdapterExecutionMeta> {
     config

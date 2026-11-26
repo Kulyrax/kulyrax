@@ -25,8 +25,15 @@ use std::path::Path;
 use serde::de::DeserializeOwned;
 
 /// Why a YAML document could not be read.
+///
+/// One pointer wide (the details are boxed), so the `Result`s and the error
+/// enums that carry it (`PipelineError::ConfigParse`, `LoadError::Parse`) stay
+/// small.
 #[derive(Debug)]
-pub struct YamlError {
+pub struct YamlError(Box<Details>);
+
+#[derive(Debug)]
+struct Details {
     /// The file the document came from, if it came from one.
     file: Option<String>,
     /// The field the error belongs to (`adapters[0].priority`), if any.
@@ -39,41 +46,42 @@ pub struct YamlError {
 #[derive(Debug)]
 enum Kind {
     Read(std::io::Error),
-    // Boxed: the parser's error is large, and `YamlError` travels in `Result`s.
+    // Boxed: the parser's error is large.
     Parse(Box<serde_saphyr::Error>),
 }
 
 impl YamlError {
     /// The file the document came from, if it came from one.
     pub fn file(&self) -> Option<&str> {
-        self.file.as_deref()
+        self.0.file.as_deref()
     }
 
     /// The path of the field the error belongs to (`adapters[0].priority`), if
     /// the error belongs to one.
     pub fn field(&self) -> Option<&str> {
-        self.field.as_deref()
+        self.0.field.as_deref()
     }
 
     /// The document the error is in, for errors raised without the file name.
     pub fn in_file(mut self, file: impl Into<String>) -> Self {
-        self.file = Some(file.into());
+        self.0.file = Some(file.into());
         self
     }
 }
 
 impl fmt::Display for YamlError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(file) = &self.file {
+        let d = &self.0;
+        if let Some(file) = &d.file {
             write!(f, "{file}: ")?;
         }
-        if let Some(field) = &self.field {
+        if let Some(field) = &d.field {
             write!(f, "field `{field}`: ")?;
         }
-        if let Some(UnknownKey { line, message }) = &self.unknown_key {
+        if let Some(UnknownKey { line, message }) = &d.unknown_key {
             return write!(f, "line {line}: {message}");
         }
-        match &self.kind {
+        match &d.kind {
             Kind::Read(e) => write!(f, "cannot read: {e}"),
             Kind::Parse(e) => write!(f, "{e}"),
         }
@@ -82,7 +90,7 @@ impl fmt::Display for YamlError {
 
 impl std::error::Error for YamlError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match &self.kind {
+        match &self.0.kind {
             Kind::Read(e) => Some(e),
             Kind::Parse(e) => Some(e.as_ref()),
         }
@@ -103,11 +111,13 @@ pub fn from_str_in<T: DeserializeOwned>(input: &str, file: &str) -> Result<T, Ya
 /// Read the YAML file at `path` into `T`.
 pub fn from_file<T: DeserializeOwned>(path: &Path) -> Result<T, YamlError> {
     let file = path.display().to_string();
-    let input = std::fs::read_to_string(path).map_err(|e| YamlError {
-        file: Some(file.clone()),
-        field: None,
-        unknown_key: None,
-        kind: Kind::Read(e),
+    let input = std::fs::read_to_string(path).map_err(|e| {
+        YamlError(Box::new(Details {
+            file: Some(file.clone()),
+            field: None,
+            unknown_key: None,
+            kind: Kind::Read(e),
+        }))
     })?;
     parse(&input, Some(&file))
 }
@@ -137,11 +147,13 @@ fn parse<T: DeserializeOwned>(input: &str, file: Option<&str>) -> Result<T, Yaml
             e.into_inner()
         })
     })
-    .map_err(|e| YamlError {
-        file: file.map(str::to_string),
-        field,
-        unknown_key: unknown_key(input, &e),
-        kind: Kind::Parse(Box::new(e)),
+    .map_err(|e| {
+        YamlError(Box::new(Details {
+            file: file.map(str::to_string),
+            field,
+            unknown_key: unknown_key(input, &e),
+            kind: Kind::Parse(Box::new(e)),
+        }))
     })
 }
 
