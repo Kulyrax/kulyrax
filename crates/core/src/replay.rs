@@ -25,14 +25,18 @@ use crate::runtime::dependency_graph::{AdapterExecutionMeta, adapter_metadata_ma
 // Errors
 // ---------------------------------------------------------------------------
 
+/// Why the events to replay could not be read.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ReplayLoadError {
+    /// A file or directory could not be read.
     Io(std::io::Error),
     /// An event that is not valid JSON, or not an `Event`. `file` is the
     /// event file, for a directory of `*.json` files.
     Json {
+        /// The event file, for a directory of `*.json` files.
         file: Option<std::path::PathBuf>,
+        /// What did not parse.
         source: serde_json::Error,
     },
 }
@@ -108,20 +112,33 @@ pub fn events_from_path(path: impl AsRef<Path>) -> Result<EventsFromPath, Replay
     }
 }
 
+/// The events at a path, in replay order ([`events_from_path`]): iterate it.
+/// The variants are the iterator's state, not an interface; build one with
+/// [`events_from_path`].
 #[non_exhaustive]
 pub enum EventsFromPath {
+    /// A directory of event files, read in file-name order.
     Directory {
+        /// The files, sorted.
         paths: Vec<PathBuf>,
+        /// The next file to read.
         index: usize,
     },
+    /// An NDJSON file: one event per line.
     Ndjson {
+        /// The file's content.
         reader: BufReader<Cursor<Vec<u8>>>,
+        /// The line buffer.
         line: String,
     },
+    /// A file holding one JSON event.
     Single {
+        /// Whether the event was returned.
         done: bool,
+        /// The event.
         event: Option<Event>,
     },
+    /// No events.
     Empty,
 }
 
@@ -180,11 +197,15 @@ impl Iterator for EventsFromPath {
 // ReplayReport
 // ---------------------------------------------------------------------------
 
+/// One replayed event in a [`ReplayReport`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct PerEventReplaySummary {
+    /// The event's id.
     pub event_id: String,
+    /// The event's type.
     pub event_type: String,
+    /// Whether every adapter it was routed to succeeded.
     pub status: ExecutionStatus,
 }
 
@@ -192,30 +213,44 @@ fn default_replay_report_version() -> String {
     "1.0".to_string()
 }
 
+/// What a replay did: counts, timing, the first failure, and a summary per
+/// event. `--output json` prints it; its field names are stable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ReplayReport {
+    /// The report's format version (`"1.0"`).
     #[serde(default = "default_replay_report_version")]
     pub report_version: String,
 
+    /// Events read and dispatched.
     pub events_processed: u64,
+    /// Events every routed adapter succeeded on.
     pub events_succeeded: u64,
+    /// Events at least one adapter failed on.
     pub events_failed: u64,
 
+    /// The replay stopped at the first failure (`failure_policy: fail_fast`)
+    /// instead of reading every event.
     pub stopped_early: bool,
 
+    /// The id of the first event that failed, if any did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_failure_event_id: Option<String>,
 
+    /// When the replay started.
     #[serde(with = "crate::execution::time")]
     pub started_at: SystemTime,
 
+    /// When it finished; `None` while it runs.
     #[serde(with = "crate::execution::time_option")]
     pub finished_at: Option<SystemTime>,
 
+    /// How long it took, in milliseconds; `None` while it runs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
 
+    /// A summary per event, in replay order: every failure, and successes until
+    /// the list holds [`ReplayRunOptions::max_per_event_summaries`] entries.
     pub per_event: Vec<PerEventReplaySummary>,
 
     /// Successful events not listed in `per_event` because of [`ReplayRunOptions::max_per_event_summaries`].

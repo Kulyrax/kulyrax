@@ -1,3 +1,10 @@
+//! The `kulyrax` command line: argument parsing (clap) and rendering only.
+//! Every engine call goes through `kulyrax_core::pipeline` (or
+//! `kulyrax_ingest::serve`). Commands, flags, `--output json` documents and
+//! exit codes are the stable surface (`docs/stability.md` §3).
+
+#![deny(missing_docs)]
+
 use clap::{Parser, Subcommand, ValueEnum};
 use kulyrax_core::adapter::SkipReason;
 use kulyrax_core::execution::stages::StageTimings;

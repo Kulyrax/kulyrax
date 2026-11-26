@@ -1,8 +1,12 @@
+/// The SQL error type.
 pub mod adapter;
 pub mod exec;
 pub(crate) mod loader;
+/// The SQL mapping format.
 pub mod mapping;
+/// Resolving a SQL mapping against an event.
 pub mod runtime;
+/// The SQLite adapter (`type: sqlite`).
 pub mod sqlite;
 
 // The extension surface for a new SQL backend (Phase 25.1) is `exec`:

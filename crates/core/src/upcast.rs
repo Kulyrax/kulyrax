@@ -26,27 +26,38 @@ pub trait Upcaster: Send + Sync {
     fn upcast(&self, payload: Value) -> Result<Value, String>;
 }
 
+/// Why an event's payload could not be brought to its mapping's version.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum UpcastError {
     /// An upcaster's transform function failed.
     UpcastFailed {
+        /// The event type.
         event_type: String,
+        /// The version the failing upcaster reads.
         source_version: u32,
+        /// What the upcaster reported.
         reason: String,
     },
     /// No unbroken chain of upcasters exists from `from_version` to `to_version`;
     /// `missing_at` is the first source version with no registered upcaster.
     MissingLink {
+        /// The event type.
         event_type: String,
+        /// The payload's version.
         from_version: u32,
+        /// The mapping's version.
         to_version: u32,
+        /// The first version with no upcaster registered.
         missing_at: u32,
     },
     /// `to_version < from_version`: downcasting is strictly forbidden.
     Downcast {
+        /// The event type.
         event_type: String,
+        /// The payload's version.
         from_version: u32,
+        /// The mapping's version, which is older.
         to_version: u32,
     },
 }
@@ -96,10 +107,13 @@ pub struct UpcasterRegistry {
 }
 
 impl UpcasterRegistry {
+    /// An empty registry.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Add `upcaster`, replacing one already registered for its event type and
+    /// source version.
     pub fn register(&mut self, upcaster: Box<dyn Upcaster>) {
         let key = (upcaster.event_type().to_string(), upcaster.source_version());
         self.upcasters.insert(key, upcaster);

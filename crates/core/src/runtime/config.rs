@@ -103,12 +103,20 @@ pub type AdapterCapabilities = Vec<AdapterCapability>;
 // Root Config
 // ------------------------------------------------------------
 
+/// `config.yaml`: the adapters, the routing file, the sources and the run's
+/// policies. Read it with [`crate::pipeline::load_config`], or build one with
+/// [`Self::new`] and the `with_*` setters.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct KulyraxConfig {
+    /// The config format version. Only `1` exists; [`Self::validate`] refuses any
+    /// other.
     pub version: u32,
+    /// Where the routing file is.
     pub routing: RoutingConfig,
+    /// The adapters, in the order written. They run by dependency order, then by
+    /// priority.
     pub adapters: Vec<AdapterConfig>,
 
     /// When an adapter fails: fail_fast (default) or continue_on_error.
@@ -159,6 +167,9 @@ impl KulyraxConfig {
         self
     }
 
+    /// Check what parsing cannot: the version, at least one adapter, unique adapter
+    /// and source ids, and `depends_on` naming adapters that exist (not the adapter
+    /// itself).
     pub fn validate(&self) -> Result<(), ConfigError> {
         if self.version != 1 {
             return Err(ConfigError::UnsupportedVersion(self.version));
@@ -209,10 +220,12 @@ impl KulyraxConfig {
 // Routing
 // ------------------------------------------------------------
 
+/// The `routing:` block of `config.yaml`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct RoutingConfig {
+    /// The routing file, relative to the config file's directory.
     pub file: String,
 }
 
@@ -244,12 +257,17 @@ enum KnownAdapterConfig {
     Graph(GraphAdapterConfig),
 }
 
+/// One entry of `adapters:` in `config.yaml`, by its `type:`.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum AdapterConfig {
+    /// `type: sqlite`.
     Sqlite(SqliteAdapterConfig),
+    /// `type: file`: the file-backed document store.
     File(FileAdapterConfig),
+    /// `type: keyvalue`: the file-backed key-value store.
     KeyValue(KeyValueAdapterConfig),
+    /// `type: graph`: the file-backed graph store.
     Graph(GraphAdapterConfig),
 
     /// An unrecognized `type:`, resolved against the
@@ -265,15 +283,21 @@ pub enum AdapterConfig {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct CustomAdapterConfig {
+    /// The entry's `type:`, which names the registered factory.
     pub type_name: String,
+    /// The adapter's id, which routing and `depends_on` refer to.
     pub id: String,
+    /// The adapter's priority: lower runs first, among adapters with no
+    /// dependency between them.
     pub priority: u32,
     /// The whole list entry, as JSON. Since 1.0 a `serde_json::Value`, not a
     /// YAML value: read your block with [`Self::backend_config`] or
     /// `serde_json::from_value`. A YAML key that is not a string (`1: x`)
     /// arrives as a string (`"1"`).
     pub raw: serde_json::Value,
+    /// The capabilities the entry declares, if any (Phase 6.4).
     pub capabilities: Option<AdapterCapabilities>,
+    /// Adapters that must run before this one (Phase 9).
     pub depends_on: Vec<AdapterId>,
 }
 
@@ -296,11 +320,13 @@ impl CustomAdapterConfig {
         }
     }
 
+    /// Set the declared capabilities.
     pub fn with_capabilities(mut self, capabilities: AdapterCapabilities) -> Self {
         self.capabilities = Some(capabilities);
         self
     }
 
+    /// Set the adapters that must run before this one.
     pub fn with_depends_on(mut self, depends_on: Vec<AdapterId>) -> Self {
         self.depends_on = depends_on;
         self
@@ -322,7 +348,7 @@ impl CustomAdapterConfig {
     }
 }
 
-/// Try every built-in `type:` first (via [`KnownAdapterConfig`]'s derived
+/// Try every built-in `type:` first (via `KnownAdapterConfig`'s derived
 /// tagged-enum logic); anything else becomes [`AdapterConfig::Custom`]
 /// instead of a parse error — the Phase 25.2 catch-all.
 impl<'de> Deserialize<'de> for AdapterConfig {
@@ -384,8 +410,12 @@ impl<'de> Deserialize<'de> for AdapterConfig {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct SqliteAdapterConfig {
+    /// The adapter's id, which routing and `depends_on` refer to.
     pub id: String,
+    /// The adapter's priority: lower runs first, among adapters with no
+    /// dependency between them.
     pub priority: u32,
+    /// The `config:` block.
     pub config: SqliteConfig,
 
     /// Optional declared capabilities (Phase 6.4).
@@ -409,11 +439,13 @@ impl SqliteAdapterConfig {
         }
     }
 
+    /// Set the declared capabilities.
     pub fn with_capabilities(mut self, capabilities: AdapterCapabilities) -> Self {
         self.capabilities = Some(capabilities);
         self
     }
 
+    /// Set the adapters that must run before this one.
     pub fn with_depends_on(mut self, depends_on: Vec<AdapterId>) -> Self {
         self.depends_on = depends_on;
         self
@@ -430,6 +462,7 @@ pub struct SqliteConfig {
 }
 
 impl SqliteConfig {
+    /// A block naming the database file at `path`.
     pub fn new(path: impl Into<String>) -> Self {
         Self { path: path.into() }
     }
@@ -440,8 +473,12 @@ impl SqliteConfig {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct FileAdapterConfig {
+    /// The adapter's id, which routing and `depends_on` refer to.
     pub id: String,
+    /// The adapter's priority: lower runs first, among adapters with no
+    /// dependency between them.
     pub priority: u32,
+    /// The `config:` block.
     pub config: FileConfig,
 
     /// Optional declared capabilities (Phase 6.4).
@@ -465,11 +502,13 @@ impl FileAdapterConfig {
         }
     }
 
+    /// Set the declared capabilities.
     pub fn with_capabilities(mut self, capabilities: AdapterCapabilities) -> Self {
         self.capabilities = Some(capabilities);
         self
     }
 
+    /// Set the adapters that must run before this one.
     pub fn with_depends_on(mut self, depends_on: Vec<AdapterId>) -> Self {
         self.depends_on = depends_on;
         self
@@ -486,6 +525,7 @@ pub struct FileConfig {
 }
 
 impl FileConfig {
+    /// A block naming the store's directory, `root`.
     pub fn new(root: impl Into<String>) -> Self {
         Self { root: root.into() }
     }
@@ -496,8 +536,12 @@ impl FileConfig {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct KeyValueAdapterConfig {
+    /// The adapter's id, which routing and `depends_on` refer to.
     pub id: String,
+    /// The adapter's priority: lower runs first, among adapters with no
+    /// dependency between them.
     pub priority: u32,
+    /// The `config:` block.
     pub config: KeyValueConfig,
 
     /// Optional declared capabilities (Phase 6.4).
@@ -521,11 +565,13 @@ impl KeyValueAdapterConfig {
         }
     }
 
+    /// Set the declared capabilities.
     pub fn with_capabilities(mut self, capabilities: AdapterCapabilities) -> Self {
         self.capabilities = Some(capabilities);
         self
     }
 
+    /// Set the adapters that must run before this one.
     pub fn with_depends_on(mut self, depends_on: Vec<AdapterId>) -> Self {
         self.depends_on = depends_on;
         self
@@ -542,6 +588,7 @@ pub struct KeyValueConfig {
 }
 
 impl KeyValueConfig {
+    /// A block naming the store's directory, `root`.
     pub fn new(root: impl Into<String>) -> Self {
         Self { root: root.into() }
     }
@@ -552,8 +599,12 @@ impl KeyValueConfig {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct GraphAdapterConfig {
+    /// The adapter's id, which routing and `depends_on` refer to.
     pub id: String,
+    /// The adapter's priority: lower runs first, among adapters with no
+    /// dependency between them.
     pub priority: u32,
+    /// The `config:` block.
     pub config: GraphConfig,
 
     /// Optional declared capabilities (Phase 6.4).
@@ -577,11 +628,13 @@ impl GraphAdapterConfig {
         }
     }
 
+    /// Set the declared capabilities.
     pub fn with_capabilities(mut self, capabilities: AdapterCapabilities) -> Self {
         self.capabilities = Some(capabilities);
         self
     }
 
+    /// Set the adapters that must run before this one.
     pub fn with_depends_on(mut self, depends_on: Vec<AdapterId>) -> Self {
         self.depends_on = depends_on;
         self
@@ -598,6 +651,7 @@ pub struct GraphConfig {
 }
 
 impl GraphConfig {
+    /// A block naming the store's directory, `root`.
     pub fn new(root: impl Into<String>) -> Self {
         Self { root: root.into() }
     }
@@ -667,7 +721,9 @@ const KNOWN_SOURCE_TYPES: &[&str] = &["directory", "stdin"];
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct CustomSourceConfig {
+    /// The entry's `type:`, which names the registered factory.
     pub type_name: String,
+    /// The source's id; its checkpoint is kept under it.
     pub id: String,
     /// Where the source keeps its checkpoint, relative to the config file's
     /// directory, if it has one.
@@ -695,6 +751,7 @@ impl CustomSourceConfig {
         }
     }
 
+    /// Set where the source keeps its checkpoint.
     pub fn with_state_dir(mut self, state_dir: impl Into<String>) -> Self {
         self.state_dir = Some(state_dir.into());
         self
@@ -750,6 +807,7 @@ impl<'de> Deserialize<'de> for SourceConfig {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct DirectorySourceConfig {
+    /// The source's id; its checkpoint is kept under it.
     pub id: String,
     /// Directory of event files, relative to the config file's directory.
     pub path: String,
@@ -758,6 +816,7 @@ pub struct DirectorySourceConfig {
 }
 
 impl DirectorySourceConfig {
+    /// An entry reading `path` and checkpointing in `state_dir`.
     pub fn new(
         id: impl Into<String>,
         path: impl Into<String>,
@@ -776,12 +835,14 @@ impl DirectorySourceConfig {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct StdinSourceConfig {
+    /// The source's id; its checkpoint is kept under it.
     pub id: String,
     /// Where the checkpoint sidecar lives, relative to the config file's directory.
     pub state_dir: String,
 }
 
 impl StdinSourceConfig {
+    /// An entry checkpointing in `state_dir`.
     pub fn new(id: impl Into<String>, state_dir: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -791,6 +852,7 @@ impl StdinSourceConfig {
 }
 
 impl SourceConfig {
+    /// The source's id.
     pub fn id(&self) -> &str {
         match self {
             SourceConfig::Directory(c) => &c.id,
@@ -804,16 +866,25 @@ impl SourceConfig {
 // Errors
 // ------------------------------------------------------------
 
+/// Why `config.yaml` is invalid, or an adapter could not be built from it.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ConfigError {
+    /// `version:` is not `1`.
     UnsupportedVersion(u32),
+    /// `adapters:` is empty.
     NoAdaptersDefined,
+    /// Two adapters share this id.
     DuplicateAdapterId(String),
+    /// Two sources share this id.
     DuplicateSourceId(String),
+    /// This adapter lists itself in `depends_on`.
     SelfDependency(String),
+    /// An adapter's `depends_on` names an adapter that is not in the config.
     UnknownDependency {
+        /// The adapter whose `depends_on` is wrong.
         adapter: String,
+        /// The id it names.
         dependency: String,
     },
     /// Phase 25.2: an `AdapterConfig::Custom`'s `type:` has no factory
@@ -877,6 +948,7 @@ impl std::error::Error for ConfigError {}
 // ------------------------------------------------------------
 
 impl AdapterConfig {
+    /// The adapter's id.
     pub fn id(&self) -> &str {
         match self {
             AdapterConfig::Sqlite(cfg) => &cfg.id,
@@ -887,6 +959,7 @@ impl AdapterConfig {
         }
     }
 
+    /// The adapter's priority.
     pub fn priority(&self) -> u32 {
         match self {
             AdapterConfig::Sqlite(cfg) => cfg.priority,
@@ -908,6 +981,7 @@ impl AdapterConfig {
         }
     }
 
+    /// The adapters that must run before this one.
     pub fn depends_on(&self) -> &[AdapterId] {
         match self {
             AdapterConfig::Sqlite(cfg) => &cfg.depends_on,

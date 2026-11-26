@@ -5,11 +5,15 @@ use crate::runtime::config::AdapterCapability;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
+/// A document mapping file: how one event type becomes one document (or one
+/// facet of it) in a collection. See `docs/mapping-reference.md`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct DocumentMapping {
+    /// The event type this mapping projects.
     pub event: String,
+    /// The collection (for the file store, a directory) the documents go in.
     pub collection: String,
 
     /// Target schema version this mapping projects into. Must be explicit ($\ge 1$).

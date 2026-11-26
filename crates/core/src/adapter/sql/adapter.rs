@@ -4,17 +4,25 @@ use std::fmt;
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum SqlError {
+    /// No SQL mapping exists for this event type.
     MappingNotFound(String),
+    /// The row could not be built from the event (a missing field, a bad
+    /// value).
     BuildFailed(String),
+    /// The database refused the statement, or could not be reached.
     ExecutionFailed(String),
     /// A shadow rebuild refused to start or to swap: a check that protects
     /// the live tables failed. Nothing was changed.
     RebuildRefused(String),
     /// No upcaster chain from the event's version to the mapping's target version.
     UnsupportedVersion {
+        /// The event's type.
         event_type: String,
+        /// The payload version the event arrived with.
         from_version: u32,
+        /// The mapping's version.
         to_version: u32,
+        /// Why no upcast reaches it.
         reason: String,
     },
 }

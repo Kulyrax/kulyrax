@@ -31,14 +31,19 @@ use crate::execution::stages::{Stage, timed};
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ProjectionGuard {
+    /// The sequence of the last event projected into this entity's default lane.
     #[serde(default)]
     pub last_sequence: u64,
+    /// That event's id.
     #[serde(default)]
     pub last_event_id: String,
+    /// The default lane is tombstoned.
     #[serde(default)]
     pub deleted: bool,
+    /// The tombstone is permanent: nothing projects this entity again.
     #[serde(default)]
     pub permanent: bool,
+    /// The named facets' lanes, by facet name.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub facets: std::collections::BTreeMap<String, FacetGuard>,
 }
@@ -47,10 +52,14 @@ pub struct ProjectionGuard {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct FacetGuard {
+    /// The sequence of the last event projected into this lane.
     pub last_sequence: u64,
+    /// That event's id.
     pub last_event_id: String,
+    /// The lane is tombstoned.
     #[serde(default)]
     pub deleted: bool,
+    /// The tombstone is permanent.
     #[serde(default)]
     pub permanent: bool,
 }
@@ -145,9 +154,13 @@ pub trait DocumentBackend {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DocumentOutcome {
+    /// The document was created.
     Created,
+    /// An existing document was overwritten.
     Updated,
+    /// The document was removed and its tombstone recorded.
     Deleted,
+    /// Nothing was written, for this reason.
     Skipped(SkipReason),
 }
 
@@ -155,12 +168,19 @@ pub enum DocumentOutcome {
 /// identity, document, and the mapping's gating fields.
 #[non_exhaustive]
 pub struct DocumentPlan {
+    /// The mapping's collection.
     pub collection: String,
+    /// The document's id, resolved from the event.
     pub entity_id: String,
+    /// The document (or, for a named facet, the facet's fields) to write.
     pub document: Value,
+    /// The mapping's `on_existing`.
     pub on_existing: OnExisting,
+    /// The mapping's operation.
     pub operation: Operation,
+    /// Whether a delete is permanent.
     pub permanent: bool,
+    /// The facet this write owns; `""` for the default lane.
     pub facet: String,
 }
 

@@ -31,6 +31,7 @@ use crate::event::Event;
 pub struct SourcePosition(pub String);
 
 impl SourcePosition {
+    /// The position's text.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -46,7 +47,9 @@ impl std::fmt::Display for SourcePosition {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct SourcedEvent {
+    /// The event.
     pub event: Event,
+    /// The position to commit once the event is dispatched.
     pub position: SourcePosition,
 }
 
@@ -54,8 +57,11 @@ pub struct SourcedEvent {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum SourceError {
+    /// A file could not be read or written.
     Io(std::io::Error),
+    /// An event could not be parsed; the message says where.
     Parse(String),
+    /// The checkpoint could not be read or written.
     Checkpoint(String),
     /// One or more adapters failed `StorageAdapter::prepare`; nothing was
     /// ingested.

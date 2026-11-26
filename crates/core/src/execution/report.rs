@@ -20,7 +20,9 @@ use crate::routing::StorageKind;
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ExecutionStatus {
+    /// Every routed adapter succeeded (or skipped).
     Succeeded,
+    /// At least one adapter failed.
     Failed,
 }
 
@@ -39,7 +41,10 @@ pub enum AdapterOutcome {
     /// The entity was removed and its tombstone recorded (Phase 13.2/13.3).
     Deleted,
     /// Nothing was written; see `reason`.
-    Skipped { reason: SkipReason },
+    Skipped {
+        /// Why nothing was written.
+        reason: SkipReason,
+    },
     /// The adapter failed; see the sibling `error` field for detail.
     Failed,
 }
@@ -51,8 +56,17 @@ pub enum AdapterOutcome {
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum AdapterFailure {
-    WriteFailed { message: String },
-    UnsupportedVersion { message: String },
+    /// A write failed.
+    WriteFailed {
+        /// Why, as the adapter reported it (redacted of credentials).
+        message: String,
+    },
+    /// No upcaster chain reaches the mapping's version (`migration_policy:
+    /// strict`).
+    UnsupportedVersion {
+        /// Why: the event type, and the versions no upcaster links.
+        message: String,
+    },
 }
 
 impl From<AdapterError> for AdapterFailure {
@@ -83,6 +97,8 @@ impl From<&AdapterError> for AdapterFailure {
 // ExecutionReport (event-level)
 // ---------------------------------------------------------------------------
 
+/// What dispatching one event did: each adapter's report, the timing and the
+/// overall status. `--output json` prints it; its field names are stable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ExecutionReport {
@@ -90,22 +106,29 @@ pub struct ExecutionReport {
     #[serde(default = "default_report_version")]
     pub report_version: String,
 
+    /// The event's id.
     pub event_id: String,
+    /// The event's type.
     pub event_type: String,
+    /// An id for this dispatch (`trace-<event id>`), for correlating logs.
     pub trace_id: String,
 
+    /// When dispatch started.
     #[serde(with = "crate::execution::time")]
     pub started_at: SystemTime,
 
+    /// When it finished; `None` while it runs.
     #[serde(with = "crate::execution::time_option")]
     pub finished_at: Option<SystemTime>,
 
+    /// How long it took, in milliseconds; `None` while it runs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
 
     /// Adapter reports in execution order.
     pub adapter_reports: Vec<AdapterExecutionReport>,
 
+    /// Succeeded unless an adapter failed.
     pub status: ExecutionStatus,
 
     /// Source event payload version (Phase 10.2/10.3). Unversioned legacy events default to 1.
@@ -206,6 +229,7 @@ impl ExecutionReport {
 // AdapterExecutionReport (adapter-level)
 // ---------------------------------------------------------------------------
 
+/// What one adapter did with one event.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct AdapterExecutionReport {
@@ -215,17 +239,22 @@ pub struct AdapterExecutionReport {
     /// Storage kind (sql, document, etc.).
     pub storage_kind: StorageKind,
 
+    /// When the adapter started.
     #[serde(with = "crate::execution::time")]
     pub started_at: SystemTime,
 
+    /// When it finished.
     #[serde(with = "crate::execution::time_option")]
     pub finished_at: Option<SystemTime>,
 
+    /// How long it took, in milliseconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
 
+    /// What it did.
     pub outcome: AdapterOutcome,
 
+    /// Why it failed; set only when `outcome` is [`AdapterOutcome::Failed`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<AdapterFailure>,
 

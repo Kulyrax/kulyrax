@@ -9,8 +9,11 @@ use crate::upcast::UpcasterRegistry;
 /// Document projection plus the version metadata used to produce it (Phase 10.3).
 #[non_exhaustive]
 pub struct DocumentProjection {
+    /// The document to write.
     pub document: serde_json::Value,
+    /// The payload version the event arrived with.
     pub source_version: u32,
+    /// The mapping's version, which the payload was upcast to.
     pub projected_version: u32,
     /// Resolved entity identity (Phase 11.1) — keys the idempotency guard and
     /// the output filename (Phase 11.3), rather than `event.event_id`.
@@ -40,6 +43,7 @@ pub struct DocumentRuntimeBuilder {
 }
 
 impl DocumentRuntimeBuilder {
+    /// A builder over `mappings`, by event type.
     pub fn new(mappings: HashMap<String, DocumentMapping>) -> Self {
         Self { mappings }
     }

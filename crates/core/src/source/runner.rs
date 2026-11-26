@@ -46,12 +46,18 @@ pub enum RunMode {
     /// Drain every source to its current end, commit, return. Subsumes `replay`.
     Once,
     /// Keep polling; sleep `poll_interval` when all sources are caught up.
-    Continuous { poll_interval: Duration },
+    Continuous {
+        /// How long to sleep when every source is caught up.
+        poll_interval: Duration,
+    },
 }
 
+/// How [`run_sources`] runs: once or continuously, batch size and delay, the
+/// retry budget, and the DLQ.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct SourceRunOptions {
+    /// Drain once and return, or keep polling.
     pub mode: RunMode,
     /// Max events per source per poll: one batch, committed in one
     /// transaction per adapter (see `crate::batch`).
@@ -82,6 +88,7 @@ impl Default for SourceRunOptions {
     }
 }
 
+/// Why a source run ended.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -95,9 +102,11 @@ pub enum StoppedReason {
     RetryExhausted,
 }
 
+/// One batch a source run dispatched.
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct BatchSummary {
+    /// The source it came from.
     pub source_id: String,
     /// The position of the batch's first event, in delivery order.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -105,30 +114,48 @@ pub struct BatchSummary {
     /// The position of the batch's last event, in delivery order: the one the
     /// batch is committed at.
     pub position_to: String,
+    /// Events in the batch.
     pub events: u64,
+    /// Adapter writes that created an entity.
     pub created: u64,
+    /// Adapter writes that overwrote one.
     pub updated: u64,
+    /// Adapter writes that deleted one.
     pub deleted: u64,
+    /// Adapter writes skipped (idempotent, stale, tombstoned, …).
     pub skipped: u64,
+    /// Adapter writes that failed.
     pub failed: u64,
+    /// Events dead-lettered.
     pub dlq: u64,
+    /// How many times the batch was retried.
     pub retries: u32,
     /// The batch transaction rolled back (a failing event, or an adapter that
     /// could not begin or commit its batch) and the batch was dispatched one
     /// event at a time.
     pub fell_back: bool,
+    /// The batch's position was committed.
     pub committed: bool,
 }
 
+/// What [`run_sources`] did: every batch, the totals, and why it stopped.
+/// `--output json` prints it; its field names are stable.
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct SourceRunReport {
+    /// Every batch, in dispatch order.
     pub batches: Vec<BatchSummary>,
+    /// Events dispatched.
     pub events_processed: u64,
+    /// Events every routed adapter succeeded on.
     pub events_succeeded: u64,
+    /// Events that failed (dead-lettered ones included).
     pub events_failed: u64,
+    /// Events dead-lettered.
     pub events_dlq: u64,
+    /// Batches whose position was committed.
     pub batches_committed: u64,
+    /// Why the run ended.
     pub stopped_reason: StoppedReason,
     /// Set only when `stopped_reason` is `RetryExhausted`: the position of the
     /// batch that could not be committed, for operator intervention.

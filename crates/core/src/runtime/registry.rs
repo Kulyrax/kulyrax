@@ -33,6 +33,7 @@ pub struct SourceBuildContext {
     pub inspect: bool,
 }
 
+/// Builds a source for one `sources:` entry of a registered `type:`.
 pub type SourceFactory = Arc<
     dyn Fn(&CustomSourceConfig, &SourceBuildContext) -> Result<Box<dyn EventSource>, SourceError>
         + Send
@@ -46,6 +47,7 @@ pub struct SourceRegistry {
 }
 
 impl SourceRegistry {
+    /// No factories registered.
     pub fn new() -> Self {
         Self::default()
     }
@@ -97,9 +99,13 @@ impl SourceRegistry {
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct MappingSet {
+    /// SQL mappings, by event type.
     pub sql: HashMap<String, SqlMapping>,
+    /// Document mappings, by event type.
     pub document: HashMap<String, DocumentMapping>,
+    /// Key-value mappings, by event type.
     pub kv: HashMap<String, KvMapping>,
+    /// Graph mappings, by event type.
     pub graph: HashMap<String, GraphMapping>,
 }
 
@@ -107,11 +113,15 @@ pub struct MappingSet {
 /// time, so a factory can be registered before or after mappings load.
 #[non_exhaustive]
 pub struct AdapterBuildContext {
+    /// Every loaded mapping. A factory takes its storage kind's table.
     pub mappings: MappingSet,
+    /// The registered upcasters.
     pub upcasters: Arc<UpcasterRegistry>,
+    /// The config's `migration_policy`.
     pub migration_policy: MigrationPolicy,
 }
 
+/// Builds an adapter for one `adapters:` entry of a registered `type:`.
 pub type AdapterFactory = Arc<
     dyn Fn(
             &CustomAdapterConfig,
@@ -121,12 +131,16 @@ pub type AdapterFactory = Arc<
         + Sync,
 >;
 
+/// Adapter factories by `type:`: how `type: postgres` and every other
+/// backend outside core is built. Register with
+/// [`KulyraxRuntime::register_adapter_factory`](crate::KulyraxRuntime::register_adapter_factory).
 #[derive(Default, Clone)]
 pub struct AdapterRegistry {
     factories: HashMap<String, AdapterFactory>,
 }
 
 impl AdapterRegistry {
+    /// No factories registered.
     pub fn new() -> Self {
         Self::default()
     }

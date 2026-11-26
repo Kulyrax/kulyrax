@@ -15,6 +15,8 @@
 //! (stability §9.3). The `unstable-pb` feature exposes it as `pb`, outside
 //! semver.
 
+#![deny(missing_docs)]
+
 #[cfg(feature = "unstable-pb")]
 #[doc(hidden)]
 #[allow(clippy::result_large_err)] // tonic-generated client stubs return `Err(tonic::Status)` directly
@@ -55,11 +57,15 @@ const ACK_BOUND: usize = 256;
 /// producer-contract.md. Bump only when that guarantee's meaning changes.
 const CURRENT_ACK_PROTOCOL_VERSION: u32 = 1;
 
+/// Why the gRPC server could not start.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum IngestError {
+    /// The listen address could not be bound.
     Bind(String),
+    /// The server's async runtime could not be created.
     Runtime(std::io::Error),
+    /// The ingest options are invalid (a bad listen address).
     Config(String),
 }
 
@@ -544,12 +550,17 @@ fn prepare_unix_socket_path(path: &std::path::Path) -> Result<(), IngestError> {
 /// Options for [`serve`].
 #[non_exhaustive]
 pub struct ServeOptions {
+    /// Where to listen: `tcp://host:port`, `host:port`, or (Linux and macOS)
+    /// `unix:///path`.
     pub listen: String,
+    /// The most events in one batch.
     pub max_batch: usize,
+    /// How many times a failed batch is retried before the run halts.
     pub retry_budget: u32,
     /// How long a batch may wait to fill; see
     /// [`kulyrax_core::SourceRunOptions::max_batch_delay`].
     pub max_batch_delay: std::time::Duration,
+    /// Where failed events are dead-lettered; `None` turns the DLQ off.
     pub dlq_dir: Option<std::path::PathBuf>,
     /// Poll cadence when caught up — the max ingest→dispatch latency.
     pub poll_interval: std::time::Duration,
@@ -568,11 +579,15 @@ impl Default for ServeOptions {
     }
 }
 
+/// Why [`serve`] stopped with an error.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ServeError {
+    /// Loading the project, or building its adapters, failed.
     Pipeline(kulyrax_core::pipeline::PipelineError),
+    /// The gRPC server could not start.
     Ingest(IngestError),
+    /// The gRPC source failed while the run loop read it.
     Source(SourceError),
 }
 

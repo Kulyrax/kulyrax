@@ -6,12 +6,19 @@ fn default_event_version() -> u32 {
     1
 }
 
+/// One event from the log: what Kulyrax projects. Build one with
+/// [`Event::new`] and the `with_*` methods.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Event {
+    /// The event's id. Unique per event; dead-letter files are named after it.
     pub event_id: String,
+    /// The event's type, which routing and the mappings match on.
     pub event_type: String,
+    /// The payload, a JSON document as a string. Mappings read it by path
+    /// (`payload.id`).
     pub payload: String,
+    /// String metadata. Mappings read it by path (`metadata.tenant`).
     pub metadata: HashMap<String, String>,
     /// Payload schema version. Unversioned (legacy) events default to 1.
     #[serde(default = "default_event_version")]
@@ -58,15 +65,19 @@ impl Event {
         self
     }
 
+    /// The event's id.
     pub fn id(&self) -> &str {
         &self.event_id
     }
+    /// The event's type.
     pub fn event_type(&self) -> &str {
         &self.event_type
     }
+    /// The payload's schema version.
     pub fn version(&self) -> u32 {
         self.version
     }
+    /// The event's per-entity sequence.
     pub fn sequence(&self) -> u64 {
         self.sequence
     }

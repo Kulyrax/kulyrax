@@ -23,6 +23,8 @@
 //!
 //! Decision record: `docs/ledger/decisions/2026-11-24-postgres-outbox-source.md`.
 
+#![deny(missing_docs)]
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -65,6 +67,8 @@ pub struct OutboxConfig {
     /// A strictly increasing integer column: delivery order and each
     /// event's `sequence`.
     pub sequence_column: String,
+    /// Which column feeds each event field (the defaults match the column
+    /// names: `event_id`, `event_type`, `payload`, `metadata`, `version`).
     #[serde(default)]
     pub columns: OutboxColumns,
     /// A final gap is still held at least this long, for a producer that
@@ -105,26 +109,31 @@ impl OutboxConfig {
         }
     }
 
+    /// Set the column mapping.
     pub fn with_columns(mut self, columns: OutboxColumns) -> Self {
         self.columns = columns;
         self
     }
 
+    /// Set [`Self::gap_grace_ms`].
     pub fn with_gap_grace_ms(mut self, ms: u64) -> Self {
         self.gap_grace_ms = ms;
         self
     }
 
+    /// Set [`Self::gap_timeout_ms`].
     pub fn with_gap_timeout_ms(mut self, ms: u64) -> Self {
         self.gap_timeout_ms = ms;
         self
     }
 
+    /// Set [`Self::watch_retention_ms`].
     pub fn with_watch_retention_ms(mut self, ms: u64) -> Self {
         self.watch_retention_ms = ms;
         self
     }
 
+    /// Set [`Self::allow_unverified_sequence`].
     pub fn with_allow_unverified_sequence(mut self, allow: bool) -> Self {
         self.allow_unverified_sequence = allow;
         self
@@ -153,10 +162,15 @@ impl std::fmt::Debug for OutboxConfig {
 #[serde(deny_unknown_fields, default)]
 #[non_exhaustive]
 pub struct OutboxColumns {
+    /// The column holding each event's id.
     pub event_id: String,
+    /// The column holding the event type.
     pub event_type: String,
+    /// The column holding the JSON payload.
     pub payload: String,
+    /// The column holding the metadata, a JSON object; `None` for no such column.
     pub metadata: Option<String>,
+    /// The column holding the payload version; `None` for no such column (version 1).
     pub version: Option<String>,
 }
 
@@ -174,16 +188,19 @@ impl Default for OutboxColumns {
 
 /// Start from [`OutboxColumns::default`] and override the columns that differ.
 impl OutboxColumns {
+    /// Set the event id column.
     pub fn with_event_id(mut self, column: impl Into<String>) -> Self {
         self.event_id = column.into();
         self
     }
 
+    /// Set the event type column.
     pub fn with_event_type(mut self, column: impl Into<String>) -> Self {
         self.event_type = column.into();
         self
     }
 
+    /// Set the payload column.
     pub fn with_payload(mut self, column: impl Into<String>) -> Self {
         self.payload = column.into();
         self

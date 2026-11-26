@@ -39,10 +39,14 @@ pub fn control_dir(config_path: &Path) -> PathBuf {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ReloadOutcome {
+    /// The new project was loaded and is running.
     Applied {
+        /// What changed, as the process reported it.
         message: String,
     },
+    /// The new project is invalid; the process keeps the previous one.
     Rejected {
+        /// Why.
         reason: String,
     },
     /// No process picked the request up in time.

@@ -1,11 +1,19 @@
+/// The document storage kind: the trait a document backend implements, the
+/// mappings, and the file-backed store.
 pub mod document;
 pub(crate) mod file_names;
 pub(crate) mod file_store;
+/// The graph storage kind: the trait a graph backend implements, the
+/// mappings, and the file-backed store.
 pub mod graph;
+/// The key-value storage kind: the trait a key-value backend implements, the
+/// mappings, and the file-backed store.
 pub mod keyvalue;
 #[doc(hidden)]
 pub mod legacy;
 pub(crate) mod loader;
+/// The SQL storage kind: the trait a SQL backend implements, the mappings, and
+/// the SQLite adapter.
 pub mod sql;
 
 use core::fmt;
@@ -24,6 +32,7 @@ use crate::routing::StorageKind;
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum AdapterError {
+    /// The write failed; the message says why (redacted of credentials).
     WriteFailed(String),
     /// No upcaster chain to the mapping's target version, under `MigrationPolicy::Strict`.
     UnsupportedVersion(String),
@@ -92,11 +101,15 @@ pub enum AdapterOutcome {
     Failed(AdapterError),
 }
 
+/// What one adapter did with one event.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct AdapterResult {
+    /// The adapter's id.
     pub adapter_id: String,
+    /// The adapter's storage kind.
     pub kind: StorageKind,
+    /// What it did.
     pub outcome: AdapterOutcome,
     /// Event payload version this adapter observed (Phase 10.3).
     pub source_version: Option<u32>,
@@ -110,10 +123,13 @@ impl AdapterResult {
         !matches!(self.outcome, AdapterOutcome::Failed(_))
     }
 
+    /// True when the adapter skipped the event (idempotent, stale, tombstoned,
+    /// and the other [`SkipReason`]s).
     pub fn is_skipped(&self) -> bool {
         matches!(self.outcome, AdapterOutcome::Skipped(_))
     }
 
+    /// The entity was created (no version metadata).
     pub fn created(adapter_id: String, kind: StorageKind) -> Self {
         Self {
             adapter_id,
@@ -124,6 +140,7 @@ impl AdapterResult {
         }
     }
 
+    /// The entity was created, with the event's and the mapping's versions.
     pub fn created_versioned(
         adapter_id: String,
         kind: StorageKind,
@@ -171,6 +188,7 @@ impl AdapterResult {
         }
     }
 
+    /// The adapter failed with `error`.
     pub fn failure(adapter_id: String, kind: StorageKind, error: AdapterError) -> Self {
         Self {
             adapter_id,
@@ -181,6 +199,7 @@ impl AdapterResult {
         }
     }
 
+    /// The adapter skipped the event, for `reason`.
     pub fn skipped(adapter_id: String, kind: StorageKind, reason: SkipReason) -> Self {
         Self {
             adapter_id,
@@ -268,6 +287,7 @@ pub enum Operation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct GuardState {
+    /// The sequence of the last event projected into this lane.
     pub last_sequence: u64,
     /// This entity's tombstone is currently set (Phase 13.2/13.3).
     pub deleted: bool,
@@ -283,11 +303,18 @@ pub struct GuardState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum WriteDecision {
+    /// The entity has no projected state, or the event is newer than its
+    /// (non-permanent) tombstone: create it.
     Insert,
+    /// The event is newer and `on_existing: replace`: overwrite the entity.
     Update,
     /// Phase 13.2/13.3: remove the entity and record the tombstone.
     Delete,
+    /// The entity is already projected and `on_existing: ignore`: skip
+    /// ([`SkipReason::AlreadyProjected`]).
     SkipIdempotent,
+    /// The event is not newer than the lane's last sequence: skip
+    /// ([`SkipReason::StaleSequence`]).
     SkipStale,
     /// Phase 13.2/13.3: a `delete` landed on an already-tombstoned entity with
     /// a newer sequence — bump `last_sequence` on the tombstone, write nothing else.
@@ -379,7 +406,7 @@ pub fn decide(
 /// value always canonicalizes the same way across adapters. Objects and
 /// arrays fall back to their JSON text — mapping authors should not use those
 /// as an identity or column value (identity paths reject them outright; see
-/// [`is_identity_scalar`]).
+/// `is_identity_scalar`).
 pub fn json_scalar_to_string(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(s) => s.clone(),
@@ -402,6 +429,11 @@ pub(crate) fn is_identity_scalar(value: &serde_json::Value) -> bool {
     )
 }
 
+/// One projection target: a database, an index, a store. Core calls it
+/// through the dispatcher for every event routed to it, in dependency
+/// order. A backend usually implements one of the storage kinds' traits
+/// (`exec::SqlTxn`, `exec::DocumentBackend`, …) and drives it with that kind's
+/// `exec` functions, which call [`decide`]. See `docs/writing-a-backend.md`.
 pub trait StorageAdapter {
     /// Logical storage family (Sql / Document)
     fn kind(&self) -> StorageKind;
@@ -501,7 +533,9 @@ impl Prepared {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PrepareFailure {
+    /// The adapter's id.
     pub adapter_id: String,
+    /// Why it failed.
     pub message: String,
 }
 

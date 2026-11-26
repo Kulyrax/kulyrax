@@ -43,23 +43,31 @@ use std::sync::atomic::AtomicBool;
 // Errors
 // ---------------------------------------------------------------------------
 
+/// Why a pipeline command (load, run, replay, rebuild, …) could not run. The
+/// CLI's exit code is decided from its variant (`docs/stability.md` §3).
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum PipelineError {
+    /// A file or directory could not be read or written.
     Io(std::io::Error),
     /// `config.yaml` did not parse; the error names the file, the field and
     /// the line.
     ConfigParse(crate::yaml::YamlError),
+    /// `config.yaml` parsed, but is invalid ([`KulyraxConfig::validate`]).
     Config(ConfigError),
     /// A mapping directory could not be loaded.
     Mapping(LoadError),
     /// The routing file could not be loaded.
     Routing(LoadError),
+    /// The project failed start-up validation: every issue found.
     Validation(ValidationReport),
     /// An event file (`run --event`) is not a valid event.
     EventParse(serde_json::Error),
+    /// The events to replay could not be read.
     Replay(ReplayLoadError),
+    /// A source failed: it could not start, or failed while read.
     Source(SourceError),
+    /// Adapters could not be built from the config: each one, and why.
     AdapterBuild(Vec<AdapterBuildFailure>),
     /// One or more built adapters failed `StorageAdapter::prepare`.
     AdapterPrepare(Vec<crate::adapter::PrepareFailure>),
@@ -125,12 +133,16 @@ pub enum LoadError {
     /// A file that did not parse. `context` says which kind of file
     /// (`Invalid sql mapping`); the error names the file, field and line.
     Parse {
+        /// What the file was (`Invalid SQL mapping`, `Invalid routing file`).
         context: String,
+        /// The parse error, which names the file, the field and the line.
         source: crate::yaml::YamlError,
     },
     /// A file or directory that could not be read; `context` names it.
     Read {
+        /// What could not be read (`Failed to read routing file …`).
         context: String,
+        /// The I/O error.
         source: std::io::Error,
     },
     /// Anything else: a duplicate mapping, a routing file with the wrong
@@ -254,11 +266,17 @@ pub fn load_event(path: &Path) -> Result<Event, PipelineError> {
 /// A fully loaded and cross-validated project: config, mappings, and routing rules.
 #[non_exhaustive]
 pub struct LoadedProject {
+    /// `config.yaml`.
     pub config: KulyraxConfig,
+    /// SQL mappings, by event type.
     pub sql_mappings: HashMap<String, SqlMapping>,
+    /// Document mappings, by event type.
     pub doc_mappings: HashMap<String, DocumentMapping>,
+    /// Key-value mappings, by event type.
     pub kv_mappings: HashMap<String, KvMapping>,
+    /// Graph mappings, by event type.
     pub graph_mappings: HashMap<String, GraphMapping>,
+    /// The routing file: each event type's adapters.
     pub routing_rules: HashMap<String, Vec<AdapterId>>,
 }
 
@@ -327,10 +345,15 @@ pub fn dry_run(
 /// Result of [explain]: routing/dependency resolution for one event, without execution.
 #[non_exhaustive]
 pub struct ExplainResult {
+    /// The event explained.
     pub event: Event,
+    /// The adapters routing sends it to.
     pub routed_adapters: Vec<AdapterId>,
+    /// The order they run in (dependencies, then priority).
     pub execution_order: Vec<AdapterId>,
+    /// The same adapters by dependency depth: `(depth, adapters at it)`.
     pub execution_layers: Vec<(u32, Vec<AdapterId>)>,
+    /// The dependency chain is deeper than recommended.
     pub depth_warning: bool,
 }
 
@@ -422,7 +445,9 @@ pub fn build_sources(
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct SourceStatus {
+    /// The source's id.
     pub id: String,
+    /// The position committed so far; `None` before the first commit.
     pub committed: Option<String>,
     /// The source's own `name: value` lines ([`EventSource::details`]).
     pub details: Vec<(String, String)>,

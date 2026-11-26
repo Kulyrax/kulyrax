@@ -1,8 +1,12 @@
+/// The document error type.
 pub mod adapter;
 pub mod exec;
+/// The file-backed document store (`type: file`).
 pub mod file;
 pub(crate) mod loader;
+/// The document mapping format.
 pub mod mapping;
+/// Resolving a document mapping against an event.
 pub mod runtime;
 
 // The extension surface for a new document backend (Phase 25.1) is `exec`:

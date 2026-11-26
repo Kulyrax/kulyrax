@@ -37,6 +37,10 @@ use crate::source::runner::{
 use crate::source::{EventSource, SourceError};
 use crate::upcast::UpcasterRegistry;
 
+/// A loaded project, ready to project events: the config, the mappings, the
+/// routing, the registered backend factories and the built adapters. The
+/// embedded way to use Kulyrax; the CLI drives it through `pipeline`. Start
+/// with [`KulyraxRuntime::load`].
 pub struct KulyraxRuntime {
     config: KulyraxConfig,
     /// Kept for the runtime's lifetime: every adapter build gets a copy, so
@@ -121,10 +125,12 @@ impl KulyraxRuntime {
         Ok(runtime)
     }
 
+    /// The project's config.
     pub fn config(&self) -> &KulyraxConfig {
         &self.config
     }
 
+    /// The upcasters every adapter is built with.
     pub fn upcasters(&self) -> Arc<UpcasterRegistry> {
         Arc::clone(&self.upcasters)
     }
@@ -223,6 +229,8 @@ impl KulyraxRuntime {
         let _ = self.build_adapters();
     }
 
+    /// Dispatch one event to every adapter routing sends it to, in dependency
+    /// order, and report what each did.
     pub fn run_once(&mut self, event: Event) -> ExecutionReport {
         // An adapter that fails to prepare fails this event, with the prepare
         // error in the report. Call `prepare_adapters` first to stop instead.

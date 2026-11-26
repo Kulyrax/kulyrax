@@ -7,6 +7,8 @@
 //! or prost upgrade never changes them. The generated code is private; the
 //! `unstable-pb` feature exposes it as `pb`, outside semver.
 
+#![deny(missing_docs)]
+
 #[cfg(feature = "unstable-pb")]
 #[doc(hidden)]
 #[allow(clippy::result_large_err)] // tonic-generated client stubs return `Err(tonic::Status)` directly
@@ -32,9 +34,11 @@ use tonic::Streaming;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct EventEnvelope {
+    /// The event type, which routing matches on.
     pub event_type: String,
     /// JSON, exactly as the file sources carry it.
     pub payload: String,
+    /// String metadata, which becomes the event's metadata.
     pub metadata: HashMap<String, String>,
     /// Payload schema version. 0 is read as 1.
     pub version: u32,
@@ -137,7 +141,10 @@ pub enum AckOutcome {
     /// `ack_protocol_version >= 1` and `dlq_events > 0`: the position still
     /// advanced, but this many events were dead-lettered rather than
     /// genuinely projected.
-    DeadLettered { count: u32 },
+    DeadLettered {
+        /// How many events of the batch were dead-lettered.
+        count: u32,
+    },
     /// `ack_protocol_version == 0`: this server predates `dlq_events`
     /// accounting (or the field was never set), so `dlq_events` cannot be
     /// trusted either way — including when it reads `0`. Do not treat this
@@ -167,22 +174,40 @@ impl Ack {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum StatusCode {
+    /// Not an error.
     Ok,
+    /// The operation was cancelled, usually by the caller.
     Cancelled,
+    /// An error with no better code.
     Unknown,
+    /// The request is invalid. Kulyrax sends it for an envelope with an empty
+    /// position, ending that stream.
     InvalidArgument,
+    /// The deadline passed before the operation finished.
     DeadlineExceeded,
+    /// Something the request named was not found.
     NotFound,
+    /// What the request would create already exists.
     AlreadyExists,
+    /// The caller may not do this.
     PermissionDenied,
+    /// A resource ran out (a quota, or space).
     ResourceExhausted,
+    /// The system is not in a state that allows the operation.
     FailedPrecondition,
+    /// The operation was aborted, typically by a concurrency conflict.
     Aborted,
+    /// A value was out of its valid range.
     OutOfRange,
+    /// The server does not implement the operation.
     Unimplemented,
+    /// An internal server error.
     Internal,
+    /// The service is unavailable for now; retrying may help.
     Unavailable,
+    /// Data was lost or corrupted.
     DataLoss,
+    /// The request has no valid credentials.
     Unauthenticated,
 }
 
@@ -215,7 +240,9 @@ impl StatusCode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RpcError {
+    /// The status code.
     pub code: StatusCode,
+    /// The server's message.
     pub message: String,
 }
 
@@ -236,12 +263,15 @@ impl From<tonic::Status> for RpcError {
     }
 }
 
+/// Why a [`Producer`] call failed.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ClientError {
+    /// The connection could not be made (a bad endpoint, or no server).
     Connect(String),
     /// The server's status: a refused call, or a stream it ended.
     Rpc(RpcError),
+    /// The stream is closed: the server ended it, or the connection dropped.
     Closed,
 }
 

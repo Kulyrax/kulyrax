@@ -18,135 +18,202 @@ use crate::runtime::dependency_graph::{
 // Issues & report
 // ---------------------------------------------------------------------------
 
+/// One problem start-up validation found in the config, the mappings or the
+/// routing. A run starts only when there are none ([`ValidationReport`]).
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum ValidationIssue {
+    /// A SQL mapping that cannot be built.
     InvalidSqlMapping {
+        /// The mapping's event type.
         event: String,
+        /// Why it cannot be built.
         reason: String,
     },
+    /// A document mapping that cannot be built.
     InvalidDocumentMapping {
+        /// The mapping's event type.
         event: String,
+        /// Why it cannot be built.
         reason: String,
     },
+    /// A key-value mapping that cannot be built.
     InvalidKvMapping {
+        /// The mapping's event type.
         event: String,
+        /// Why it cannot be built.
         reason: String,
     },
+    /// A graph mapping that cannot be built.
     InvalidGraphMapping {
+        /// The mapping's event type.
         event: String,
+        /// Why it cannot be built.
         reason: String,
     },
+    /// Routing names an adapter that is not in the config.
     UnknownAdapter {
+        /// The routed event type.
         event_type: String,
+        /// The id routing names.
         adapter_id: String,
     },
+    /// An event type is routed to a SQL adapter but has no SQL mapping.
     MissingSqlMapping {
+        /// The routed event type.
         event_type: String,
+        /// The SQL adapter it is routed to.
         adapter_id: String,
     },
+    /// An event type is routed to a document adapter but has no document mapping.
     MissingDocumentMapping {
+        /// The routed event type.
         event_type: String,
+        /// The document adapter it is routed to.
         adapter_id: String,
     },
+    /// An event type is routed to a key-value adapter but has no key-value mapping.
     MissingKvMapping {
+        /// The routed event type.
         event_type: String,
+        /// The key-value adapter it is routed to.
         adapter_id: String,
     },
+    /// An event type is routed to a graph adapter but has no graph mapping.
     MissingGraphMapping {
+        /// The routed event type.
         event_type: String,
+        /// The graph adapter it is routed to.
         adapter_id: String,
     },
+    /// A mapping needs capabilities (`requires_capabilities`) the adapter it is
+    /// routed to does not declare.
     CapabilityMismatch {
+        /// The routed event type.
         event_type: String,
+        /// The adapter that lacks them.
         adapter_id: String,
+        /// The capabilities it lacks.
         missing: Vec<AdapterCapability>,
     },
     /// SQL mapping exists but event type is not in routing.
     UnroutedSqlMapping {
+        /// The mapping's event type.
         event: String,
     },
     /// Event is routed but no Sqlite adapter on the route (SQL mapping unreachable).
     SqlMappingNoSqlTarget {
+        /// The mapping's event type.
         event: String,
     },
+    /// A document mapping exists, but its event type is not in routing.
     UnroutedDocumentMapping {
+        /// The mapping's event type.
         event: String,
     },
+    /// The event type is routed, but to no document adapter, so its document
+    /// mapping is never used.
     DocumentMappingNoFileTarget {
+        /// The mapping's event type.
         event: String,
     },
     /// Key-value mapping exists but event type is not in routing.
     UnroutedKvMapping {
+        /// The mapping's event type.
         event: String,
     },
     /// Event is routed but no key-value adapter on the route (mapping unreachable).
     KvMappingNoKeyValueTarget {
+        /// The mapping's event type.
         event: String,
     },
     /// Graph mapping exists but event type is not in routing.
     UnroutedGraphMapping {
+        /// The mapping's event type.
         event: String,
     },
     /// Event is routed but no graph adapter on the route (mapping unreachable).
     GraphMappingNoGraphTarget {
+        /// The mapping's event type.
         event: String,
     },
     /// HashMap key must match `event` field (routing and lookups use the key).
     MappingKeyMismatch {
+        /// The key the mapping is stored under.
         map_key: String,
+        /// The mapping's own `event` field.
         event_field: String,
+        /// The mapping kind: `"SQL"`, `"document"`, `"key-value"` or `"graph"`.
         kind: &'static str,
     },
     /// Same adapter id listed more than once for one event type.
     DuplicateRoutingTarget {
+        /// The routed event type.
         event_type: String,
+        /// The id listed more than once.
         adapter_id: String,
     },
     /// Config lists the same adapter id more than once (defense in depth vs `KulyraxConfig::validate`).
     DuplicateAdapterId {
+        /// The id listed more than once.
         adapter_id: String,
     },
     /// Routed adapter depends on another adapter not on this event's route.
     DependencyNotOnRoute {
+        /// The routed event type.
         event_type: String,
+        /// The adapter with the dependency.
         adapter_id: String,
+        /// The adapter it depends on, which is not on the route.
         dependency: String,
     },
     /// Cyclic depends_on among adapters routed for this event (`adapters` sorted by id).
     DependencyCycle {
+        /// The routed event type.
         event_type: String,
+        /// The adapters in the cycle, sorted by id.
         adapters: Vec<AdapterId>,
     },
     /// Phase 15.1: a faceted entity has a mapping using `on_existing: replace` —
     /// whole-entity replace and facets are mutually exclusive.
     FacetReplaceConflict {
+        /// The entity: its table, collection, namespace or label.
         entity: String,
+        /// The mapping kind: `"SQL"`, `"document"`, `"key-value"` or `"graph"`.
         kind: &'static str,
     },
     /// Phase 15.1: `operation: delete` on a named-facet mapping. You delete an
     /// entity, not a facet — delete is only valid on the default facet.
     FacetDeleteNotDefault {
+        /// The mapping's event type.
         event: String,
+        /// The mapping kind: `"SQL"`, `"document"`, `"key-value"` or `"graph"`.
         kind: &'static str,
     },
     /// Phase 15.1: a named facet owns no non-key field — nothing for its lane
     /// to write.
     FacetHasNoFields {
+        /// The mapping's event type.
         event: String,
+        /// The mapping kind: `"SQL"`, `"document"`, `"key-value"` or `"graph"`.
         kind: &'static str,
     },
     /// Phase 15.1: two facets of one entity both claim the same field — they
     /// would race their independent sequence gates.
     FacetFieldOverlap {
+        /// The entity: its table, collection, namespace or label.
         entity: String,
+        /// The field both facets write.
         field: String,
+        /// The mapping kind: `"SQL"`, `"document"`, `"key-value"` or `"graph"`.
         kind: &'static str,
     },
     /// Phase 15.1: a named facet's identity (primary_key / id / key) differs
     /// from the entity's — it must identify the same entity.
     FacetKeyMismatch {
+        /// The mapping's event type.
         event: String,
+        /// The mapping kind: `"SQL"`, `"document"`, `"key-value"` or `"graph"`.
         kind: &'static str,
     },
 }
@@ -389,6 +456,7 @@ fn cap_label(c: &AdapterCapability) -> &'static str {
     }
 }
 
+/// Every [`ValidationIssue`] found. Empty means the project is valid.
 #[derive(Debug, Clone, Default)]
 pub struct ValidationReport(pub Vec<ValidationIssue>);
 
@@ -397,10 +465,12 @@ impl ValidationReport {
         self.0.push(issue);
     }
 
+    /// Whether no issue was found.
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
+    /// `Ok` when no issue was found, else the report as the error.
     pub fn into_result(self) -> Result<(), Self> {
         if self.is_empty() { Ok(()) } else { Err(self) }
     }

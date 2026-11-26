@@ -33,30 +33,42 @@ use crate::execution::stages::{Stage, timed};
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct GraphGuard {
+    /// The sequence of the last event projected into this entity's default lane.
     #[serde(default)]
     pub last_sequence: u64,
+    /// That event's id.
     #[serde(default)]
     pub last_event_id: String,
+    /// The default lane is tombstoned.
     #[serde(default)]
     pub deleted: bool,
+    /// The tombstone is permanent: nothing projects this entity again.
     #[serde(default)]
     pub permanent: bool,
+    /// The named facets' lanes, by facet name (nodes only).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub facets: std::collections::BTreeMap<String, GraphFacetGuard>,
 }
 
+/// One named facet's guard lane on a graph node.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct GraphFacetGuard {
+    /// The sequence of the last event projected into this lane.
     pub last_sequence: u64,
+    /// That event's id.
     pub last_event_id: String,
+    /// The lane is tombstoned.
     #[serde(default)]
     pub deleted: bool,
+    /// The tombstone is permanent.
     #[serde(default)]
     pub permanent: bool,
 }
 
 impl GraphGuard {
+    /// The lane `facet` (`""` for the default lane) as [`crate::adapter::decide`]
+    /// reads it; `None` if that facet was never projected.
     pub fn lane_state(&self, facet: &str) -> Option<GuardState> {
         if facet.is_empty() {
             Some(GuardState {
@@ -179,37 +191,58 @@ pub trait GraphBackend {
     ) -> Result<(), GraphError>;
 }
 
+/// What a graph write did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum GraphOutcome {
+    /// The record was created.
     Created,
+    /// An existing record was overwritten.
     Updated,
+    /// The record was removed and its tombstone recorded.
     Deleted,
+    /// Nothing was written, for this reason.
     Skipped(SkipReason),
 }
 
+/// One node to write, resolved from a mapping and an event.
 #[non_exhaustive]
 pub struct NodePlan {
+    /// The node label.
     pub label: String,
+    /// The node id.
     pub node_id: String,
+    /// The properties to write.
     pub properties: Value,
+    /// The mapping's `on_existing`.
     pub on_existing: OnExisting,
+    /// The mapping's operation.
     pub operation: Operation,
+    /// Whether a delete is permanent.
     pub permanent: bool,
+    /// The facet this write owns; `""` for the default lane.
     pub facet: String,
 }
 
+/// One edge to write, resolved from a mapping and an event.
 #[non_exhaustive]
 pub struct EdgePlan {
+    /// The relationship type.
     pub edge_type: String,
+    /// The `from` endpoint's node id.
     pub from: String,
+    /// The `to` endpoint's node id.
     pub to: String,
     /// Canonical edge identity (`canonical_edge_key`) — stable across
     /// backends, opaque to this layer.
     pub key: String,
+    /// The properties to write.
     pub properties: Value,
+    /// The mapping's `on_existing`.
     pub on_existing: OnExisting,
+    /// The mapping's operation.
     pub operation: Operation,
+    /// Whether a delete is permanent.
     pub permanent: bool,
 }
 

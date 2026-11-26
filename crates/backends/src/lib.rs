@@ -3,6 +3,8 @@
 //! embedder that needs only one can depend on its crate directly and skip
 //! this one.
 
+#![deny(missing_docs)]
+
 use kulyrax_core::KulyraxRuntime;
 
 /// Register every backend enabled by feature. Call before the runtime builds
