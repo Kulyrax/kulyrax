@@ -14,15 +14,11 @@ use std::path::Path;
 pub fn config(db_path: &Path) -> KulyraxConfig {
     KulyraxConfig::new(
         "routing.yaml",
-        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
-            id: "sql-primary".into(),
-            priority: 10,
-            config: SqliteConfig {
-                path: db_path.to_string_lossy().into(),
-            },
-            capabilities: None,
-            depends_on: vec![],
-        })],
+        vec![AdapterConfig::Sqlite(SqliteAdapterConfig::new(
+            "sql-primary",
+            10,
+            SqliteConfig::new(db_path.to_string_lossy()),
+        ))],
     )
 }
 

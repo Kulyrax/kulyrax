@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # The gRPC crates use Kulyrax-owned types; raw pb behind `unstable-pb` (step 4, D3)
@@ -42,7 +42,7 @@ hidden ([decision](../decisions/2026-11-26-canonical-paths.md), item 3).
 - [x] Gates: fmt, clippy `-D warnings` (default features, and with
   `unstable-pb`), workspace tests, examples build, every Docker backend suite.
 - [x] The semver report has no `trait_newly_sealed` finding.
-- [ ] PR merged with the 12 required checks green.
+- [x] PR #31 merged with the 12 required checks green (all 18 checks pass; merge commit 3243836).
 
 ## Constraints and assumptions
 
@@ -71,4 +71,4 @@ hidden ([decision](../decisions/2026-11-26-canonical-paths.md), item 3).
 
 ## Outcome
 
-In progress.
+Completed. The gRPC crates expose only Kulyrax-owned types; generated code is behind `unstable-pb`. The storage-kind facades are removed, and the semver report no longer reads the backend traits as sealed.

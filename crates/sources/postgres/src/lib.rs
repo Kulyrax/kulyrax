@@ -56,6 +56,7 @@ fn default_watch_retention_ms() -> u64 {
 /// The `config:` block of a `type: postgres_outbox` source.
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[non_exhaustive]
 pub struct OutboxConfig {
     /// `postgres://user:pass@host/db`; `${ENV_VAR}` references are expanded.
     pub url: String,
@@ -84,6 +85,52 @@ pub struct OutboxConfig {
     pub allow_unverified_sequence: bool,
 }
 
+impl OutboxConfig {
+    /// The default columns, gap timings and watch retention; the sequence
+    /// check on.
+    pub fn new(
+        url: impl Into<String>,
+        table: impl Into<String>,
+        sequence_column: impl Into<String>,
+    ) -> Self {
+        Self {
+            url: url.into(),
+            table: table.into(),
+            sequence_column: sequence_column.into(),
+            columns: OutboxColumns::default(),
+            gap_grace_ms: default_gap_grace_ms(),
+            gap_timeout_ms: default_gap_timeout_ms(),
+            watch_retention_ms: default_watch_retention_ms(),
+            allow_unverified_sequence: false,
+        }
+    }
+
+    pub fn with_columns(mut self, columns: OutboxColumns) -> Self {
+        self.columns = columns;
+        self
+    }
+
+    pub fn with_gap_grace_ms(mut self, ms: u64) -> Self {
+        self.gap_grace_ms = ms;
+        self
+    }
+
+    pub fn with_gap_timeout_ms(mut self, ms: u64) -> Self {
+        self.gap_timeout_ms = ms;
+        self
+    }
+
+    pub fn with_watch_retention_ms(mut self, ms: u64) -> Self {
+        self.watch_retention_ms = ms;
+        self
+    }
+
+    pub fn with_allow_unverified_sequence(mut self, allow: bool) -> Self {
+        self.allow_unverified_sequence = allow;
+        self
+    }
+}
+
 /// Shows the URL with its password and secret query parameters hidden.
 impl std::fmt::Debug for OutboxConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -104,6 +151,7 @@ impl std::fmt::Debug for OutboxConfig {
 /// `~`: no such column (empty metadata, version 1).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields, default)]
+#[non_exhaustive]
 pub struct OutboxColumns {
     pub event_id: String,
     pub event_type: String,
@@ -121,6 +169,36 @@ impl Default for OutboxColumns {
             metadata: Some("metadata".into()),
             version: Some("version".into()),
         }
+    }
+}
+
+/// Start from [`OutboxColumns::default`] and override the columns that differ.
+impl OutboxColumns {
+    pub fn with_event_id(mut self, column: impl Into<String>) -> Self {
+        self.event_id = column.into();
+        self
+    }
+
+    pub fn with_event_type(mut self, column: impl Into<String>) -> Self {
+        self.event_type = column.into();
+        self
+    }
+
+    pub fn with_payload(mut self, column: impl Into<String>) -> Self {
+        self.payload = column.into();
+        self
+    }
+
+    /// `None`: no metadata column, so each event gets empty metadata.
+    pub fn with_metadata(mut self, column: Option<String>) -> Self {
+        self.metadata = column;
+        self
+    }
+
+    /// `None`: no version column, so each event gets version 1.
+    pub fn with_version(mut self, column: Option<String>) -> Self {
+        self.version = column;
+        self
     }
 }
 

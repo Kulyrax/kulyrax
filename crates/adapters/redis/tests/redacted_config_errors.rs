@@ -33,14 +33,7 @@ fn the_factory_error_hides_the_secrets() {
         "type": "redis", "id": "x", "priority": 10, "config": config(),
     }))
     .expect("raw");
-    let entry = CustomAdapterConfig {
-        type_name: "redis".into(),
-        id: "x".into(),
-        priority: 10,
-        raw,
-        capabilities: None,
-        depends_on: Vec::new(),
-    };
+    let entry = CustomAdapterConfig::new("redis", "x", 10, raw);
     let ctx = AdapterBuildContext::new(
         Default::default(),
         Arc::new(UpcasterRegistry::new()),

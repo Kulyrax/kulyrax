@@ -14,15 +14,10 @@ use std::collections::HashMap;
 fn config() -> KulyraxConfig {
     KulyraxConfig::new(
         "r.json",
-        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
-            id: "sql-primary".into(),
-            priority: 10,
-            config: SqliteConfig {
-                path: ":memory:".into(),
-            },
-            capabilities: Some(vec![AdapterCapability::Write, AdapterCapability::Upsert]),
-            depends_on: vec![],
-        })],
+        vec![AdapterConfig::Sqlite(
+            SqliteAdapterConfig::new("sql-primary", 10, SqliteConfig::new(":memory:"))
+                .with_capabilities(vec![AdapterCapability::Write, AdapterCapability::Upsert]),
+        )],
     )
 }
 

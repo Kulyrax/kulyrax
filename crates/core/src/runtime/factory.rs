@@ -2,12 +2,8 @@ use std::sync::Arc;
 
 use crate::adapter::StorageAdapter;
 use crate::adapter::document::file::FileDocumentAdapter;
-use crate::adapter::document::runtime::DocumentRuntimeBuilder;
-use crate::adapter::graph::runtime::GraphRuntimeBuilder;
 use crate::adapter::graph::store::GraphStore;
-use crate::adapter::keyvalue::runtime::KvRuntimeBuilder;
 use crate::adapter::keyvalue::store::FileKvStore;
-use crate::adapter::sql::runtime::SqlRuntimeBuilder;
 use crate::adapter::sql::sqlite::SqliteAdapter;
 use crate::adapter::{AdapterError, AdapterResult};
 use crate::event::Event;
@@ -86,77 +82,55 @@ pub fn build_adapters_reporting_failures(
     let mut failures = Vec::new();
 
     for adapter in &config.adapters {
-        match adapter {
-            AdapterConfig::Sqlite(cfg) => {
-                let builder = SqlRuntimeBuilder::new(ctx.mappings.sql.clone());
-                adapters.push(Box::new(SqliteAdapter::new(
-                    cfg.id.clone(),
-                    cfg.config.path.clone(),
-                    cfg.priority,
-                    builder,
-                    Arc::clone(&ctx.upcasters),
-                    config.migration_policy,
-                )));
-            }
-
-            AdapterConfig::File(cfg) => {
-                let builder = DocumentRuntimeBuilder::new(ctx.mappings.document.clone());
-                adapters.push(Box::new(FileDocumentAdapter::new(
-                    cfg.id.clone(),
-                    cfg.config.root.clone().into(),
-                    cfg.priority,
-                    builder,
-                    Arc::clone(&ctx.upcasters),
-                    config.migration_policy,
-                )));
-            }
-
-            AdapterConfig::KeyValue(cfg) => {
-                let builder = KvRuntimeBuilder::new(ctx.mappings.kv.clone());
-                adapters.push(Box::new(FileKvStore::new(
-                    cfg.id.clone(),
-                    cfg.config.root.clone().into(),
-                    cfg.priority,
-                    builder,
-                    Arc::clone(&ctx.upcasters),
-                    config.migration_policy,
-                )));
-            }
-
-            AdapterConfig::Graph(cfg) => {
-                let builder = GraphRuntimeBuilder::new(ctx.mappings.graph.clone());
-                adapters.push(Box::new(GraphStore::new(
-                    cfg.id.clone(),
-                    cfg.config.root.clone().into(),
-                    cfg.priority,
-                    builder,
-                    Arc::clone(&ctx.upcasters),
-                    config.migration_policy,
-                )));
-            }
-
-            AdapterConfig::Custom(cfg) => {
-                let built = registry.build(cfg, &ctx).unwrap_or_else(|| {
+        let (id, priority, built) = match adapter {
+            AdapterConfig::Sqlite(cfg) => (
+                &cfg.id,
+                cfg.priority,
+                SqliteAdapter::from_config(cfg, &ctx).map(boxed),
+            ),
+            AdapterConfig::File(cfg) => (
+                &cfg.id,
+                cfg.priority,
+                FileDocumentAdapter::from_config(cfg, &ctx).map(boxed),
+            ),
+            AdapterConfig::KeyValue(cfg) => (
+                &cfg.id,
+                cfg.priority,
+                FileKvStore::from_config(cfg, &ctx).map(boxed),
+            ),
+            AdapterConfig::Graph(cfg) => (
+                &cfg.id,
+                cfg.priority,
+                GraphStore::from_config(cfg, &ctx).map(boxed),
+            ),
+            AdapterConfig::Custom(cfg) => (
+                &cfg.id,
+                cfg.priority,
+                registry.build(cfg, &ctx).unwrap_or_else(|| {
                     Err(ConfigError::UnregisteredAdapterType(cfg.type_name.clone()))
+                }),
+            ),
+        };
+        match built {
+            Ok(adapter) => adapters.push(adapter),
+            Err(e) => {
+                failures.push(AdapterBuildFailure {
+                    adapter_id: id.clone(),
+                    reason: e.to_string(),
                 });
-                match built {
-                    Ok(adapter) => adapters.push(adapter),
-                    Err(e) => {
-                        failures.push(AdapterBuildFailure {
-                            adapter_id: cfg.id.clone(),
-                            reason: e.to_string(),
-                        });
-                        adapters.push(Box::new(FailedAdapter {
-                            id: cfg.id.clone(),
-                            priority: cfg.priority,
-                            error: e.to_string(),
-                        }));
-                    }
-                }
+                adapters.push(Box::new(FailedAdapter {
+                    id: id.clone(),
+                    priority,
+                    error: e.to_string(),
+                }));
             }
         }
     }
 
     adapters.sort_by_key(|a| a.priority());
     (adapters, failures)
+}
+
+fn boxed<A: StorageAdapter + 'static>(adapter: A) -> Box<dyn StorageAdapter> {
+    Box::new(adapter)
 }

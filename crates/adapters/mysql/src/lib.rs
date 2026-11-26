@@ -50,7 +50,15 @@ use kulyrax_core::upcast::UpcasterRegistry;
 
 /// The `config:` block of a `type: mysql` adapter entry.
 #[derive(Clone, Deserialize)]
+#[non_exhaustive]
 pub struct MySqlConfig {
+    /// The adapter's id. In YAML it is the entry's `id:`, not a key of the
+    /// `config:` block.
+    #[serde(skip)]
+    pub id: String,
+    /// The adapter's priority. In YAML it is the entry's `priority:`.
+    #[serde(skip)]
+    pub priority: u32,
     /// `mysql://user:pass@host:port/db`; `${ENV_VAR}` references are expanded.
     pub url: String,
     /// Connection pool size (default 4).
@@ -58,10 +66,39 @@ pub struct MySqlConfig {
     pub pool_size: Option<u32>,
 }
 
+impl MySqlConfig {
+    /// Id empty, priority 0, the default pool size.
+    pub fn new(url: impl Into<String>) -> Self {
+        Self {
+            id: String::new(),
+            priority: 0,
+            url: url.into(),
+            pool_size: None,
+        }
+    }
+
+    pub fn with_id(mut self, id: impl Into<String>) -> Self {
+        self.id = id.into();
+        self
+    }
+
+    pub fn with_priority(mut self, priority: u32) -> Self {
+        self.priority = priority;
+        self
+    }
+
+    pub fn with_pool_size(mut self, pool_size: u32) -> Self {
+        self.pool_size = Some(pool_size);
+        self
+    }
+}
+
 /// Shows the URL with its password and secret query parameters hidden.
 impl std::fmt::Debug for MySqlConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MySqlConfig")
+            .field("id", &self.id)
+            .field("priority", &self.priority)
             .field("url", &kulyrax_core::redact::redact_url(&self.url))
             .field("pool_size", &self.pool_size)
             .finish()
@@ -73,29 +110,39 @@ pub fn factory(
     entry: &CustomAdapterConfig,
     ctx: &AdapterBuildContext,
 ) -> Result<Box<dyn StorageAdapter>, ConfigError> {
-    let id = entry.id.clone();
     let cfg: MySqlConfig = entry.backend_config()?;
-    let url = expand_env(&cfg.url);
-    if url.trim().is_empty() {
-        return Err(ConfigError::FactoryConfigInvalid(format!(
-            "mysql adapter {id:?}: `url` is empty"
-        )));
+    let cfg = cfg.with_id(entry.id.clone()).with_priority(entry.priority);
+    Ok(Box::new(MySqlAdapter::from_config(&cfg, ctx)?))
+}
+
+impl MySqlAdapter {
+    /// Build the adapter, with the run's mappings, upcasters and migration
+    /// policy from `ctx`. Fails on the checks below; an unreachable server
+    /// surfaces on the first write.
+    pub fn from_config(cfg: &MySqlConfig, ctx: &AdapterBuildContext) -> Result<Self, ConfigError> {
+        let id = cfg.id.clone();
+        let url = expand_env(&cfg.url);
+        if url.trim().is_empty() {
+            return Err(ConfigError::FactoryConfigInvalid(format!(
+                "mysql adapter {id:?}: `url` is empty"
+            )));
+        }
+        if Opts::from_url(&url).is_err() {
+            return Err(ConfigError::FactoryConfigInvalid(format!(
+                "mysql adapter {id:?}: `url` does not parse: {}",
+                kulyrax_core::redact::redact_url(&url)
+            )));
+        }
+        Ok(MySqlAdapter::new(
+            id,
+            &url,
+            cfg.pool_size.unwrap_or(4),
+            cfg.priority,
+            SqlRuntimeBuilder::new(ctx.mappings.sql.clone()),
+            Arc::clone(&ctx.upcasters),
+            ctx.migration_policy,
+        ))
     }
-    if Opts::from_url(&url).is_err() {
-        return Err(ConfigError::FactoryConfigInvalid(format!(
-            "mysql adapter {id:?}: `url` does not parse: {}",
-            kulyrax_core::redact::redact_url(&url)
-        )));
-    }
-    Ok(Box::new(MySqlAdapter::new(
-        id,
-        &url,
-        cfg.pool_size.unwrap_or(4),
-        entry.priority,
-        SqlRuntimeBuilder::new(ctx.mappings.sql.clone()),
-        Arc::clone(&ctx.upcasters),
-        ctx.migration_policy,
-    )))
 }
 
 /// The pool is held as `Result<Pool, String>`: a connection error surfaces
@@ -127,6 +174,7 @@ fn poisoned() -> AdapterError {
 }
 
 impl MySqlAdapter {
+    #[doc(hidden)]
     pub fn new(
         id: String,
         url: &str,
@@ -669,14 +717,7 @@ mod tests {
             "config": { "url": url },
         }))
         .map_err(|e| ConfigError::FactoryConfigInvalid(e.to_string()))?;
-        let entry = CustomAdapterConfig {
-            type_name: "mysql".into(),
-            id: "my1".into(),
-            priority: 10,
-            raw,
-            capabilities: None,
-            depends_on: Vec::new(),
-        };
+        let entry = CustomAdapterConfig::new("mysql", "my1", 10, raw);
         let ctx = AdapterBuildContext::new(
             Default::default(),
             Arc::new(UpcasterRegistry::new()),

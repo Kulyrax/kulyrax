@@ -85,7 +85,15 @@ const BULK_MAX_BYTES: usize = 8 * 1024 * 1024;
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Deserialize)]
+#[non_exhaustive]
 pub struct ElasticsearchConfig {
+    /// The adapter's id. In YAML it is the entry's `id:`, not a key of the
+    /// `config:` block.
+    #[serde(skip)]
+    pub id: String,
+    /// The adapter's priority. In YAML it is the entry's `priority:`.
+    #[serde(skip)]
+    pub priority: u32,
     /// `http(s)://host:port`. May contain `${ENV_VAR}` references (the same
     /// pattern every other networked backend's `url` field uses).
     pub url: String,
@@ -101,10 +109,51 @@ pub struct ElasticsearchConfig {
     pub timeout_ms: Option<u64>,
 }
 
+impl ElasticsearchConfig {
+    /// Id empty, priority 0, no basic auth, the default timeout.
+    pub fn new(url: impl Into<String>) -> Self {
+        Self {
+            id: String::new(),
+            priority: 0,
+            url: url.into(),
+            username: None,
+            password: None,
+            timeout_ms: None,
+        }
+    }
+
+    pub fn with_id(mut self, id: impl Into<String>) -> Self {
+        self.id = id.into();
+        self
+    }
+
+    pub fn with_priority(mut self, priority: u32) -> Self {
+        self.priority = priority;
+        self
+    }
+
+    pub fn with_username(mut self, username: impl Into<String>) -> Self {
+        self.username = Some(username.into());
+        self
+    }
+
+    pub fn with_password(mut self, password: impl Into<String>) -> Self {
+        self.password = Some(password.into());
+        self
+    }
+
+    pub fn with_timeout_ms(mut self, timeout_ms: u64) -> Self {
+        self.timeout_ms = Some(timeout_ms);
+        self
+    }
+}
+
 /// Shows the URL redacted and the password as `***`.
 impl std::fmt::Debug for ElasticsearchConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ElasticsearchConfig")
+            .field("id", &self.id)
+            .field("priority", &self.priority)
             .field("url", &kulyrax_core::redact::redact_url(&self.url))
             .field("username", &self.username)
             .field(
@@ -171,6 +220,7 @@ fn poisoned() -> AdapterError {
 
 impl ElasticsearchAdapter {
     #[allow(clippy::too_many_arguments)]
+    #[doc(hidden)]
     pub fn new(
         id: String,
         url: &str,
@@ -854,34 +904,47 @@ pub fn factory(
     entry: &CustomAdapterConfig,
     ctx: &AdapterBuildContext,
 ) -> Result<Box<dyn StorageAdapter>, ConfigError> {
-    let id = entry.id.clone();
     let cfg: ElasticsearchConfig = entry.backend_config()?;
+    let cfg = cfg.with_id(entry.id.clone()).with_priority(entry.priority);
+    Ok(Box::new(ElasticsearchAdapter::from_config(&cfg, ctx)?))
+}
 
-    let url = expand_env(&cfg.url);
-    if url.trim().is_empty() {
-        return Err(ConfigError::FactoryConfigInvalid(format!(
-            "elasticsearch adapter {id:?}: `url` is empty"
-        )));
-    }
-    if reqwest::Url::parse(&url).is_err() {
-        return Err(ConfigError::FactoryConfigInvalid(format!(
-            "elasticsearch adapter {id:?}: `url` does not parse: {}",
-            kulyrax_core::redact::redact_url(&url)
-        )));
-    }
-    let auth = match (&cfg.username, &cfg.password) {
-        (Some(u), Some(p)) => Some((u.clone(), expand_env(p))),
-        _ => None,
-    };
+impl ElasticsearchAdapter {
+    /// Build the adapter, with the run's mappings, upcasters and migration
+    /// policy from `ctx`. Fails on the checks below; an unreachable server
+    /// surfaces on the first write.
+    pub fn from_config(
+        cfg: &ElasticsearchConfig,
+        ctx: &AdapterBuildContext,
+    ) -> Result<Self, ConfigError> {
+        let id = cfg.id.clone();
 
-    Ok(Box::new(ElasticsearchAdapter::new(
-        id,
-        &url,
-        auth,
-        cfg.timeout_ms.unwrap_or(10_000),
-        entry.priority,
-        DocumentRuntimeBuilder::new(ctx.mappings.document.clone()),
-        Arc::clone(&ctx.upcasters),
-        ctx.migration_policy,
-    )))
+        let url = expand_env(&cfg.url);
+        if url.trim().is_empty() {
+            return Err(ConfigError::FactoryConfigInvalid(format!(
+                "elasticsearch adapter {id:?}: `url` is empty"
+            )));
+        }
+        if reqwest::Url::parse(&url).is_err() {
+            return Err(ConfigError::FactoryConfigInvalid(format!(
+                "elasticsearch adapter {id:?}: `url` does not parse: {}",
+                kulyrax_core::redact::redact_url(&url)
+            )));
+        }
+        let auth = match (&cfg.username, &cfg.password) {
+            (Some(u), Some(p)) => Some((u.clone(), expand_env(p))),
+            _ => None,
+        };
+
+        Ok(ElasticsearchAdapter::new(
+            id,
+            &url,
+            auth,
+            cfg.timeout_ms.unwrap_or(10_000),
+            cfg.priority,
+            DocumentRuntimeBuilder::new(ctx.mappings.document.clone()),
+            Arc::clone(&ctx.upcasters),
+            ctx.migration_policy,
+        ))
+    }
 }

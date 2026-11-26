@@ -83,15 +83,11 @@ fn replay_follows_file_order_so_a_facet_before_its_create_is_skipped() {
 
     let config = KulyraxConfig::new(
         "routing.yaml",
-        vec![AdapterConfig::File(FileAdapterConfig {
-            id: "doc-readmodel".into(),
-            priority: 10,
-            config: FileConfig {
-                root: docs.to_string_lossy().into(),
-            },
-            capabilities: None,
-            depends_on: vec![],
-        })],
+        vec![AdapterConfig::File(FileAdapterConfig::new(
+            "doc-readmodel",
+            10,
+            FileConfig::new(docs.to_string_lossy()),
+        ))],
     );
     config.validate().unwrap();
 

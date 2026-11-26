@@ -233,6 +233,7 @@ pub enum AdapterConfig {
 /// dependency validation work before the adapter is built; `raw` is the whole
 /// list entry.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct CustomAdapterConfig {
     pub type_name: String,
     pub id: String,
@@ -247,6 +248,34 @@ pub struct CustomAdapterConfig {
 }
 
 impl CustomAdapterConfig {
+    /// An entry with no declared capabilities and no dependencies. `raw` is the
+    /// whole list entry, its `config:` block included.
+    pub fn new(
+        type_name: impl Into<String>,
+        id: impl Into<String>,
+        priority: u32,
+        raw: serde_json::Value,
+    ) -> Self {
+        Self {
+            type_name: type_name.into(),
+            id: id.into(),
+            priority,
+            raw,
+            capabilities: None,
+            depends_on: Vec::new(),
+        }
+    }
+
+    pub fn with_capabilities(mut self, capabilities: AdapterCapabilities) -> Self {
+        self.capabilities = Some(capabilities);
+        self
+    }
+
+    pub fn with_depends_on(mut self, depends_on: Vec<AdapterId>) -> Self {
+        self.depends_on = depends_on;
+        self
+    }
+
     /// Deserialize the entry's backend-specific `config:` block.
     pub fn backend_config<C: serde::de::DeserializeOwned>(&self) -> Result<C, ConfigError> {
         let (type_name, id) = (&self.type_name, &self.id);
@@ -319,7 +348,9 @@ impl<'de> Deserialize<'de> for AdapterConfig {
     }
 }
 
+/// A `type: sqlite` entry in `config.yaml`. Build one in code with [`Self::new`].
 #[derive(Debug, Deserialize)]
+#[non_exhaustive]
 pub struct SqliteAdapterConfig {
     pub id: String,
     pub priority: u32,
@@ -334,12 +365,46 @@ pub struct SqliteAdapterConfig {
     pub depends_on: Vec<AdapterId>,
 }
 
+impl SqliteAdapterConfig {
+    /// An entry with no declared capabilities and no dependencies.
+    pub fn new(id: impl Into<String>, priority: u32, config: SqliteConfig) -> Self {
+        Self {
+            id: id.into(),
+            priority,
+            config,
+            capabilities: None,
+            depends_on: Vec::new(),
+        }
+    }
+
+    pub fn with_capabilities(mut self, capabilities: AdapterCapabilities) -> Self {
+        self.capabilities = Some(capabilities);
+        self
+    }
+
+    pub fn with_depends_on(mut self, depends_on: Vec<AdapterId>) -> Self {
+        self.depends_on = depends_on;
+        self
+    }
+}
+
+/// The `config:` block of a `type: sqlite` entry.
 #[derive(Debug, Deserialize)]
+#[non_exhaustive]
 pub struct SqliteConfig {
+    /// The SQLite database file.
     pub path: String,
 }
 
+impl SqliteConfig {
+    pub fn new(path: impl Into<String>) -> Self {
+        Self { path: path.into() }
+    }
+}
+
+/// A `type: file` entry in `config.yaml`. Build one in code with [`Self::new`].
 #[derive(Debug, Deserialize)]
+#[non_exhaustive]
 pub struct FileAdapterConfig {
     pub id: String,
     pub priority: u32,
@@ -354,12 +419,46 @@ pub struct FileAdapterConfig {
     pub depends_on: Vec<AdapterId>,
 }
 
+impl FileAdapterConfig {
+    /// An entry with no declared capabilities and no dependencies.
+    pub fn new(id: impl Into<String>, priority: u32, config: FileConfig) -> Self {
+        Self {
+            id: id.into(),
+            priority,
+            config,
+            capabilities: None,
+            depends_on: Vec::new(),
+        }
+    }
+
+    pub fn with_capabilities(mut self, capabilities: AdapterCapabilities) -> Self {
+        self.capabilities = Some(capabilities);
+        self
+    }
+
+    pub fn with_depends_on(mut self, depends_on: Vec<AdapterId>) -> Self {
+        self.depends_on = depends_on;
+        self
+    }
+}
+
+/// The `config:` block of a `type: file` entry.
 #[derive(Debug, Deserialize)]
+#[non_exhaustive]
 pub struct FileConfig {
+    /// The directory the document store keeps its files in.
     pub root: String,
 }
 
+impl FileConfig {
+    pub fn new(root: impl Into<String>) -> Self {
+        Self { root: root.into() }
+    }
+}
+
+/// A `type: keyvalue` entry in `config.yaml`. Build one in code with [`Self::new`].
 #[derive(Debug, Deserialize)]
+#[non_exhaustive]
 pub struct KeyValueAdapterConfig {
     pub id: String,
     pub priority: u32,
@@ -374,12 +473,46 @@ pub struct KeyValueAdapterConfig {
     pub depends_on: Vec<AdapterId>,
 }
 
+impl KeyValueAdapterConfig {
+    /// An entry with no declared capabilities and no dependencies.
+    pub fn new(id: impl Into<String>, priority: u32, config: KeyValueConfig) -> Self {
+        Self {
+            id: id.into(),
+            priority,
+            config,
+            capabilities: None,
+            depends_on: Vec::new(),
+        }
+    }
+
+    pub fn with_capabilities(mut self, capabilities: AdapterCapabilities) -> Self {
+        self.capabilities = Some(capabilities);
+        self
+    }
+
+    pub fn with_depends_on(mut self, depends_on: Vec<AdapterId>) -> Self {
+        self.depends_on = depends_on;
+        self
+    }
+}
+
+/// The `config:` block of a `type: keyvalue` entry.
 #[derive(Debug, Deserialize)]
+#[non_exhaustive]
 pub struct KeyValueConfig {
+    /// The directory the key-value store keeps its files in.
     pub root: String,
 }
 
+impl KeyValueConfig {
+    pub fn new(root: impl Into<String>) -> Self {
+        Self { root: root.into() }
+    }
+}
+
+/// A `type: graph` entry in `config.yaml`. Build one in code with [`Self::new`].
 #[derive(Debug, Deserialize)]
+#[non_exhaustive]
 pub struct GraphAdapterConfig {
     pub id: String,
     pub priority: u32,
@@ -394,9 +527,41 @@ pub struct GraphAdapterConfig {
     pub depends_on: Vec<AdapterId>,
 }
 
+impl GraphAdapterConfig {
+    /// An entry with no declared capabilities and no dependencies.
+    pub fn new(id: impl Into<String>, priority: u32, config: GraphConfig) -> Self {
+        Self {
+            id: id.into(),
+            priority,
+            config,
+            capabilities: None,
+            depends_on: Vec::new(),
+        }
+    }
+
+    pub fn with_capabilities(mut self, capabilities: AdapterCapabilities) -> Self {
+        self.capabilities = Some(capabilities);
+        self
+    }
+
+    pub fn with_depends_on(mut self, depends_on: Vec<AdapterId>) -> Self {
+        self.depends_on = depends_on;
+        self
+    }
+}
+
+/// The `config:` block of a `type: graph` entry.
 #[derive(Debug, Deserialize)]
+#[non_exhaustive]
 pub struct GraphConfig {
+    /// The directory the graph store keeps its files in.
     pub root: String,
+}
+
+impl GraphConfig {
+    pub fn new(root: impl Into<String>) -> Self {
+        Self { root: root.into() }
+    }
 }
 
 /// Expand `${VAR}` references against the process environment. An unset
@@ -461,6 +626,7 @@ const KNOWN_SOURCE_TYPES: &[&str] = &["directory", "stdin"];
 /// A source `type:` this crate doesn't build in, carried opaquely until a
 /// registered factory resolves it; `raw` is the whole list entry.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct CustomSourceConfig {
     pub type_name: String,
     pub id: String,
@@ -475,6 +641,26 @@ pub struct CustomSourceConfig {
 }
 
 impl CustomSourceConfig {
+    /// An entry with no `state_dir`. `raw` is the whole list entry, its
+    /// `config:` block included.
+    pub fn new(
+        type_name: impl Into<String>,
+        id: impl Into<String>,
+        raw: serde_json::Value,
+    ) -> Self {
+        Self {
+            type_name: type_name.into(),
+            id: id.into(),
+            state_dir: None,
+            raw,
+        }
+    }
+
+    pub fn with_state_dir(mut self, state_dir: impl Into<String>) -> Self {
+        self.state_dir = Some(state_dir.into());
+        self
+    }
+
     /// Deserialize the entry's source-specific `config:` block.
     pub fn source_config<C: serde::de::DeserializeOwned>(&self) -> Result<C, ConfigError> {
         let (type_name, id) = (&self.type_name, &self.id);
@@ -519,7 +705,9 @@ impl<'de> Deserialize<'de> for SourceConfig {
     }
 }
 
+/// A `type: directory` source entry.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
 pub struct DirectorySourceConfig {
     pub id: String,
     /// Directory of event files, relative to the config file's directory.
@@ -528,10 +716,36 @@ pub struct DirectorySourceConfig {
     pub state_dir: String,
 }
 
+impl DirectorySourceConfig {
+    pub fn new(
+        id: impl Into<String>,
+        path: impl Into<String>,
+        state_dir: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            path: path.into(),
+            state_dir: state_dir.into(),
+        }
+    }
+}
+
+/// A `type: stdin` source entry.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
 pub struct StdinSourceConfig {
     pub id: String,
+    /// Where the checkpoint sidecar lives, relative to the config file's directory.
     pub state_dir: String,
+}
+
+impl StdinSourceConfig {
+    pub fn new(id: impl Into<String>, state_dir: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            state_dir: state_dir.into(),
+        }
+    }
 }
 
 impl SourceConfig {

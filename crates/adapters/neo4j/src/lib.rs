@@ -57,7 +57,15 @@ use kulyrax_core::upcast::UpcasterRegistry;
 
 /// The `config:` block of a `type: neo4j` adapter entry.
 #[derive(Clone, Deserialize)]
+#[non_exhaustive]
 pub struct Neo4jConfig {
+    /// The adapter's id. In YAML it is the entry's `id:`, not a key of the
+    /// `config:` block.
+    #[serde(skip)]
+    pub id: String,
+    /// The adapter's priority. In YAML it is the entry's `priority:`.
+    #[serde(skip)]
+    pub priority: u32,
     /// Bolt URI (`bolt://host:port` or `neo4j://host:port`); `${ENV_VAR}`
     /// references are expanded.
     pub uri: String,
@@ -70,10 +78,45 @@ pub struct Neo4jConfig {
     pub database: Option<String>,
 }
 
+impl Neo4jConfig {
+    /// Id empty, priority 0, Neo4j's default database.
+    pub fn new(
+        uri: impl Into<String>,
+        user: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: String::new(),
+            priority: 0,
+            uri: uri.into(),
+            user: user.into(),
+            password: password.into(),
+            database: None,
+        }
+    }
+
+    pub fn with_id(mut self, id: impl Into<String>) -> Self {
+        self.id = id.into();
+        self
+    }
+
+    pub fn with_priority(mut self, priority: u32) -> Self {
+        self.priority = priority;
+        self
+    }
+
+    pub fn with_database(mut self, database: impl Into<String>) -> Self {
+        self.database = Some(database.into());
+        self
+    }
+}
+
 /// Shows the URI redacted and the password as `***`.
 impl std::fmt::Debug for Neo4jConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Neo4jConfig")
+            .field("id", &self.id)
+            .field("priority", &self.priority)
             .field("uri", &kulyrax_core::redact::redact_url(&self.uri))
             .field("user", &self.user)
             .field(
@@ -90,32 +133,42 @@ pub fn factory(
     entry: &CustomAdapterConfig,
     ctx: &AdapterBuildContext,
 ) -> Result<Box<dyn StorageAdapter>, ConfigError> {
-    let id = entry.id.clone();
     let cfg: Neo4jConfig = entry.backend_config()?;
-    let uri = expand_env(&cfg.uri);
-    let password = expand_env(&cfg.password);
-    if uri.trim().is_empty() {
-        return Err(ConfigError::FactoryConfigInvalid(format!(
-            "neo4j adapter {id:?}: `uri` is empty"
-        )));
+    let cfg = cfg.with_id(entry.id.clone()).with_priority(entry.priority);
+    Ok(Box::new(Neo4jAdapter::from_config(&cfg, ctx)?))
+}
+
+impl Neo4jAdapter {
+    /// Build the adapter, with the run's mappings, upcasters and migration
+    /// policy from `ctx`. Fails on the checks below; an unreachable server
+    /// surfaces on the first write.
+    pub fn from_config(cfg: &Neo4jConfig, ctx: &AdapterBuildContext) -> Result<Self, ConfigError> {
+        let id = cfg.id.clone();
+        let uri = expand_env(&cfg.uri);
+        let password = expand_env(&cfg.password);
+        if uri.trim().is_empty() {
+            return Err(ConfigError::FactoryConfigInvalid(format!(
+                "neo4j adapter {id:?}: `uri` is empty"
+            )));
+        }
+        if let Err(reason) = check_bolt_uri(&uri) {
+            return Err(ConfigError::FactoryConfigInvalid(format!(
+                "neo4j adapter {id:?}: `uri` {reason}: {}",
+                kulyrax_core::redact::redact_url(&uri)
+            )));
+        }
+        Ok(Neo4jAdapter::new(
+            id,
+            &uri,
+            &cfg.user,
+            &password,
+            cfg.database.clone(),
+            cfg.priority,
+            GraphRuntimeBuilder::new(ctx.mappings.graph.clone()),
+            Arc::clone(&ctx.upcasters),
+            ctx.migration_policy,
+        ))
     }
-    if let Err(reason) = check_bolt_uri(&uri) {
-        return Err(ConfigError::FactoryConfigInvalid(format!(
-            "neo4j adapter {id:?}: `uri` {reason}: {}",
-            kulyrax_core::redact::redact_url(&uri)
-        )));
-    }
-    Ok(Box::new(Neo4jAdapter::new(
-        id,
-        &uri,
-        &cfg.user,
-        &password,
-        cfg.database,
-        entry.priority,
-        GraphRuntimeBuilder::new(ctx.mappings.graph.clone()),
-        Arc::clone(&ctx.upcasters),
-        ctx.migration_policy,
-    )))
 }
 
 /// Mirrors the parse `neo4rs` performs when it connects (`NeoUrl::parse` and
@@ -231,6 +284,7 @@ fn poisoned() -> AdapterError {
 
 impl Neo4jAdapter {
     #[allow(clippy::too_many_arguments)]
+    #[doc(hidden)]
     pub fn new(
         id: String,
         uri: &str,
@@ -892,14 +946,7 @@ mod tests {
         let Ok(raw) = raw else {
             return "test yaml did not serialize".into();
         };
-        let entry = CustomAdapterConfig {
-            type_name: "neo4j".into(),
-            id: "n1".into(),
-            priority: 10,
-            raw,
-            capabilities: None,
-            depends_on: Vec::new(),
-        };
+        let entry = CustomAdapterConfig::new("neo4j", "n1", 10, raw);
         let ctx = AdapterBuildContext::new(
             Default::default(),
             Arc::new(UpcasterRegistry::new()),
