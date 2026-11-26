@@ -210,9 +210,9 @@ pub fn factory(
 ) -> Result<Box<dyn EventSource>, SourceError> {
     let config: OutboxConfig = entry
         .source_config()
-        .map_err(|e| SourceError::Unavailable(e.to_string()))?;
+        .map_err(|e| SourceError::InvalidConfig(e.to_string()))?;
     let state_dir = entry.state_dir.as_deref().ok_or_else(|| {
-        SourceError::Unavailable(format!(
+        SourceError::InvalidConfig(format!(
             "postgres_outbox source {:?} needs a `state_dir` for its checkpoint",
             entry.id
         ))

@@ -61,8 +61,14 @@ pub enum SourceError {
     /// ingested.
     Prepare(Vec<crate::adapter::PrepareFailure>),
     /// The source cannot be read: it could not start (a refused start-up
-    /// check, a held lock, an unknown `type:`) or lost its connection.
+    /// check, an unknown `type:`) or lost its connection.
     Unavailable(String),
+    /// Another process holds the source's lock ([`lock_source`]): only one
+    /// Kulyrax process may read a source. A safety refusal, not a failure.
+    Locked(String),
+    /// The source's entry is invalid: an unknown `type:`, a bad `config:` block,
+    /// a missing `state_dir`. Caught at start-up.
+    InvalidConfig(String),
 }
 
 impl std::fmt::Display for SourceError {
@@ -71,7 +77,10 @@ impl std::fmt::Display for SourceError {
             SourceError::Io(e) => write!(f, "{}", e),
             SourceError::Parse(s) => write!(f, "source parse error: {}", s),
             SourceError::Checkpoint(s) => write!(f, "checkpoint error: {}", s),
-            SourceError::Unavailable(s) => write!(f, "source unavailable: {}", s),
+            SourceError::Unavailable(s) | SourceError::Locked(s) => {
+                write!(f, "source unavailable: {}", s)
+            }
+            SourceError::InvalidConfig(s) => write!(f, "invalid source config: {s}"),
             SourceError::Prepare(failures) => {
                 write!(f, "adapters failed to prepare:")?;
                 for failure in failures {
@@ -177,7 +186,7 @@ pub fn lock_source(
         .open(&path)?;
     match file.try_lock() {
         Ok(()) => Ok(file),
-        Err(std::fs::TryLockError::WouldBlock) => Err(SourceError::Unavailable(format!(
+        Err(std::fs::TryLockError::WouldBlock) => Err(SourceError::Locked(format!(
             "source {source_id:?} is in use by another process (lock {} is held); only one \
              Kulyrax process may read a source",
             path.display()

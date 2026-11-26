@@ -77,7 +77,7 @@ impl SourceRegistry {
             None => {
                 let mut known: Vec<&str> = self.factories.keys().map(String::as_str).collect();
                 known.sort_unstable();
-                Err(SourceError::Unavailable(format!(
+                Err(SourceError::InvalidConfig(format!(
                     "source {:?}: no source type {:?} is registered (built in: directory, \
                      stdin; registered: {})",
                     entry.id,

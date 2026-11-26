@@ -227,13 +227,82 @@ enum Commands {
 
 /// Errors are printed with `Display`, not the `Debug` a `main` returning
 /// `Result` would print: a YAML error quotes the offending lines, and `Debug`
-/// would show them as one line of `\n` escapes. The exit code stays 1.
+/// would show them as one line of `\n` escapes. The exit code says what kind
+/// of error it was ([`exit::for_error`]).
 fn main() {
     match run() {
         Ok(exit_code) => std::process::exit(exit_code),
         Err(e) => {
             eprintln!("Error: {e}");
-            std::process::exit(1);
+            std::process::exit(exit::for_error(e.as_ref()));
+        }
+    }
+}
+
+/// The exit codes, frozen at 1.0 (`docs/stability.md` §3). clap exits 2 on
+/// bad arguments by itself.
+mod exit {
+    use kulyrax_core::pipeline::PipelineError;
+    use kulyrax_core::rebuild::RebuildError;
+    use kulyrax_core::replay::ReplayLoadError;
+    use kulyrax_core::source::SourceError;
+    use kulyrax_ingest::{IngestError, ServeError};
+
+    /// Everything worked.
+    pub const OK: i32 = 0;
+    /// An internal or unexpected error (I/O, a database that failed).
+    pub const INTERNAL: i32 = 1;
+    /// Usage, config, mapping or routing invalid.
+    pub const INVALID: i32 = 2;
+    /// Events failed or were dead-lettered.
+    pub const EVENTS_FAILED: i32 = 3;
+    /// Refused by a safety check: a held lock, a refused rebuild, a project
+    /// `init` would overwrite.
+    pub const REFUSED: i32 = 4;
+
+    /// The code for an error a command returned. Each error enum is
+    /// `#[non_exhaustive]`: a kind this version does not know is internal.
+    pub fn for_error(err: &(dyn std::error::Error + 'static)) -> i32 {
+        if let Some(e) = err.downcast_ref::<PipelineError>() {
+            return pipeline(e);
+        }
+        if let Some(e) = err.downcast_ref::<ServeError>() {
+            return match e {
+                ServeError::Pipeline(e) => pipeline(e),
+                ServeError::Source(e) => source(e),
+                ServeError::Ingest(IngestError::Config(_)) => INVALID,
+                _ => INTERNAL,
+            };
+        }
+        if let Some(e) = err.downcast_ref::<SourceError>() {
+            return source(e);
+        }
+        INTERNAL
+    }
+
+    fn pipeline(e: &PipelineError) -> i32 {
+        match e {
+            PipelineError::ConfigParse(_)
+            | PipelineError::Config(_)
+            | PipelineError::Mapping(_)
+            | PipelineError::Routing(_)
+            | PipelineError::Validation(_)
+            | PipelineError::EventParse(_)
+            | PipelineError::AdapterBuild(_)
+            | PipelineError::Replay(ReplayLoadError::Json { .. }) => INVALID,
+            PipelineError::Source(e) => source(e),
+            PipelineError::Rebuild(RebuildError::Invalid(_)) => INVALID,
+            PipelineError::Rebuild(RebuildError::Refused(_)) => REFUSED,
+            PipelineError::Rebuild(RebuildError::EventsFailed(_)) => EVENTS_FAILED,
+            _ => INTERNAL,
+        }
+    }
+
+    fn source(e: &SourceError) -> i32 {
+        match e {
+            SourceError::Locked(_) => REFUSED,
+            SourceError::InvalidConfig(_) => INVALID,
+            _ => INTERNAL,
         }
     }
 }
@@ -409,10 +478,13 @@ fn run_cmd(
         log_reload,
     )?;
     render_source_run_report(&report, output)?;
+    // `--once` counts a dead-lettered event as a failure too; a continuous
+    // run that dead-lettered only kept running as designed.
     Ok(match report.stopped_reason {
-        StoppedReason::RetryExhausted => 1,
-        _ if report.events_failed > report.events_dlq => 1,
-        _ => 0,
+        StoppedReason::RetryExhausted => exit::EVENTS_FAILED,
+        _ if report.events_failed > report.events_dlq => exit::EVENTS_FAILED,
+        _ if once && report.events_dlq > 0 => exit::EVENTS_FAILED,
+        _ => exit::OK,
     })
 }
 
@@ -457,9 +529,9 @@ fn ingest_cmd(
     )?;
     render_source_run_report(&report, output)?;
     Ok(match report.stopped_reason {
-        StoppedReason::RetryExhausted => 1,
-        _ if report.events_failed > report.events_dlq => 1,
-        _ => 0,
+        StoppedReason::RetryExhausted => exit::EVENTS_FAILED,
+        _ if report.events_failed > report.events_dlq => exit::EVENTS_FAILED,
+        _ => exit::OK,
     })
 }
 
@@ -644,8 +716,11 @@ fn replay_cmd(
 
     render_replay_report(&report, output)?;
 
-    let exit = if report.events_failed > 0 { 1 } else { 0 };
-    Ok(exit)
+    Ok(if report.events_failed > 0 {
+        exit::EVENTS_FAILED
+    } else {
+        exit::OK
+    })
 }
 
 // --------------------------------------------------
@@ -832,19 +907,19 @@ fn reload_cmd(config: PathBuf, timeout_secs: u64) -> Result<i32, Box<dyn std::er
                 "reload rejected, still running the previous configuration:
   {reason}"
             );
-            1
+            exit::INVALID
         }
         ReloadOutcome::NotPickedUp => {
             eprintln!(
                 "no running process answered within {timeout_secs}s. Is `kulyrax run` (without --once) or `kulyrax ingest` running with {}?",
                 config.display()
             );
-            2
+            exit::INTERNAL
         }
         // `ReloadOutcome` is `#[non_exhaustive]`.
         other => {
             eprintln!("reload: unexpected outcome {other:?}");
-            1
+            exit::INTERNAL
         }
     })
 }
@@ -870,7 +945,11 @@ fn init_cmd(dir: PathBuf) -> Result<i32, Box<dyn std::error::Error>> {
         Ok(written) => written,
         Err(e) => {
             eprintln!("error: {e}");
-            return Ok(1);
+            return Ok(match e {
+                // A refusal that keeps existing files safe.
+                pipeline::InitError::WouldOverwrite(_) => exit::REFUSED,
+                _ => exit::INTERNAL,
+            });
         }
     };
     println!("Created a Kulyrax project in {}:", dir.display());
@@ -906,7 +985,11 @@ fn dry_run_cmd(
         .adapters
         .iter()
         .any(|a| matches!(a.outcome, DryRunOutcome::Failed { .. }));
-    Ok(if any_failed { 1 } else { 0 })
+    Ok(if any_failed {
+        exit::EVENTS_FAILED
+    } else {
+        exit::OK
+    })
 }
 
 fn print_dry_run_report(report: &DryRunReport) {
@@ -1081,7 +1164,7 @@ fn format_skip_reason(reason: SkipReason) -> &'static str {
 /// A status this version does not know is a failure.
 fn exit_code_from_status(status: ExecutionStatus) -> i32 {
     match status {
-        ExecutionStatus::Succeeded => 0,
-        _ => 1,
+        ExecutionStatus::Succeeded => exit::OK,
+        _ => exit::EVENTS_FAILED,
     }
 }

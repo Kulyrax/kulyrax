@@ -7,6 +7,9 @@ pub enum SqlError {
     MappingNotFound(String),
     BuildFailed(String),
     ExecutionFailed(String),
+    /// A shadow rebuild refused to start or to swap: a check that protects
+    /// the live tables failed. Nothing was changed.
+    RebuildRefused(String),
     /// No upcaster chain from the event's version to the mapping's target version.
     UnsupportedVersion {
         event_type: String,
@@ -28,6 +31,7 @@ impl fmt::Display for SqlError {
             SqlError::ExecutionFailed(msg) => {
                 write!(f, "SQL execution failed: {}", msg)
             }
+            SqlError::RebuildRefused(msg) => write!(f, "{msg}"),
             SqlError::UnsupportedVersion {
                 event_type,
                 from_version,

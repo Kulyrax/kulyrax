@@ -703,23 +703,22 @@ fn shadow_index_sql(name: &str, sql: &str, shadow: &str) -> Result<String, SqlEr
 }
 
 impl crate::rebuild::ShadowRebuild for SqliteAdapter {
-    fn start_rebuild(&self, tables: &[ShadowTable]) -> Result<GuardFingerprint, AdapterError> {
+    fn start_rebuild(
+        &self,
+        tables: &[ShadowTable],
+    ) -> Result<GuardFingerprint, crate::rebuild::RebuildError> {
         let (conn, _batch) = self.lock()?;
-        let txn = SqliteTxn::begin(connection(&conn)?)
-            .map_err(|e| AdapterError::WriteFailed(e.to_string()))?;
-        exec::start_shadow_rebuild(txn, tables)
-            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+        let txn = SqliteTxn::begin(connection(&conn)?)?;
+        Ok(exec::start_shadow_rebuild(txn, tables)?)
     }
 
     fn finish_rebuild(
         &self,
         tables: &[ShadowTable],
         before: GuardFingerprint,
-    ) -> Result<(), AdapterError> {
+    ) -> Result<(), crate::rebuild::RebuildError> {
         let (conn, _batch) = self.lock()?;
-        let txn = SqliteTxn::begin(connection(&conn)?)
-            .map_err(|e| AdapterError::WriteFailed(e.to_string()))?;
-        exec::swap_shadow_rebuild(txn, tables, before)
-            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+        let txn = SqliteTxn::begin(connection(&conn)?)?;
+        Ok(exec::swap_shadow_rebuild(txn, tables, before)?)
     }
 }
