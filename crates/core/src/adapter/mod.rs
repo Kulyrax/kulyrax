@@ -1,6 +1,6 @@
 pub mod document;
 pub(crate) mod file_names;
-pub mod file_store;
+pub(crate) mod file_store;
 pub mod graph;
 pub mod keyvalue;
 #[doc(hidden)]
@@ -423,7 +423,7 @@ pub trait StorageAdapter {
     }
 
     /// Open one transaction for a batch of events (Phase 2; see
-    /// [`crate::batch`]). Until [`StorageAdapter::commit_batch`] or
+    /// `crate::batch`). Until [`StorageAdapter::commit_batch`] or
     /// [`StorageAdapter::rollback_batch`], `handle` writes into it and does
     /// not commit. `events` are the batch's events routed to this adapter, in
     /// dispatch order, so it can load what `handle` will read (guard lanes)

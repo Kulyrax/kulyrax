@@ -50,6 +50,7 @@ fn not_a_line(id: &str, what: &str, p: &SourcePosition) -> SourceError {
 }
 
 impl<R: BufRead> StdinSource<R> {
+    #[doc(hidden)]
     pub fn new(
         id: impl Into<String>,
         state_dir: impl Into<PathBuf>,

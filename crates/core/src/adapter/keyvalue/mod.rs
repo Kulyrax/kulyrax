@@ -1,8 +1,7 @@
 pub mod adapter;
 pub mod exec;
-pub mod loader;
+pub(crate) mod loader;
 pub mod mapping;
-pub mod preview;
 pub mod runtime;
 pub mod store;
 

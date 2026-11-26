@@ -54,7 +54,7 @@ pub enum RunMode {
 pub struct SourceRunOptions {
     pub mode: RunMode,
     /// Max events per source per poll: one batch, committed in one
-    /// transaction per adapter (see [`crate::batch`]).
+    /// transaction per adapter (see `crate::batch`).
     pub max_batch: usize,
     /// Continuous mode: how long a batch may wait to fill. A batch closes
     /// when `max_batch` events are waiting, or when this much time has passed
@@ -153,7 +153,7 @@ struct BatchOutcome {
 }
 
 /// Dispatch a batch, in delivery order: in one transaction per adapter when `batched`
-/// (see [`crate::batch`]), falling back to one event at a time if that rolls
+/// (see `crate::batch`), falling back to one event at a time if that rolls
 /// back; one event at a time otherwise.
 #[allow(clippy::too_many_arguments)]
 fn dispatch_source_batch(
@@ -316,6 +316,7 @@ pub fn run_sources(
     run_sources_with_adapters(config, routing_rules, adapters, sources, opts, stop)
 }
 
+#[doc(hidden)]
 /// Same as [`run_sources`] but with pre-built adapters — the injection point
 /// for tests (a flaky adapter, a spy) and future callers that own their
 /// adapter set.
@@ -330,6 +331,7 @@ pub fn run_sources_with_adapters(
     run_sources_with_reload(config, routing_rules, adapters, sources, opts, stop, None)
 }
 
+#[doc(hidden)]
 /// A new adapter set, routing table and config, ready to swap in.
 pub struct Reloaded {
     pub config: KulyraxConfig,
@@ -337,6 +339,7 @@ pub struct Reloaded {
     pub adapters: Vec<Box<dyn StorageAdapter>>,
 }
 
+#[doc(hidden)]
 /// Asked between batches whether to switch to a new configuration.
 ///
 /// Return `Some` only for a configuration that is already validated and
@@ -347,6 +350,7 @@ pub trait Reloader {
     fn poll(&mut self) -> Option<Reloaded>;
 }
 
+#[doc(hidden)]
 /// [`run_sources_with_adapters`] that also asks `reloader` for a new
 /// configuration at the top of every loop iteration. That point is only
 /// reached once every batch polled so far has been committed or the loop has

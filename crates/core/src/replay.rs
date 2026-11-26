@@ -259,7 +259,7 @@ pub struct ReplayRunOptions {
     pub progress_interval: Option<usize>,
     /// If true, events with no routing targets fail without calling adapters.
     pub validate_routing: bool,
-    /// Events per batch transaction (see [`crate::batch`]). `None` =
+    /// Events per batch transaction (see `crate::batch`). `None` =
     /// [`DEFAULT_REPLAY_BATCH`]; `Some(1)` dispatches one event at a time.
     pub max_batch: Option<usize>,
 }
@@ -293,6 +293,7 @@ fn unrouted_event_report(event: &Event) -> ExecutionReport {
 // ReplayContext
 // ---------------------------------------------------------------------------
 
+#[doc(hidden)]
 pub struct ReplayContext {
     adapters: Vec<Box<dyn crate::adapter::StorageAdapter>>,
     failure_policy: FailurePolicy,
@@ -516,6 +517,7 @@ fn record_replayed(
     succeeded
 }
 
+#[doc(hidden)]
 /// Build context and run stream. Fails on first event load error.
 #[allow(clippy::too_many_arguments)]
 pub fn replay_stream(
@@ -539,6 +541,7 @@ pub fn replay_stream(
     )
 }
 
+#[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
 pub fn replay_stream_with_options(
     config: &KulyraxConfig,

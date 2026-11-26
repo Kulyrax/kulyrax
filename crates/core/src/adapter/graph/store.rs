@@ -43,7 +43,7 @@ struct IncidentIndex {
 /// prior adapter. Since Phase 24.1 the write path lives in
 /// `exec::project_node`/`project_edge`; this file is the file-sidecar driver
 /// — behaviour is byte-identical to the pre-24.1 inlined version. Since
-/// Phase 3 (v0.11) every write goes through a [`FileStore`]: batched, logged,
+/// Phase 3 (v0.11) every write goes through a `FileStore`: batched, logged,
 /// and crash-safe.
 pub struct GraphStore {
     id: String,

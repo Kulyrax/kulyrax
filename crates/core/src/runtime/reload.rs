@@ -25,6 +25,7 @@ use crate::upcast::UpcasterRegistry;
 const REQUEST_FILE: &str = "reload-request";
 const RESULT_FILE: &str = "reload-result";
 
+#[doc(hidden)]
 /// Where reload requests and results for `config_path` live.
 pub fn control_dir(config_path: &Path) -> PathBuf {
     config_path
@@ -48,6 +49,7 @@ pub enum ReloadOutcome {
     NotPickedUp,
 }
 
+#[doc(hidden)]
 /// Re-reads the project when a reload request appears, for
 /// [`KulyraxRuntime::run_sources_with_reload`].
 pub struct FileReloader {

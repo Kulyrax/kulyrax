@@ -314,6 +314,7 @@ impl StorageAdapter for MySqlAdapter {
     }
 }
 
+#[doc(hidden)]
 /// A transaction on one connection: its own (`begin`, committed by
 /// `commit`, rolled back if dropped uncommitted), or a share of an open batch
 /// transaction (`joined`: `commit` and drop leave it alone).

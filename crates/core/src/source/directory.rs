@@ -26,6 +26,7 @@ pub struct DirectorySource {
 }
 
 impl DirectorySource {
+    #[doc(hidden)]
     pub fn new(
         id: impl Into<String>,
         path: impl Into<PathBuf>,

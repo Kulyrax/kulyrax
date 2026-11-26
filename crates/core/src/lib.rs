@@ -1,18 +1,27 @@
+//! Public paths (stability §1, decision 2026-11-26-canonical-paths): a type's
+//! canonical path is the module that defines it. The crate root also
+//! re-exports the front door (the runtime, reports, sources, upcasting,
+//! validation). Every other re-export, and every module stability §1 marks
+//! UNSTABLE, is `#[doc(hidden)]`: reachable, but outside semver.
+
 pub mod adapter;
-pub mod batch;
+pub(crate) mod batch;
 #[doc(hidden)]
 pub mod crash;
+#[doc(hidden)]
 pub mod dispatch;
 pub mod event;
 pub mod execution;
+#[doc(hidden)]
 pub mod kulyrax_dir;
 pub mod pipeline;
 pub mod rebuild;
+#[doc(hidden)]
 pub mod redact;
 pub mod replay;
 pub mod routing;
 pub mod runtime;
-pub mod scaffold;
+pub(crate) mod scaffold;
 pub mod source;
 pub mod upcast;
 pub mod yaml;
@@ -38,49 +47,44 @@ use crate::{
 // an internal artifact or transitional type. Consumers depend on this contract.
 
 /// Re-export at crate root so users can `use kulyrax_core::ExecutionReport`.
-pub use execution::{
+pub use execution::report::{
     AdapterExecutionReport, AdapterOutcome, AdapterReportError, ExecutionReport, ExecutionStatus,
 };
 
 /// Phase 10.2 upcaster registry for schema evolution.
 pub use upcast::{UpcastError, Upcaster, UpcasterRegistry};
 
-/// Phase 7 replay API.
+#[doc(hidden)]
 pub use replay::{
-    EventsFromPath, PerEventReplaySummary, ReplayContext, ReplayLoadError, ReplayReport,
-    ReplayRunOptions, events_from_path, replay_stream, replay_stream_with_options,
+    EventsFromPath, PerEventReplaySummary, ReplayContext, ReplayLoadError, events_from_path,
+    replay_stream, replay_stream_with_options,
 };
+/// Phase 7 replay API.
+pub use replay::{ReplayReport, ReplayRunOptions};
 
+#[doc(hidden)]
+pub use source::runner::run_sources_with_adapters;
 /// Phase 17 event-source API.
-pub use source::runner::{
-    RunMode, SourceRunOptions, SourceRunReport, StoppedReason, run_sources,
-    run_sources_with_adapters,
-};
+pub use source::runner::{RunMode, SourceRunOptions, SourceRunReport, StoppedReason, run_sources};
 pub use source::{EventSource, SourceError, SourcePosition, SourcedEvent};
 
 /// Phase 8 projection validation.
+pub use runtime::validation::{ValidationIssue, ValidationReport, validate_projection_config};
+#[doc(hidden)]
 pub use runtime::{
     AdapterExecutionMeta, PROJECTION_DEPTH_EXCEEDS_RECOMMENDED_WARNING,
-    RECOMMENDED_MAX_DEPENDENCY_LAYER, ValidationIssue, ValidationReport, adapter_metadata_map,
-    dependency_depth_exceeds_recommended, dependency_layers_grouped, dependency_layers_parallel,
-    execution_order_for_routed, max_dependency_layer, validate_projection_config,
-    validate_routing_adapter_ids, validate_routing_and_dependencies_for_event_type,
-    validate_routing_for_event_type,
+    RECOMMENDED_MAX_DEPENDENCY_LAYER, adapter_metadata_map, dependency_depth_exceeds_recommended,
+    dependency_layers_grouped, dependency_layers_parallel, execution_order_for_routed,
+    max_dependency_layer, validate_routing_adapter_ids,
+    validate_routing_and_dependencies_for_event_type, validate_routing_for_event_type,
 };
 
 /// Phase 27: the facade type — owns config, mappings, routing, an
 /// instance-scoped [`AdapterRegistry`], and (once built) the resolved
 /// adapters, exposing `run_once`/`dry_run_once`/`replay`/`run_sources` as
 /// methods instead of free functions that each re-thread the same bundle.
-pub use runtime::{AdapterBuildContext, AdapterRegistry, KulyraxRuntime, MappingSet};
-
-/// Execution report types (also at [crate root](crate) for convenience).
-pub mod report {
-    pub use crate::execution::{
-        AdapterExecutionReport, AdapterOutcome, AdapterReportError, ExecutionReport,
-        ExecutionStatus,
-    };
-}
+pub use runtime::engine::KulyraxRuntime;
+pub use runtime::registry::{AdapterBuildContext, AdapterRegistry, MappingSet};
 
 // ---------------------------------------------------------------------------
 // Execution entry point
