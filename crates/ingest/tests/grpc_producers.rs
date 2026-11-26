@@ -60,22 +60,18 @@ fn mappings() -> HashMap<String, SqlMapping> {
 }
 
 fn env(seq: u64, id: &str, position: &str) -> EventEnvelope {
-    EventEnvelope {
-        event_type: "UserUpserted".into(),
-        payload: format!(r#"{{"id":"{id}","name":"n{seq}"}}"#),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-        position: position.into(),
-        event_id: String::new(),
-    }
+    EventEnvelope::new(
+        "UserUpserted",
+        format!(r#"{{"id":"{id}","name":"n{seq}"}}"#),
+        seq,
+        position,
+    )
 }
 
 fn poison(position: &str) -> EventEnvelope {
-    EventEnvelope {
-        payload: "this is not json".into(),
-        ..env(1, "bad", position)
-    }
+    let mut e = env(1, "bad", position);
+    e.payload = "this is not json".into();
+    e
 }
 
 struct Harness {
@@ -307,8 +303,12 @@ fn an_event_with_an_empty_position_ends_its_stream_with_invalid_argument() {
     );
     match end {
         Ok(Some(Err(kulyrax_client::ClientError::Rpc(status)))) => {
-            assert_eq!(status.code(), tonic::Code::InvalidArgument, "{status:?}");
-            assert!(status.message().contains("empty position"), "{status:?}");
+            assert_eq!(
+                status.code,
+                kulyrax_client::StatusCode::InvalidArgument,
+                "{status:?}"
+            );
+            assert!(status.message.contains("empty position"), "{status:?}");
         }
         other => panic!("expected InvalidArgument, got {other:?}"),
     }

@@ -5,6 +5,7 @@ pub mod mapping;
 pub mod runtime;
 pub mod store;
 
-/// The public extension surface for a new key-value backend (Phase 25.1) —
-/// see [`exec::KvBackend`]'s doc comment for the atomicity contract.
-pub use exec::{KvBackend, KvFacetGuard, KvGuard, KvOutcome, KvPlan};
+// The extension surface for a new key-value backend (Phase 25.1) is `exec`:
+// its traits, plans and guards, and the functions that drive them. 0.12 also
+// re-exported its types here; since 1.0 each has one path (decision
+// 2026-11-26-canonical-paths).

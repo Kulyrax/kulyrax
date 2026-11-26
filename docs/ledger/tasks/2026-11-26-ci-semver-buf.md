@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: blocked
 ---
 
 # CI: buf breaking (required) and a semver report (step 4, D9)
@@ -27,7 +27,7 @@ breaking` guards the wire while D3 reworks the gRPC types.
 - [x] Both run on the PR. The buf job passes on the current proto and fails on a
   deliberately breaking commit, which is then reverted.
 - [ ] The buf job is made required in the ruleset (the owner's setting).
-- [ ] PR merged.
+- [x] PR #30 merged (merge commit d140dcf).
 
 ## Constraints and assumptions
 
@@ -47,4 +47,13 @@ breaking` guards the wire while D3 reworks the gRPC types.
 |---|---|---|
 | CI on a60e909 (recorded afterwards) | PR #30 checks | 18/18 pass; `proto wire compatible with v0.12.2` passes on the current proto; `API changes since v0.12.2 (report)` passes and uploads `semver-report` with the D1/D2 breaking changes per crate |
 | buf negative test | 65cbe73 changes `EventEnvelope.position` from field 6 to 9; CI | `proto wire compatible with v0.12.2` **fails** (exit 100): `ingest.proto:24:1: Previously present field "6" with name "position" on message "EventEnvelope" was deleted.` Expected failure |
-| Revert | this commit restores field 6; CI | see the PR checks on this commit |
+| Revert | 28a7dc8 restores field 6; CI | 18/18 pass, buf included. Net proto diff against a60e909: none |
+| Ruleset | `gh api repos/Kulyrax/kulyrax/rules/branches/main` | the 12 original required checks; buf not yet among them |
+
+## Risks and open questions
+
+- **Blocked on the owner:** the main ruleset must add `proto wire compatible with v0.12.2` to the required checks. Until then a wire break fails the job but does not block a merge.
+
+## Outcome
+
+Both jobs run on every PR, and buf demonstrably fails on a wire break. Open: the owner adds `proto wire compatible with v0.12.2` to the required checks.

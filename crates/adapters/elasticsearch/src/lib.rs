@@ -48,9 +48,10 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use kulyrax_core::adapter::document::adapter::DocumentError;
-use kulyrax_core::adapter::document::exec::{self, ProjectionGuard};
+use kulyrax_core::adapter::document::exec::{
+    self, DocumentBackend, DocumentOutcome, DocumentPlan, ProjectionGuard,
+};
 use kulyrax_core::adapter::document::runtime::DocumentRuntimeBuilder;
-use kulyrax_core::adapter::document::{DocumentBackend, DocumentOutcome, DocumentPlan};
 use kulyrax_core::adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter};
 use kulyrax_core::event::Event;
 use kulyrax_core::execution::stages::{Stage, timed};

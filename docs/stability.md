@@ -74,7 +74,7 @@ underlying errors are flattened into strings (`WriteFailed(String)`,
 | Each adapter crate's `factory` and `<Name>Config` | **FREEZE**: what `kulyrax-backends` and embedders use |
 | `<Name>Adapter::new(…)` (positional arguments, up to 8) | **CHANGE** (step 4, §9.4): `new` hidden; `<Name>Adapter::from_config(cfg)` with a `#[non_exhaustive]` config built by `Default` + setters or a builder is the only public constructor |
 | `PostgresTxn`, `MySqlTxn` (pub, implement `SqlTxn`) | **UNSTABLE**: internals of their adapters |
-| `kulyrax_ingest::pb`, `kulyrax_client::pb` (tonic/prost-generated) | **UNSTABLE** (step 4, §9.3): `#[doc(hidden)]` behind the `unstable-pb` feature, outside semver; `Producer`, `Ack`, `AckOutcome`, `EventEnvelope` become Kulyrax-owned types. The frozen contract is the `.proto` (§4) |
+| `kulyrax_ingest::pb`, `kulyrax_client::pb` (tonic/prost-generated) | **UNSTABLE** (step 4, D3, §9.3): private, exposed as `#[doc(hidden)]` only with the `unstable-pb` feature, outside semver. `kulyrax_client` owns `Producer`, `EventEnvelope`, `Ack`, `AckOutcome`, `ClientError`, `RpcError`, `StatusCode`; none names a tonic or prost type. The frozen contract is the `.proto` (§4) |
 | `kulyrax_source_postgres::PostgresOutboxSource::{open, inspect}`, `WATCH_CAP` | **FREEZE** `factory`, `OutboxConfig`, `OutboxColumns`; **UNSTABLE** the rest |
 | `kulyrax_backends::register_default_backends` and its features | **FREEZE** (feature names included) |
 
