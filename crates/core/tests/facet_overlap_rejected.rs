@@ -12,18 +12,11 @@ fn config() -> KulyraxConfig {
     KulyraxConfig::new(
         "r.json",
         vec![kulyrax_core::runtime::config::AdapterConfig::Sqlite(
-            SqliteAdapterConfig {
-                id: "sql-primary".into(),
-                priority: 10,
-                config: SqliteConfig {
-                    path: ":memory:".into(),
-                },
-                capabilities: Some(vec![
+            SqliteAdapterConfig::new("sql-primary", 10, SqliteConfig::new(":memory:"))
+                .with_capabilities(vec![
                     kulyrax_core::runtime::config::AdapterCapability::Write,
                     kulyrax_core::runtime::config::AdapterCapability::Upsert,
                 ]),
-                depends_on: vec![],
-            },
         )],
     )
 }

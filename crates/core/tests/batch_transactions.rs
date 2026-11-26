@@ -405,15 +405,11 @@ impl StorageAdapter for FailFirstCommit {
 fn two_sqlite_config(a: &Path, b: &Path) -> KulyraxConfig {
     let mut c = config(a);
     let entry = |id: &str, path: &Path, priority| {
-        AdapterConfig::Sqlite(SqliteAdapterConfig {
-            id: id.into(),
+        AdapterConfig::Sqlite(SqliteAdapterConfig::new(
+            id,
             priority,
-            config: SqliteConfig {
-                path: path.to_string_lossy().into(),
-            },
-            capabilities: None,
-            depends_on: vec![],
-        })
+            SqliteConfig::new(path.to_string_lossy()),
+        ))
     };
     c.adapters = vec![entry("sql-a", a, 10), entry("sql-b", b, 20)];
     c

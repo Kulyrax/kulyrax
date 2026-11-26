@@ -186,15 +186,11 @@ fn replay_and_real_time_dispatch_produce_identical_state_for_mixed_versions() {
 
     let replay_config = KulyraxConfig::new(
         "routing.yaml",
-        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
-            id: "sql-primary".into(),
-            priority: 10,
-            config: SqliteConfig {
-                path: replay_db.to_string_lossy().into(),
-            },
-            capabilities: None,
-            depends_on: vec![],
-        })],
+        vec![AdapterConfig::Sqlite(SqliteAdapterConfig::new(
+            "sql-primary",
+            10,
+            SqliteConfig::new(replay_db.to_string_lossy()),
+        ))],
     );
     replay_config.validate().unwrap();
 
@@ -229,15 +225,11 @@ fn replay_and_real_time_dispatch_produce_identical_state_for_mixed_versions() {
 
     let live_config = KulyraxConfig::new(
         "routing.yaml",
-        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
-            id: "sql-primary".into(),
-            priority: 10,
-            config: SqliteConfig {
-                path: live_db.to_string_lossy().into(),
-            },
-            capabilities: None,
-            depends_on: vec![],
-        })],
+        vec![AdapterConfig::Sqlite(SqliteAdapterConfig::new(
+            "sql-primary",
+            10,
+            SqliteConfig::new(live_db.to_string_lossy()),
+        ))],
     );
     live_config.validate().unwrap();
 

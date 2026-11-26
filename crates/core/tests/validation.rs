@@ -17,24 +17,16 @@ fn base_config() -> KulyraxConfig {
     KulyraxConfig::new(
         "r.json",
         vec![
-            AdapterConfig::Sqlite(SqliteAdapterConfig {
-                id: "sql-primary".into(),
-                priority: 10,
-                config: SqliteConfig {
-                    path: ":memory:".into(),
-                },
-                capabilities: None,
-                depends_on: vec![],
-            }),
-            AdapterConfig::File(FileAdapterConfig {
-                id: "doc-readmodel".into(),
-                priority: 20,
-                config: FileConfig {
-                    root: "/tmp".into(),
-                },
-                capabilities: None,
-                depends_on: vec![],
-            }),
+            AdapterConfig::Sqlite(SqliteAdapterConfig::new(
+                "sql-primary",
+                10,
+                SqliteConfig::new(":memory:"),
+            )),
+            AdapterConfig::File(FileAdapterConfig::new(
+                "doc-readmodel",
+                20,
+                FileConfig::new("/tmp"),
+            )),
         ],
     )
 }
@@ -269,15 +261,11 @@ fn rejects_unrouted_sql_mapping() {
 fn rejects_sql_mapping_when_route_has_only_file_adapters() {
     let config = KulyraxConfig::new(
         "r.json",
-        vec![AdapterConfig::File(FileAdapterConfig {
-            id: "doc-readmodel".into(),
-            priority: 10,
-            config: FileConfig {
-                root: "/tmp".into(),
-            },
-            capabilities: None,
-            depends_on: vec![],
-        })],
+        vec![AdapterConfig::File(FileAdapterConfig::new(
+            "doc-readmodel",
+            10,
+            FileConfig::new("/tmp"),
+        ))],
     );
     config.validate().unwrap();
     let mut sql = HashMap::new();
@@ -306,15 +294,11 @@ fn rejects_sql_mapping_when_route_has_only_file_adapters() {
 fn rejects_document_mapping_without_file_on_route() {
     let config = KulyraxConfig::new(
         "r.json",
-        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
-            id: "sql-primary".into(),
-            priority: 10,
-            config: SqliteConfig {
-                path: ":memory:".into(),
-            },
-            capabilities: None,
-            depends_on: vec![],
-        })],
+        vec![AdapterConfig::Sqlite(SqliteAdapterConfig::new(
+            "sql-primary",
+            10,
+            SqliteConfig::new(":memory:"),
+        ))],
     );
     config.validate().unwrap();
     let mut sql = HashMap::new();
@@ -402,33 +386,21 @@ fn rejects_duplicate_adapter_ids_in_config() {
     let config = KulyraxConfig::new(
         "r.json",
         vec![
-            AdapterConfig::Sqlite(SqliteAdapterConfig {
-                id: "sql-primary".into(),
-                priority: 10,
-                config: SqliteConfig {
-                    path: ":memory:".into(),
-                },
-                capabilities: None,
-                depends_on: vec![],
-            }),
-            AdapterConfig::Sqlite(SqliteAdapterConfig {
-                id: "sql-primary".into(),
-                priority: 11,
-                config: SqliteConfig {
-                    path: ":memory:".into(),
-                },
-                capabilities: None,
-                depends_on: vec![],
-            }),
-            AdapterConfig::File(FileAdapterConfig {
-                id: "doc-readmodel".into(),
-                priority: 20,
-                config: FileConfig {
-                    root: "/tmp".into(),
-                },
-                capabilities: None,
-                depends_on: vec![],
-            }),
+            AdapterConfig::Sqlite(SqliteAdapterConfig::new(
+                "sql-primary",
+                10,
+                SqliteConfig::new(":memory:"),
+            )),
+            AdapterConfig::Sqlite(SqliteAdapterConfig::new(
+                "sql-primary",
+                11,
+                SqliteConfig::new(":memory:"),
+            )),
+            AdapterConfig::File(FileAdapterConfig::new(
+                "doc-readmodel",
+                20,
+                FileConfig::new("/tmp"),
+            )),
         ],
     );
     let mut sql = HashMap::new();
@@ -826,14 +798,12 @@ fn phase15_rejects_facet_identity_that_differs_from_the_entity() {
 fn config_with_custom_adapter(type_name: &str) -> KulyraxConfig {
     KulyraxConfig::new(
         "routing.yaml",
-        vec![AdapterConfig::Custom(CustomAdapterConfig {
-            type_name: type_name.into(),
-            id: "custom".into(),
-            priority: 10,
-            raw: serde_json::Value::Null,
-            capabilities: None,
-            depends_on: vec![],
-        })],
+        vec![AdapterConfig::Custom(CustomAdapterConfig::new(
+            type_name,
+            "custom",
+            10,
+            serde_json::Value::Null,
+        ))],
     )
 }
 

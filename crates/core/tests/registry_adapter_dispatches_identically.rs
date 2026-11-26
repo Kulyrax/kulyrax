@@ -101,28 +101,25 @@ fn registered_adapter_participates_identically_in_dependency_order_and_dispatch(
     let config = KulyraxConfig::new(
         "routing.yaml",
         vec![
-            AdapterConfig::Custom(CustomAdapterConfig {
-                type_name: type_name.into(),
-                id: "sql-primary".into(),
-                priority: 10,
-                raw: serde_json::to_value(serde_json::json!({
+            AdapterConfig::Custom(CustomAdapterConfig::new(
+                type_name,
+                "sql-primary",
+                10,
+                serde_json::to_value(serde_json::json!({
                     "type": type_name,
                     "id": "sql-primary",
                     "priority": 10,
                 }))
                 .unwrap(),
-                capabilities: None,
-                depends_on: vec![],
-            }),
-            AdapterConfig::File(FileAdapterConfig {
-                id: "doc-readmodel".into(),
-                priority: 20,
-                config: FileConfig {
-                    root: tmp.path().to_string_lossy().into_owned(),
-                },
-                capabilities: None,
-                depends_on: vec!["sql-primary".into()],
-            }),
+            )),
+            AdapterConfig::File(
+                FileAdapterConfig::new(
+                    "doc-readmodel",
+                    20,
+                    FileConfig::new(tmp.path().to_string_lossy().into_owned()),
+                )
+                .with_depends_on(vec!["sql-primary".into()]),
+            ),
         ],
     );
     config
@@ -176,14 +173,12 @@ fn unregistered_custom_type_becomes_a_failed_placeholder_not_a_panic() {
     // routing fixture, so a single adapter fully covers this route.
     let config = KulyraxConfig::new(
         "routing.yaml",
-        vec![AdapterConfig::Custom(CustomAdapterConfig {
-            type_name: "definitely-unregistered-25-5".into(),
-            id: "kv-cache".into(),
-            priority: 10,
-            raw: serde_json::Value::Null,
-            capabilities: None,
-            depends_on: vec![],
-        })],
+        vec![AdapterConfig::Custom(CustomAdapterConfig::new(
+            "definitely-unregistered-25-5",
+            "kv-cache",
+            10,
+            serde_json::Value::Null,
+        ))],
     );
 
     let mut adapters = build_adapters_from_config(

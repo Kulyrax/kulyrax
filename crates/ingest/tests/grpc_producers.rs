@@ -33,15 +33,11 @@ fn init_users(db: &Path) {
 fn config(db: &Path) -> KulyraxConfig {
     KulyraxConfig::new(
         "r.json",
-        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
-            id: "sql".into(),
-            priority: 10,
-            config: SqliteConfig {
-                path: db.to_string_lossy().into(),
-            },
-            capabilities: None,
-            depends_on: vec![],
-        })],
+        vec![AdapterConfig::Sqlite(SqliteAdapterConfig::new(
+            "sql",
+            10,
+            SqliteConfig::new(db.to_string_lossy()),
+        ))],
     )
 }
 

@@ -16,24 +16,17 @@ fn config_with_sqlite_capabilities(capabilities: Option<Vec<AdapterCapability>>)
     KulyraxConfig::new(
         "r.json",
         vec![
-            AdapterConfig::Sqlite(SqliteAdapterConfig {
-                id: "sql-primary".into(),
-                priority: 10,
-                config: SqliteConfig {
-                    path: ":memory:".into(),
-                },
-                capabilities,
-                depends_on: vec![],
+            AdapterConfig::Sqlite({
+                let mut c =
+                    SqliteAdapterConfig::new("sql-primary", 10, SqliteConfig::new(":memory:"));
+                c.capabilities = capabilities;
+                c
             }),
-            AdapterConfig::File(FileAdapterConfig {
-                id: "doc-readmodel".into(),
-                priority: 20,
-                config: FileConfig {
-                    root: "/tmp".into(),
-                },
-                capabilities: None,
-                depends_on: vec![],
-            }),
+            AdapterConfig::File(FileAdapterConfig::new(
+                "doc-readmodel",
+                20,
+                FileConfig::new("/tmp"),
+            )),
         ],
     )
 }

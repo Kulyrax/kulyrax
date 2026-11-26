@@ -95,7 +95,15 @@ type ColTypes = HashMap<String, PgColType>;
 /// typed `AdapterConfig` variant; this is parsed by [`factory`] from the
 /// `Custom` entry's raw `config:` sub-value).
 #[derive(Deserialize)]
+#[non_exhaustive]
 pub struct PostgresConfig {
+    /// The adapter's id. In YAML it is the entry's `id:`, not a key of the
+    /// `config:` block.
+    #[serde(skip)]
+    pub id: String,
+    /// The adapter's priority. In YAML it is the entry's `priority:`.
+    #[serde(skip)]
+    pub priority: u32,
     /// `postgres://user:pass@host:port/db`. May contain `${ENV_VAR}` references
     /// (Phase 19.2) so credentials stay out of the committed config.
     pub url: String,
@@ -104,10 +112,39 @@ pub struct PostgresConfig {
     pub pool_size: Option<u32>,
 }
 
+impl PostgresConfig {
+    /// Id empty, priority 0, the default pool size.
+    pub fn new(url: impl Into<String>) -> Self {
+        Self {
+            id: String::new(),
+            priority: 0,
+            url: url.into(),
+            pool_size: None,
+        }
+    }
+
+    pub fn with_id(mut self, id: impl Into<String>) -> Self {
+        self.id = id.into();
+        self
+    }
+
+    pub fn with_priority(mut self, priority: u32) -> Self {
+        self.priority = priority;
+        self
+    }
+
+    pub fn with_pool_size(mut self, pool_size: u32) -> Self {
+        self.pool_size = Some(pool_size);
+        self
+    }
+}
+
 /// Shows the URL with its password and secret query parameters hidden.
 impl std::fmt::Debug for PostgresConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PostgresConfig")
+            .field("id", &self.id)
+            .field("priority", &self.priority)
             .field("url", &kulyrax_core::redact::redact_url(&self.url))
             .field("pool_size", &self.pool_size)
             .finish()
@@ -159,6 +196,7 @@ impl PostgresAdapter {
     /// `build_adapters_from_config` free of a `Result`. The pool is
     /// `build_unchecked` (lazy connect): connectivity problems surface on the
     /// first real write, not at construction.
+    #[doc(hidden)]
     pub fn new(
         id: String,
         url: &str,
@@ -1020,33 +1058,46 @@ pub fn factory(
     entry: &CustomAdapterConfig,
     ctx: &AdapterBuildContext,
 ) -> Result<Box<dyn StorageAdapter>, ConfigError> {
-    let id = entry.id.clone();
     let cfg: PostgresConfig = entry.backend_config()?;
+    let cfg = cfg.with_id(entry.id.clone()).with_priority(entry.priority);
+    Ok(Box::new(PostgresAdapter::from_config(&cfg, ctx)?))
+}
 
-    // Checked here rather than in config validation, which cannot see
-    // registry-resolved types.
-    let url = kulyrax_core::runtime::config::expand_env(&cfg.url);
-    if url.trim().is_empty() {
-        return Err(ConfigError::FactoryConfigInvalid(format!(
-            "postgres adapter {id:?}: `url` is empty"
-        )));
-    }
-    if url.parse::<postgres::Config>().is_err() {
-        return Err(ConfigError::FactoryConfigInvalid(format!(
-            "postgres adapter {id:?}: `url` does not parse: {}",
-            kulyrax_core::redact::redact_url(&url)
-        )));
-    }
+impl PostgresAdapter {
+    /// Build the adapter, with the run's mappings, upcasters and migration
+    /// policy from `ctx`. Fails on the checks below; an unreachable server
+    /// surfaces on the first write.
+    pub fn from_config(
+        cfg: &PostgresConfig,
+        ctx: &AdapterBuildContext,
+    ) -> Result<Self, ConfigError> {
+        let id = cfg.id.clone();
 
-    Ok(Box::new(PostgresAdapter::new(
-        id,
-        &url,
-        cfg.pool_size.unwrap_or(4),
-        entry.priority,
-        SqlRuntimeBuilder::new(ctx.mappings.sql.clone()),
-        Arc::clone(&ctx.upcasters),
-        ctx.migration_policy,
-    )))
+        // Checked here rather than in config validation, which cannot see
+        // registry-resolved types.
+        let url = kulyrax_core::runtime::config::expand_env(&cfg.url);
+        if url.trim().is_empty() {
+            return Err(ConfigError::FactoryConfigInvalid(format!(
+                "postgres adapter {id:?}: `url` is empty"
+            )));
+        }
+        if url.parse::<postgres::Config>().is_err() {
+            return Err(ConfigError::FactoryConfigInvalid(format!(
+                "postgres adapter {id:?}: `url` does not parse: {}",
+                kulyrax_core::redact::redact_url(&url)
+            )));
+        }
+
+        Ok(PostgresAdapter::new(
+            id,
+            &url,
+            cfg.pool_size.unwrap_or(4),
+            cfg.priority,
+            SqlRuntimeBuilder::new(ctx.mappings.sql.clone()),
+            Arc::clone(&ctx.upcasters),
+            ctx.migration_policy,
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -1145,14 +1196,7 @@ mod tests {
             "config": { "url": "" },
         }))
         .unwrap();
-        let entry = CustomAdapterConfig {
-            type_name: "postgres".into(),
-            id: "pg1".into(),
-            priority: 10,
-            raw,
-            capabilities: None,
-            depends_on: Vec::new(),
-        };
+        let entry = CustomAdapterConfig::new("postgres", "pg1", 10, raw);
         let ctx = AdapterBuildContext::new(
             Default::default(),
             Arc::new(UpcasterRegistry::new()),

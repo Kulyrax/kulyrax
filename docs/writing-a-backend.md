@@ -151,9 +151,8 @@ under a `type:` name in the YAML config:
 
 ```rust
 use kulyrax_core::adapter::StorageAdapter;
-use kulyrax_core::runtime::AdapterBuildContext;
 use kulyrax_core::runtime::config::{ConfigError, CustomAdapterConfig};
-use kulyrax_core::KulyraxRuntime;
+use kulyrax_core::{AdapterBuildContext, KulyraxRuntime};
 
 pub fn factory(
     entry: &CustomAdapterConfig,
@@ -162,19 +161,23 @@ pub fn factory(
     // `entry.id` / `entry.priority` are already parsed; `backend_config`
     // deserializes your own `config:` block with a uniform error message.
     let cfg: MyDbConfig = entry.backend_config()?;
-    Ok(Box::new(MyDbAdapter::new(
-        entry.id.clone(),
-        entry.priority,
-        &cfg,
-        ctx.mappings.document.clone(), // the mapping table for your storage kind
-        ctx.upcasters.clone(),
-        ctx.migration_policy,
-    )))
+    let cfg = cfg.with_id(entry.id.clone()).with_priority(entry.priority);
+    Ok(Box::new(MyDbAdapter::from_config(&cfg, ctx)?))
 }
 
 let mut runtime = KulyraxRuntime::load(&config_path, &mappings_dir)?;
 runtime.register_adapter_factory("mydb", factory);
 ```
+
+The built-in backends follow one shape, which a new backend can copy:
+- **`MyDbConfig`** is `#[non_exhaustive]`: your `config:` block, plus `id`
+  and `priority` marked `#[serde(skip)]`, so YAML keeps them on the entry. It
+  has `new(<required fields>)` and a `with_*` setter for each other field.
+- **`MyDbAdapter::from_config(&cfg, &AdapterBuildContext)`** checks the config
+  and builds the adapter. It takes the mapping table for its storage kind
+  (`ctx.mappings.document`, …), `ctx.upcasters` and `ctx.migration_policy`
+  from the context. It is the only public constructor, so building in code
+  and building from YAML validate the same way.
 
 The [`kulyrax-adapter-postgres`](../crates/adapters/postgres/src/lib.rs)
 and [`kulyrax-adapter-elasticsearch`](../crates/adapters/elasticsearch/src/lib.rs)

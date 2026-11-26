@@ -32,6 +32,24 @@ pub struct FileKvStore {
 }
 
 impl FileKvStore {
+    /// Build the adapter for a `type: keyvalue` entry, with the run's mappings,
+    /// upcasters and migration policy from `ctx`. The public constructor
+    /// (decision 2026-11-26-adapter-from-config).
+    pub fn from_config(
+        cfg: &crate::runtime::config::KeyValueAdapterConfig,
+        ctx: &crate::runtime::registry::AdapterBuildContext,
+    ) -> Result<Self, crate::runtime::config::ConfigError> {
+        Ok(Self::new(
+            cfg.id.clone(),
+            PathBuf::from(&cfg.config.root),
+            cfg.priority,
+            crate::adapter::keyvalue::runtime::KvRuntimeBuilder::new(ctx.mappings.kv.clone()),
+            Arc::clone(&ctx.upcasters),
+            ctx.migration_policy,
+        ))
+    }
+
+    #[doc(hidden)]
     pub fn new(
         id: String,
         root: PathBuf,

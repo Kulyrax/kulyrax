@@ -35,6 +35,26 @@ pub struct FileDocumentAdapter {
 }
 
 impl FileDocumentAdapter {
+    /// Build the adapter for a `type: file` entry, with the run's mappings,
+    /// upcasters and migration policy from `ctx`. The public constructor
+    /// (decision 2026-11-26-adapter-from-config).
+    pub fn from_config(
+        cfg: &crate::runtime::config::FileAdapterConfig,
+        ctx: &crate::runtime::registry::AdapterBuildContext,
+    ) -> Result<Self, crate::runtime::config::ConfigError> {
+        Ok(Self::new(
+            cfg.id.clone(),
+            PathBuf::from(&cfg.config.root),
+            cfg.priority,
+            crate::adapter::document::runtime::DocumentRuntimeBuilder::new(
+                ctx.mappings.document.clone(),
+            ),
+            Arc::clone(&ctx.upcasters),
+            ctx.migration_policy,
+        ))
+    }
+
+    #[doc(hidden)]
     pub fn new(
         id: String,
         root: PathBuf,

@@ -37,24 +37,16 @@ fn execute_event_runs_without_panic() {
     let config = KulyraxConfig::new(
         "routing.yaml",
         vec![
-            AdapterConfig::Sqlite(SqliteAdapterConfig {
-                id: "sql-primary".into(),
-                priority: 10,
-                config: SqliteConfig {
-                    path: ":memory:".into(),
-                },
-                capabilities: None,
-                depends_on: vec![],
-            }),
-            AdapterConfig::File(FileAdapterConfig {
-                id: "doc-readmodel".into(),
-                priority: 20,
-                config: FileConfig {
-                    root: "./target/test-docs".into(),
-                },
-                capabilities: None,
-                depends_on: vec![],
-            }),
+            AdapterConfig::Sqlite(SqliteAdapterConfig::new(
+                "sql-primary",
+                10,
+                SqliteConfig::new(":memory:"),
+            )),
+            AdapterConfig::File(FileAdapterConfig::new(
+                "doc-readmodel",
+                20,
+                FileConfig::new("./target/test-docs"),
+            )),
         ],
     );
 

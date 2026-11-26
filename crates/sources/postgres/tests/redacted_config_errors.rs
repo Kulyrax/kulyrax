@@ -30,12 +30,7 @@ fn the_connect_error_hides_the_secrets() {
         "type": "postgres_outbox", "id": "o", "state_dir": "state", "config": config(),
     }))
     .expect("raw");
-    let entry = CustomSourceConfig {
-        type_name: "postgres_outbox".into(),
-        id: "o".into(),
-        state_dir: Some("state".into()),
-        raw,
-    };
+    let entry = CustomSourceConfig::new("postgres_outbox", "o", raw).with_state_dir("state");
     let ctx = SourceBuildContext::new(dir.path().to_path_buf(), false);
     let err = factory(&entry, &ctx)
         .err()

@@ -17,14 +17,10 @@ use std::collections::HashMap;
 fn config_with_kv_capabilities(capabilities: Option<Vec<AdapterCapability>>) -> KulyraxConfig {
     KulyraxConfig::new(
         "r.json",
-        vec![AdapterConfig::KeyValue(KeyValueAdapterConfig {
-            id: "kv-cache".into(),
-            priority: 10,
-            config: KeyValueConfig {
-                root: "/tmp".into(),
-            },
-            capabilities,
-            depends_on: vec![],
+        vec![AdapterConfig::KeyValue({
+            let mut c = KeyValueAdapterConfig::new("kv-cache", 10, KeyValueConfig::new("/tmp"));
+            c.capabilities = capabilities;
+            c
         })],
     )
 }

@@ -74,24 +74,16 @@ fn sample_config(doc_root: &Path, sqlite_path: &Path) -> KulyraxConfig {
     KulyraxConfig::new(
         "routing.yaml",
         vec![
-            AdapterConfig::Sqlite(SqliteAdapterConfig {
-                id: "sql-primary".into(),
-                priority: 10,
-                config: SqliteConfig {
-                    path: sqlite_path.to_string_lossy().into(),
-                },
-                capabilities: None,
-                depends_on: vec![],
-            }),
-            AdapterConfig::File(FileAdapterConfig {
-                id: "doc-readmodel".into(),
-                priority: 20,
-                config: FileConfig {
-                    root: doc_root.to_string_lossy().into(),
-                },
-                capabilities: None,
-                depends_on: vec![],
-            }),
+            AdapterConfig::Sqlite(SqliteAdapterConfig::new(
+                "sql-primary",
+                10,
+                SqliteConfig::new(sqlite_path.to_string_lossy()),
+            )),
+            AdapterConfig::File(FileAdapterConfig::new(
+                "doc-readmodel",
+                20,
+                FileConfig::new(doc_root.to_string_lossy()),
+            )),
         ],
     )
 }
@@ -378,24 +370,16 @@ fn replay_user_created_writes_two_sqlite_adapters() {
     let config = KulyraxConfig::new(
         "routing.yaml",
         vec![
-            AdapterConfig::Sqlite(SqliteAdapterConfig {
-                id: "pgsql_master".into(),
-                priority: 10,
-                config: SqliteConfig {
-                    path: db_master.to_string_lossy().into(),
-                },
-                capabilities: None,
-                depends_on: vec![],
-            }),
-            AdapterConfig::Sqlite(SqliteAdapterConfig {
-                id: "pgsql_slave".into(),
-                priority: 20,
-                config: SqliteConfig {
-                    path: db_slave.to_string_lossy().into(),
-                },
-                capabilities: None,
-                depends_on: vec![],
-            }),
+            AdapterConfig::Sqlite(SqliteAdapterConfig::new(
+                "pgsql_master",
+                10,
+                SqliteConfig::new(db_master.to_string_lossy()),
+            )),
+            AdapterConfig::Sqlite(SqliteAdapterConfig::new(
+                "pgsql_slave",
+                20,
+                SqliteConfig::new(db_slave.to_string_lossy()),
+            )),
         ],
     );
     config.validate().unwrap();

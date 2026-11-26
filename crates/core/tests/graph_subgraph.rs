@@ -207,15 +207,10 @@ fn records_take_event_and_version_from_the_subgraph() {
 fn config(capabilities: Vec<AdapterCapability>) -> KulyraxConfig {
     KulyraxConfig::new(
         "r.json",
-        vec![AdapterConfig::Graph(GraphAdapterConfig {
-            id: "g".into(),
-            priority: 10,
-            config: GraphConfig {
-                root: "/tmp".into(),
-            },
-            capabilities: Some(capabilities),
-            depends_on: vec![],
-        })],
+        vec![AdapterConfig::Graph(
+            GraphAdapterConfig::new("g", 10, GraphConfig::new("/tmp"))
+                .with_capabilities(capabilities),
+        )],
     )
 }
 

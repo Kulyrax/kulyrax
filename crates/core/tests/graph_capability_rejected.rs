@@ -18,14 +18,10 @@ use std::collections::HashMap;
 fn config_with_graph_capabilities(capabilities: Option<Vec<AdapterCapability>>) -> KulyraxConfig {
     KulyraxConfig::new(
         "r.json",
-        vec![AdapterConfig::Graph(GraphAdapterConfig {
-            id: "graph-social".into(),
-            priority: 10,
-            config: GraphConfig {
-                root: "/tmp".into(),
-            },
-            capabilities,
-            depends_on: vec![],
+        vec![AdapterConfig::Graph({
+            let mut c = GraphAdapterConfig::new("graph-social", 10, GraphConfig::new("/tmp"));
+            c.capabilities = capabilities;
+            c
         })],
     )
 }

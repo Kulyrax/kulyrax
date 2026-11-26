@@ -41,7 +41,15 @@ use kulyrax_core::upcast::UpcasterRegistry;
 
 /// The `config:` block of a `type: mongodb` adapter entry.
 #[derive(Clone, Deserialize)]
+#[non_exhaustive]
 pub struct MongoDbConfig {
+    /// The adapter's id. In YAML it is the entry's `id:`, not a key of the
+    /// `config:` block.
+    #[serde(skip)]
+    pub id: String,
+    /// The adapter's priority. In YAML it is the entry's `priority:`.
+    #[serde(skip)]
+    pub priority: u32,
     /// `mongodb://[user:pass@]host[:port][/?options]`; `${ENV_VAR}` references
     /// are expanded.
     pub url: String,
@@ -51,10 +59,40 @@ pub struct MongoDbConfig {
     pub pool_size: Option<u32>,
 }
 
+impl MongoDbConfig {
+    /// Id empty, priority 0, the default pool size.
+    pub fn new(url: impl Into<String>, database: impl Into<String>) -> Self {
+        Self {
+            id: String::new(),
+            priority: 0,
+            url: url.into(),
+            database: database.into(),
+            pool_size: None,
+        }
+    }
+
+    pub fn with_id(mut self, id: impl Into<String>) -> Self {
+        self.id = id.into();
+        self
+    }
+
+    pub fn with_priority(mut self, priority: u32) -> Self {
+        self.priority = priority;
+        self
+    }
+
+    pub fn with_pool_size(mut self, pool_size: u32) -> Self {
+        self.pool_size = Some(pool_size);
+        self
+    }
+}
+
 /// Shows the URL with its password and secret query parameters hidden.
 impl std::fmt::Debug for MongoDbConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MongoDbConfig")
+            .field("id", &self.id)
+            .field("priority", &self.priority)
             .field("url", &kulyrax_core::redact::redact_url(&self.url))
             .field("database", &self.database)
             .field("pool_size", &self.pool_size)
@@ -67,34 +105,47 @@ pub fn factory(
     entry: &CustomAdapterConfig,
     ctx: &AdapterBuildContext,
 ) -> Result<Box<dyn StorageAdapter>, ConfigError> {
-    let id = entry.id.clone();
     let cfg: MongoDbConfig = entry.backend_config()?;
-    let url = expand_env(&cfg.url);
-    let invalid = |reason: String| {
-        ConfigError::FactoryConfigInvalid(format!("mongodb adapter {id:?}: {reason}"))
-    };
-    if url.trim().is_empty() {
-        return Err(invalid("`url` is empty".into()));
+    let cfg = cfg.with_id(entry.id.clone()).with_priority(entry.priority);
+    Ok(Box::new(MongoDbAdapter::from_config(&cfg, ctx)?))
+}
+
+impl MongoDbAdapter {
+    /// Build the adapter, with the run's mappings, upcasters and migration
+    /// policy from `ctx`. Fails on the checks below; an unreachable server
+    /// surfaces on the first write.
+    pub fn from_config(
+        cfg: &MongoDbConfig,
+        ctx: &AdapterBuildContext,
+    ) -> Result<Self, ConfigError> {
+        let id = cfg.id.clone();
+        let url = expand_env(&cfg.url);
+        let invalid = |reason: String| {
+            ConfigError::FactoryConfigInvalid(format!("mongodb adapter {id:?}: {reason}"))
+        };
+        if url.trim().is_empty() {
+            return Err(invalid("`url` is empty".into()));
+        }
+        if cfg.database.trim().is_empty() {
+            return Err(invalid("`database` is empty".into()));
+        }
+        if Client::with_uri_str(&url).is_err() {
+            return Err(invalid(format!(
+                "`url` does not parse: {}",
+                kulyrax_core::redact::redact_url(&url)
+            )));
+        }
+        Ok(MongoDbAdapter::new(
+            id.clone(),
+            &url,
+            cfg.database.clone(),
+            cfg.pool_size.unwrap_or(4),
+            cfg.priority,
+            DocumentRuntimeBuilder::new(ctx.mappings.document.clone()),
+            Arc::clone(&ctx.upcasters),
+            ctx.migration_policy,
+        ))
     }
-    if cfg.database.trim().is_empty() {
-        return Err(invalid("`database` is empty".into()));
-    }
-    if Client::with_uri_str(&url).is_err() {
-        return Err(invalid(format!(
-            "`url` does not parse: {}",
-            kulyrax_core::redact::redact_url(&url)
-        )));
-    }
-    Ok(Box::new(MongoDbAdapter::new(
-        id.clone(),
-        &url,
-        cfg.database,
-        cfg.pool_size.unwrap_or(4),
-        entry.priority,
-        DocumentRuntimeBuilder::new(ctx.mappings.document.clone()),
-        Arc::clone(&ctx.upcasters),
-        ctx.migration_policy,
-    )))
 }
 
 /// Dedicated collection for guard documents — kept separate from the user's
@@ -394,6 +445,7 @@ impl MongoDbAdapter {
     /// `Client` connects lazily, so an unreachable server surfaces on the
     /// first write rather than here.
     #[allow(clippy::too_many_arguments)]
+    #[doc(hidden)]
     pub fn new(
         id: String,
         url: &str,
@@ -847,14 +899,7 @@ mod tests {
             "config": { "url": url, "database": database },
         }))
         .map_err(|e| ConfigError::FactoryConfigInvalid(e.to_string()))?;
-        let entry = CustomAdapterConfig {
-            type_name: "mongodb".into(),
-            id: "m1".into(),
-            priority: 10,
-            raw,
-            capabilities: None,
-            depends_on: Vec::new(),
-        };
+        let entry = CustomAdapterConfig::new("mongodb", "m1", 10, raw);
         let ctx = AdapterBuildContext::new(
             Default::default(),
             Arc::new(UpcasterRegistry::new()),

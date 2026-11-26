@@ -41,15 +41,11 @@ fn init_users(db: &Path) {
 fn config(db: &Path) -> KulyraxConfig {
     KulyraxConfig::new(
         "r.json",
-        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
-            id: "sql".into(),
-            priority: 10,
-            config: SqliteConfig {
-                path: db.to_string_lossy().into(),
-            },
-            capabilities: None,
-            depends_on: vec![],
-        })],
+        vec![AdapterConfig::Sqlite(SqliteAdapterConfig::new(
+            "sql",
+            10,
+            SqliteConfig::new(db.to_string_lossy()),
+        ))],
     )
 }
 
@@ -440,31 +436,23 @@ fn grpc_dlq_count_reflects_a_real_cross_backend_failure() {
         .unwrap(),
     )]);
 
-    let caps = Some(vec![
+    let caps = vec![
         AdapterCapability::Write,
         AdapterCapability::Idempotent,
         AdapterCapability::Upsert,
         AdapterCapability::Delete,
-    ]);
+    ];
     let cfg = KulyraxConfig::new(
         "r.json",
         vec![
-            AdapterConfig::Custom(CustomAdapterConfig {
-                type_name: "postgres".into(),
-                id: "pg".into(),
-                priority: 10,
-                raw: serde_json::Value::Null,
-                capabilities: caps.clone(),
-                depends_on: vec![],
-            }),
-            AdapterConfig::Custom(CustomAdapterConfig {
-                type_name: "elasticsearch".into(),
-                id: "es".into(),
-                priority: 10,
-                raw: serde_json::Value::Null,
-                capabilities: caps,
-                depends_on: vec![],
-            }),
+            AdapterConfig::Custom(
+                CustomAdapterConfig::new("postgres", "pg", 10, serde_json::Value::Null)
+                    .with_capabilities(caps.clone()),
+            ),
+            AdapterConfig::Custom(
+                CustomAdapterConfig::new("elasticsearch", "es", 10, serde_json::Value::Null)
+                    .with_capabilities(caps),
+            ),
         ],
     )
     .with_failure_policy(FailurePolicy::ContinueOnError);

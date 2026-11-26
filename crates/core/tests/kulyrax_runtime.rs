@@ -49,14 +49,12 @@ fn user_created_event() -> Event {
 fn config_with_one_custom_adapter(type_name: &str) -> KulyraxConfig {
     KulyraxConfig::new(
         "routing.yaml",
-        vec![AdapterConfig::Custom(CustomAdapterConfig {
-            type_name: type_name.into(),
-            id: "sql-primary".into(),
-            priority: 10,
-            raw: serde_json::Value::Null,
-            capabilities: None,
-            depends_on: vec![],
-        })],
+        vec![AdapterConfig::Custom(CustomAdapterConfig::new(
+            type_name,
+            "sql-primary",
+            10,
+            serde_json::Value::Null,
+        ))],
     )
 }
 

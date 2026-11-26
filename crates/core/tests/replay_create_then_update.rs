@@ -106,18 +106,17 @@ fn replay_and_real_time_dispatch_agree_on_final_state() {
 
     let replay_config = KulyraxConfig::new(
         "routing.yaml",
-        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
-            id: "sql-primary".into(),
-            priority: 10,
-            config: SqliteConfig {
-                path: replay_db.to_string_lossy().into(),
-            },
-            capabilities: Some(vec![
+        vec![AdapterConfig::Sqlite(
+            SqliteAdapterConfig::new(
+                "sql-primary",
+                10,
+                SqliteConfig::new(replay_db.to_string_lossy()),
+            )
+            .with_capabilities(vec![
                 kulyrax_core::runtime::config::AdapterCapability::Write,
                 kulyrax_core::runtime::config::AdapterCapability::Upsert,
             ]),
-            depends_on: vec![],
-        })],
+        )],
     );
     replay_config.validate().unwrap();
 
@@ -147,18 +146,17 @@ fn replay_and_real_time_dispatch_agree_on_final_state() {
 
     let live_config = KulyraxConfig::new(
         "routing.yaml",
-        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
-            id: "sql-primary".into(),
-            priority: 10,
-            config: SqliteConfig {
-                path: live_db.to_string_lossy().into(),
-            },
-            capabilities: Some(vec![
+        vec![AdapterConfig::Sqlite(
+            SqliteAdapterConfig::new(
+                "sql-primary",
+                10,
+                SqliteConfig::new(live_db.to_string_lossy()),
+            )
+            .with_capabilities(vec![
                 kulyrax_core::runtime::config::AdapterCapability::Write,
                 kulyrax_core::runtime::config::AdapterCapability::Upsert,
             ]),
-            depends_on: vec![],
-        })],
+        )],
     );
     live_config.validate().unwrap();
 

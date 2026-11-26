@@ -63,16 +63,10 @@ fn fresh_outbox(url: &str) -> Result<String, Box<dyn std::error::Error>> {
 }
 
 fn config(url: &str, table: &str) -> OutboxConfig {
-    OutboxConfig {
-        url: url.to_string(),
-        table: table.to_string(),
-        sequence_column: "id".into(),
-        columns: OutboxColumns::default(),
-        gap_grace_ms: 1_000,
-        gap_timeout_ms: 60_000,
-        watch_retention_ms: 3_600_000,
-        allow_unverified_sequence: false,
-    }
+    OutboxConfig::new(url.to_string(), table.to_string(), "id")
+        .with_gap_grace_ms(1_000)
+        .with_gap_timeout_ms(60_000)
+        .with_watch_retention_ms(3_600_000)
 }
 
 /// Insert one event row (in its own transaction) and return its id.
@@ -292,14 +286,12 @@ fn watched_values_expire() -> R {
     let mut c = connect(&url)?;
     insert(&mut c, &t, "u1", "a")?;
     let dir = tempfile::tempdir()?;
-    let mut s = open(
-        dir.path(),
-        OutboxConfig {
-            watch_retention_ms: 200,
-            gap_grace_ms: 0,
-            ..config(&url, &t)
-        },
-    )?;
+    let mut s = open(dir.path(), {
+        let mut o = config(&url, &t);
+        o.gap_grace_ms = 0;
+        o.watch_retention_ms = 200;
+        o
+    })?;
     let events = s.poll(10)?;
     s.commit(events[0].position.clone())?;
     let mut tx = c.transaction()?;
@@ -363,12 +355,10 @@ fn start_up_refuses_a_bad_table_or_sequence() -> R {
     };
 
     // A column the config names but the table lacks.
-    let err = refused(OutboxConfig {
-        columns: OutboxColumns {
-            payload: "body".into(),
-            ..OutboxColumns::default()
-        },
-        ..config(&url, &t)
+    let err = refused({
+        let mut o = config(&url, &t);
+        o.columns = OutboxColumns::default().with_payload("body");
+        o
     });
     assert!(
         err.contains("columns.payload") && err.contains("no column \"body\""),
@@ -404,13 +394,11 @@ fn start_up_refuses_a_bad_table_or_sequence() -> R {
     let err = refused(config(&url, &plain));
     assert!(err.contains("has no sequence behind it"), "{err}");
     let dir = tempfile::tempdir()?;
-    open(
-        dir.path(),
-        OutboxConfig {
-            allow_unverified_sequence: true,
-            ..config(&url, &plain)
-        },
-    )?;
+    open(dir.path(), {
+        let mut o = config(&url, &plain);
+        o.allow_unverified_sequence = true;
+        o
+    })?;
     Ok(())
 }
 
@@ -424,15 +412,11 @@ fn run_once(
 ) -> Result<kulyrax_core::SourceRunReport, kulyrax_core::SourceError> {
     let config = KulyraxConfig::new(
         "routing.yaml",
-        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
-            id: "sql".into(),
-            priority: 10,
-            config: SqliteConfig {
-                path: db.to_string_lossy().into(),
-            },
-            capabilities: None,
-            depends_on: vec![],
-        })],
+        vec![AdapterConfig::Sqlite(SqliteAdapterConfig::new(
+            "sql",
+            10,
+            SqliteConfig::new(db.to_string_lossy()),
+        ))],
     );
     let mapping: SqlMapping = kulyrax_core::yaml::from_str(
         "event: UserUpserted\ntable: users\nprimary_key: id\nversion: 1\non_existing: replace\ncolumns:\n  id: payload.id\n  name: payload.name\n",
@@ -568,9 +552,10 @@ fn a_late_row_is_delivered_logged_and_counted() -> R {
 
 /// [`config`] with `gap_grace_ms: 0`: a final gap skips on the next poll.
 fn no_grace(url: &str, table: &str) -> OutboxConfig {
-    OutboxConfig {
-        gap_grace_ms: 0,
-        ..config(url, table)
+    {
+        let mut o = config(url, table);
+        o.gap_grace_ms = 0;
+        o
     }
 }
 
@@ -585,13 +570,11 @@ fn a_value_taken_before_the_insert_is_held_by_the_grace() -> R {
     let mut c = connect(&url)?;
     insert(&mut c, &t, "u1", "a")?;
     let dir = tempfile::tempdir()?;
-    let mut s = open(
-        dir.path(),
-        OutboxConfig {
-            gap_grace_ms: 5_000,
-            ..config(&url, &t)
-        },
-    )?;
+    let mut s = open(dir.path(), {
+        let mut o = config(&url, &t);
+        o.gap_grace_ms = 5_000;
+        o
+    })?;
     let events = s.poll(10)?;
     s.commit(events[0].position.clone())?;
 
