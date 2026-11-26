@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # Adapters built with `from_config`; config structs `#[non_exhaustive]` (step 4, D4)
@@ -48,7 +48,7 @@ Decision: [2026-11-26-adapter-from-config](../decisions/2026-11-26-adapter-from-
   - the rc.1 notes, with before/after code.
 - [x] Gates: fmt, clippy `-D warnings`, workspace tests, examples, every Docker
   backend suite.
-- [ ] PR merged with the 12 required checks green.
+- [x] PR #32 merged with the 12 required checks green (all 18 pass; merge commit 62baca5).
 
 ## Constraints and assumptions
 
@@ -78,4 +78,4 @@ Decision: [2026-11-26-adapter-from-config](../decisions/2026-11-26-adapter-from-
 
 ## Outcome
 
-In progress.
+Completed. Every adapter is built with `from_config(&cfg, &AdapterBuildContext)`; positional `new` is hidden; the config structs are `#[non_exhaustive]` with builders.

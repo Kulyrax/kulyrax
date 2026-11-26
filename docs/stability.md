@@ -93,11 +93,20 @@ underlying errors are flattened into strings (`WriteFailed(String)`,
 | `migration_policy` | `strict` (default), `ignore_unmatched` | FREEZE |
 | `sources[]` | `directory` (`id`, `path`, `state_dir`), `stdin` (`id`, `state_dir`), `postgres_outbox` (`id`, `state_dir`, `config`: `url`, `table`, `sequence_column`, `columns.{event_id,event_type,payload,metadata,version}`, `gap_grace_ms`, `gap_timeout_ms`, `watch_retention_ms`, `allow_unverified_sequence`) | FREEZE |
 
-Unknown keys: no built-in config or mapping struct rejects unknown keys (no
-`deny_unknown_fields` in `runtime/config.rs` or any `mapping.rs`), so a misspelt key
-is silently ignored; `OutboxConfig` rejects them. **CHANGE** (step 4, §9): every
-built-in config, mapping and routing struct rejects unknown keys, naming the key, the
-file and the line.
+Unknown keys: in 0.12 no built-in config or mapping struct rejected unknown keys, so
+a misspelt key was silently ignored; only `OutboxConfig` rejected them. **CHANGE**
+(step 4, D5, done): every built-in config, mapping and routing struct rejects
+unknown keys. That covers:
+- `config.yaml`: the top level, `routing:`, each adapter and source entry (custom
+  ones too: core checks the keys it reads), and the `config:` blocks of the
+  built-in and Kulyrax-shipped backends;
+- the SQL, document, key-value and graph mapping files.
+
+The error names the key, the file and the key's own line. A Kulyrax-shipped
+backend's `config:` block is parsed by its factory after the file is read, so its
+error names the key and the adapter id, but not the line. `routing.yaml` has no
+fixed keys: each key is an event type. A third-party backend or source parses its
+own `config:` block and documents its own rule (`docs/writing-a-backend.md`).
 
 ### Mappings (`mappings/{sql,document,keyvalue,graph}/*.yaml`, `version: <n>`)
 

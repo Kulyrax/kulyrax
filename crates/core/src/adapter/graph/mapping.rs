@@ -41,6 +41,7 @@ impl<'de> Deserialize<'de> for GraphSubgraphMapping {
         use serde::de::Error;
 
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Raw {
             event: String,
             version: u32,
@@ -80,6 +81,7 @@ impl<'de> Deserialize<'de> for GraphSubgraphMapping {
 
 /// `kind: node` — a node *is* an entity, so facets (Phase 15) apply verbatim.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct GraphNodeMapping {
     pub event: String,
@@ -107,6 +109,7 @@ pub struct GraphNodeMapping {
 /// optional `discriminator` for parallel edges (a multigraph). Edges are not
 /// faceted.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct GraphEdgeMapping {
     pub event: String,

@@ -178,6 +178,11 @@ The built-in backends follow one shape, which a new backend can copy:
   (`ctx.mappings.document`, …), `ctx.upcasters` and `ctx.migration_policy`
   from the context. It is the only public constructor, so building in code
   and building from YAML validate the same way.
+- **Unknown keys.** Core refuses an unknown key on the entry itself (beside
+  `type`, `id`, `priority`, `config`, `capabilities` and `depends_on`). Your
+  `config:` block is yours to check: every Kulyrax-shipped backend marks its
+  config `#[serde(deny_unknown_fields)]`, so a misspelt key fails at start-up
+  instead of being ignored. Whatever you choose, document it for your users.
 
 The [`kulyrax-adapter-postgres`](../crates/adapters/postgres/src/lib.rs)
 and [`kulyrax-adapter-elasticsearch`](../crates/adapters/elasticsearch/src/lib.rs)

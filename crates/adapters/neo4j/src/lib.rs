@@ -57,6 +57,7 @@ use kulyrax_core::upcast::UpcasterRegistry;
 
 /// The `config:` block of a `type: neo4j` adapter entry.
 #[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Neo4jConfig {
     /// The adapter's id. In YAML it is the entry's `id:`, not a key of the

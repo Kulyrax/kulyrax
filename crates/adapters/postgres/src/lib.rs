@@ -95,6 +95,7 @@ type ColTypes = HashMap<String, PgColType>;
 /// typed `AdapterConfig` variant; this is parsed by [`factory`] from the
 /// `Custom` entry's raw `config:` sub-value).
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct PostgresConfig {
     /// The adapter's id. In YAML it is the entry's `id:`, not a key of the
