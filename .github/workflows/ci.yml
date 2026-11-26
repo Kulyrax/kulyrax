@@ -428,3 +428,47 @@ jobs:
         run: bash examples/sqlite-quickstart/run.sh
       - name: embedded example runs
         run: cargo run --manifest-path examples/embedded/Cargo.toml
+
+  # The gRPC wire must not break (decision: proto v1 frozen, stability §4).
+  # Compares proto/ with the v0.12.2 release. A required check.
+  buf-breaking:
+    name: proto wire compatible with v0.12.2
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+      - name: buf breaking against v0.12.2
+        run: buf breaking proto --against '.git#tag=v0.12.2,subdir=proto'
+
+  # The Rust API's breaking changes since v0.12.2, as a report (runbook D9).
+  # Phase D breaks the API on purpose, so this job does not fail and is not
+  # required: it lists every breaking change and uploads the list as the
+  # `semver-report` artifact, the checklist for the 1.0 upgrade guide. After
+  # the 1.0.0-rc.1 tag it becomes a strict, required job against that tag.
+  semver-report:
+    name: API changes since v0.12.2 (report)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-semver-checks
+      - name: cargo semver-checks against v0.12.2 (report only)
+        run: |
+          set +e
+          cargo semver-checks --workspace --baseline-rev v0.12.2 > semver-report.txt 2>&1
+          echo "cargo semver-checks exit code: $?" >> semver-report.txt
+          grep -E "^--- failure|^     Summary|exit code" semver-report.txt
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: semver-report
+          path: semver-report.txt
