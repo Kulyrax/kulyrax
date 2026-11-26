@@ -2,16 +2,28 @@
 //!
 //! Part 3 of the three-part model (`architecture.md` §1.2): a
 //! technology-agnostic producer contract. A producer in any language streams
-//! [`EventEnvelope`](pb::EventEnvelope)s and gets back position
-//! [`Ack`](pb::Ack)s once the batch's guards commit. Kulyrax persists nothing
-//! on the ingestion side — the producer owns replay from its last ack.
+//! `EventEnvelope`s and gets back position `Ack`s once the batch's guards
+//! commit (`proto/kulyrax/v1/ingest.proto`; `kulyrax-client` is the Rust
+//! producer). Kulyrax persists nothing on the ingestion side — the producer
+//! owns replay from its last ack.
 //!
 //! `tonic` lives here, never in `kulyrax-core`: [`GrpcSource`] implements the
 //! `kulyrax_core::source::EventSource` trait, so `kulyrax_core::run_sources`
 //! drives it exactly like a `directory` source.
+//!
+//! The generated gRPC code is private: the frozen contract is the `.proto`
+//! (stability §9.3). The `unstable-pb` feature exposes it as `pb`, outside
+//! semver.
 
+#[cfg(feature = "unstable-pb")]
+#[doc(hidden)]
 #[allow(clippy::result_large_err)] // tonic-generated client stubs return `Err(tonic::Status)` directly
 pub mod pb {
+    tonic::include_proto!("kulyrax.v1");
+}
+#[cfg(not(feature = "unstable-pb"))]
+#[allow(clippy::result_large_err, dead_code)] // as above; the client stubs go unused here
+mod pb {
     tonic::include_proto!("kulyrax.v1");
 }
 
@@ -91,6 +103,9 @@ impl pb::EventEnvelope {
     /// The envelope for `event`, at the producer's resume `position`. Every
     /// envelope needs one: Kulyrax refuses an empty position. (0.12 had a
     /// `From<&Event>` that left it empty.)
+    /// On the generated type, so outside semver (`unstable-pb`); a Rust
+    /// producer uses `kulyrax_client::EventEnvelope::new`.
+    #[cfg(any(test, feature = "unstable-pb"))]
     pub fn from_event(e: &Event, position: impl Into<String>) -> Self {
         pb::EventEnvelope {
             event_type: e.event_type.clone(),

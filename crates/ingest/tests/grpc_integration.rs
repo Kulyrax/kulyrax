@@ -68,15 +68,12 @@ fn mappings() -> HashMap<String, SqlMapping> {
 }
 
 fn env(seq: u64, id: &str, name: &str, position: &str) -> EventEnvelope {
-    EventEnvelope {
-        event_type: "UserUpserted".into(),
-        payload: format!(r#"{{"id":"{id}","name":"{name}"}}"#),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-        position: position.into(),
-        event_id: String::new(),
-    }
+    EventEnvelope::new(
+        "UserUpserted",
+        format!(r#"{{"id":"{id}","name":"{name}"}}"#),
+        seq,
+        position,
+    )
 }
 
 fn read_user(db: &Path, id: &str) -> Option<(String, i64)> {
@@ -531,14 +528,13 @@ fn grpc_dlq_count_reflects_a_real_cross_backend_failure() {
         .unwrap()
     });
 
-    let vehicle_env = |seq: u64, id: &str, mileage: Value| EventEnvelope {
-        event_type: "VehicleUpserted".into(),
-        payload: serde_json::json!({"id": id, "name": "Alice", "mileage": mileage}).to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-        position: format!("pos-{seq}"),
-        event_id: String::new(),
+    let vehicle_env = |seq: u64, id: &str, mileage: Value| {
+        EventEnvelope::new(
+            "VehicleUpserted",
+            serde_json::json!({"id": id, "name": "Alice", "mileage": mileage}).to_string(),
+            seq,
+            format!("pos-{seq}"),
+        )
     };
 
     let ack = rt().block_on(stream_until(

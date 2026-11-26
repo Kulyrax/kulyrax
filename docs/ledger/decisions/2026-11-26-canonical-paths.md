@@ -53,12 +53,23 @@ The owner chose **module path + front door**:
 3. **Every other re-export is `#[doc(hidden)]`**: still reachable, outside
    semver. That covers:
    - the flat `runtime::*` and `execution::*` re-exports;
-   - the storage kinds' facade re-exports (`adapter::sql::SqlTxn`, …);
    - the other root re-exports (`ReplayContext`, `replay_stream*`,
      `events_from_path`, `run_sources_with_adapters`, the dependency-graph
      functions, `AdapterExecutionMeta`).
 
    The root `report` module, a pure duplicate that nothing used, is removed.
+
+   **The storage kinds' facade re-exports (`adapter::sql::SqlTxn`, …) are
+   removed, not hidden** (corrected in D3, task
+   [2026-11-26-api-grpc-types](../tasks/2026-11-26-api-grpc-types.md)). D2
+   first hid them. The D9 semver report then flagged `SqlTxn`,
+   `DocumentBackend` and `GraphBackend` as `trait_newly_sealed`: with the
+   hidden re-export, cargo-semver-checks no longer counts the trait as
+   implementable from outside. Un-hiding the document facade alone cleared the
+   `DocumentBackend` finding, which confirmed the cause. A backend author
+   implements these traits (Phase 25.1), so a "sealed" reading would be wrong.
+   The runbook allows "removed or doc(hidden)", so the facades are removed:
+   each type has the one path `adapter::<kind>::exec::<Name>`.
    One exception: where the defining module is itself hidden, its re-export is
    the canonical path (`pipeline::InitError` and `pipeline::init_project`,
    from `scaffold`).
@@ -91,6 +102,9 @@ The owner chose **module path + front door**:
   `stability.md` asked.
 - **Hidden paths still compile**, so nothing outside the stable surface breaks
   today. They may be removed in a minor release.
+- **The storage-kind facades do not compile any more**: a backend written
+  against 0.12 imports `adapter::sql::SqlTxn` and must change it to
+  `adapter::sql::exec::SqlTxn`. The rc.1 notes say so.
 - **Canonical module paths are sometimes long**
   (`runtime::engine::KulyraxRuntime`). The front door covers the common
   imports.

@@ -12,6 +12,11 @@ categories = ["database", "network-programming"]
 readme = "README.md"
 include = ["src/**", "build.rs", "README.md", "proto/**"]
 
+[features]
+# The generated gRPC code as `pb`, `#[doc(hidden)]` and outside semver: a
+# tonic or prost upgrade may change it in any release (stability §9.3).
+unstable-pb = []
+
 [dependencies]
 kulyrax-core = { workspace = true }
 tonic = "0.12"

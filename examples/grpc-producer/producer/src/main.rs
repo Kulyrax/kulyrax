@@ -4,7 +4,6 @@
 //! (`run.sh` starts the server for you).
 
 use kulyrax_client::{EventEnvelope, Producer};
-use std::collections::HashMap;
 
 #[tokio::main]
 async fn main() {
@@ -24,21 +23,18 @@ async fn main() {
     ];
     for (id, name, sequence, position) in events {
         producer
-            .send(EventEnvelope {
-                event_type: "UserRegistered".into(),
-                payload: format!(r#"{{"id":"{id}","name":"{name}"}}"#),
-                metadata: HashMap::new(),
-                version: 1,
+            .send(EventEnvelope::new(
+                "UserRegistered",
+                format!(r#"{{"id":"{id}","name":"{name}"}}"#),
                 sequence,
-                position: position.into(),
-                event_id: String::new(),
-            })
+                position,
+            ))
             .await
             .expect("send event");
     }
 
-    // Positions are opaque strings to Kulyrax but ours happen to sort the way
-    // we want, so "wait for offset-2" is "wait for the last event's batch".
+    // An ack carries the last position this stream sent whose batch has
+    // committed, so "wait for offset-2" is "wait for the last event's batch".
     while let Some(ack) = producer.next_ack().await {
         let ack = ack.expect("ack");
         println!(
