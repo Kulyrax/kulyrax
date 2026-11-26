@@ -72,7 +72,14 @@ impl std::fmt::Display for IngestError {
         }
     }
 }
-impl std::error::Error for IngestError {}
+impl std::error::Error for IngestError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            IngestError::Runtime(e) => Some(e),
+            IngestError::Bind(_) | IngestError::Config(_) => None,
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // EventEnvelope <-> Event
@@ -578,7 +585,15 @@ impl std::fmt::Display for ServeError {
         }
     }
 }
-impl std::error::Error for ServeError {}
+impl std::error::Error for ServeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ServeError::Pipeline(e) => Some(e),
+            ServeError::Ingest(e) => Some(e),
+            ServeError::Source(e) => Some(e),
+        }
+    }
+}
 
 /// Load the project, start the gRPC server, and run the
 /// `poll → dispatch → commit → ack` loop until `stop` is set (SIGINT/SIGTERM).

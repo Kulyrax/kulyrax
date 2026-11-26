@@ -102,7 +102,7 @@ impl From<crate::replay::ReplayLoadError> for SourceError {
     fn from(e: crate::replay::ReplayLoadError) -> Self {
         match e {
             crate::replay::ReplayLoadError::Io(e) => SourceError::Io(e),
-            crate::replay::ReplayLoadError::Json(s) => SourceError::Parse(s),
+            e @ crate::replay::ReplayLoadError::Json { .. } => SourceError::Parse(e.to_string()),
         }
     }
 }

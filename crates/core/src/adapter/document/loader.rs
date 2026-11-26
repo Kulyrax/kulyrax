@@ -8,7 +8,7 @@ use crate::adapter::loader::load_mapping_dir;
 /// keyed by event type. See `docs/mapping-reference.md` for the file rules.
 pub fn load_document_mappings<P: AsRef<Path>>(
     dir: P,
-) -> Result<HashMap<String, DocumentMapping>, String> {
+) -> Result<HashMap<String, DocumentMapping>, crate::pipeline::LoadError> {
     load_mapping_dir(dir.as_ref(), "document", |m: &DocumentMapping| {
         m.event.as_str()
     })

@@ -8,6 +8,6 @@ use crate::adapter::loader::load_mapping_dir;
 /// keyed by event type. See `docs/mapping-reference.md` for the file rules.
 pub fn load_keyvalue_mappings<P: AsRef<Path>>(
     dir: P,
-) -> Result<HashMap<String, KvMapping>, String> {
+) -> Result<HashMap<String, KvMapping>, crate::pipeline::LoadError> {
     load_mapping_dir(dir.as_ref(), "key-value", |m: &KvMapping| m.event.as_str())
 }

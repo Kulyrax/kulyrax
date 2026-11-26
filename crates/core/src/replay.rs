@@ -15,9 +15,7 @@ use crate::adapter::sql::mapping::SqlMapping;
 use crate::batch::{BatchResult, dispatch_batch};
 use crate::dispatch::dispatch;
 use crate::event::Event;
-use crate::execution::{
-    AdapterExecutionReport, AdapterReportError, ExecutionReport, ExecutionStatus,
-};
+use crate::execution::{AdapterExecutionReport, AdapterFailure, ExecutionReport, ExecutionStatus};
 use crate::routing::{AdapterId, StorageKind, route_with_rules};
 use crate::runtime::build_adapters_from_config;
 use crate::runtime::config::{FailurePolicy, KulyraxConfig};
@@ -31,14 +29,23 @@ use crate::runtime::dependency_graph::{AdapterExecutionMeta, adapter_metadata_ma
 #[non_exhaustive]
 pub enum ReplayLoadError {
     Io(std::io::Error),
-    Json(String),
+    /// An event that is not valid JSON, or not an `Event`. `file` is the
+    /// event file, for a directory of `*.json` files.
+    Json {
+        file: Option<std::path::PathBuf>,
+        source: serde_json::Error,
+    },
 }
 
 impl std::fmt::Display for ReplayLoadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ReplayLoadError::Io(e) => write!(f, "{}", e),
-            ReplayLoadError::Json(s) => write!(f, "{}", s),
+            ReplayLoadError::Json {
+                file: Some(file),
+                source,
+            } => write!(f, "{}: {source}", file.display()),
+            ReplayLoadError::Json { source, .. } => write!(f, "{source}"),
         }
     }
 }
@@ -47,7 +54,7 @@ impl std::error::Error for ReplayLoadError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             ReplayLoadError::Io(e) => Some(e),
-            _ => None,
+            ReplayLoadError::Json { source, .. } => Some(source),
         }
     }
 }
@@ -140,11 +147,10 @@ impl Iterator for EventsFromPath {
                 match File::open(&p) {
                     Ok(f) => match serde_json::from_reader(BufReader::new(f)) {
                         Ok(e) => Some(Ok(e)),
-                        Err(e) => Some(Err(ReplayLoadError::Json(format!(
-                            "{}: {}",
-                            p.display(),
-                            e
-                        )))),
+                        Err(source) => Some(Err(ReplayLoadError::Json {
+                            file: Some(p),
+                            source,
+                        })),
                     },
                     Err(e) => Some(Err(e.into())),
                 }
@@ -160,7 +166,7 @@ impl Iterator for EventsFromPath {
                         }
                         return match serde_json::from_str::<Event>(t) {
                             Ok(e) => Some(Ok(e)),
-                            Err(e) => Some(Err(ReplayLoadError::Json(e.to_string()))),
+                            Err(source) => Some(Err(ReplayLoadError::Json { file: None, source })),
                         };
                     }
                     Err(e) => return Some(Err(e.into())),
@@ -281,7 +287,7 @@ fn unrouted_event_report(event: &Event) -> ExecutionReport {
     let adapter_report = AdapterExecutionReport::new("routing".to_string(), StorageKind::Sql, now)
         .finish_failed(
             now,
-            AdapterReportError::WriteFailed {
+            AdapterFailure::WriteFailed {
                 message: format!("no routing rule for event_type {:?}", event.event_type),
             },
         );
