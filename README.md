@@ -125,7 +125,7 @@ kulyrax reload --config config.yaml
 
 The process re-reads and validates everything between batches, builds the new
 adapters, and switches over. If anything is invalid it keeps running on the previous
-configuration and `reload` prints why (exit 1). Changing `sources:` needs a restart.
+configuration and `reload` prints why (exit 2). Changing `sources:` needs a restart.
 Pass the same config file the process was started with.
 
 A changed SQL mapping only applies to new events. To re-project the whole history

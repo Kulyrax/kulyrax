@@ -65,7 +65,7 @@ pub enum PipelineError {
     AdapterPrepare(Vec<crate::adapter::PrepareFailure>),
     /// A rebuild could not start, or was not swapped in (see
     /// [`crate::rebuild`]).
-    Rebuild(String),
+    Rebuild(crate::rebuild::RebuildError),
 }
 
 impl fmt::Display for PipelineError {
@@ -94,7 +94,7 @@ impl fmt::Display for PipelineError {
                 }
                 Ok(())
             }
-            PipelineError::Rebuild(msg) => write!(f, "rebuild: {msg}"),
+            PipelineError::Rebuild(e) => write!(f, "rebuild: {e}"),
         }
     }
 }
@@ -107,6 +107,7 @@ impl std::error::Error for PipelineError {
             PipelineError::Config(e) => Some(e),
             PipelineError::Mapping(e) | PipelineError::Routing(e) => Some(e),
             PipelineError::EventParse(e) => Some(e),
+            PipelineError::Rebuild(e) => Some(e),
             PipelineError::Validation(e) => Some(e),
             PipelineError::Replay(e) => Some(e),
             PipelineError::Source(e) => Some(e),

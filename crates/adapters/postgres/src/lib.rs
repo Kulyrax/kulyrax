@@ -31,7 +31,7 @@ use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use kulyrax_core::adapter::{AdapterError, AdapterResult, GuardState, Prepared, StorageAdapter};
 use kulyrax_core::event::Event;
 use kulyrax_core::execution::stages::{Stage, timed};
-use kulyrax_core::rebuild::ShadowRebuild;
+use kulyrax_core::rebuild::{RebuildError, ShadowRebuild};
 use kulyrax_core::routing::StorageKind;
 use kulyrax_core::runtime::AdapterBuildContext;
 use kulyrax_core::runtime::config::{ConfigError, CustomAdapterConfig, MigrationPolicy};
@@ -1035,22 +1035,20 @@ impl SqlTxn for PostgresTxn<'_> {
 }
 
 impl ShadowRebuild for PostgresAdapter {
-    fn start_rebuild(&self, tables: &[ShadowTable]) -> Result<GuardFingerprint, AdapterError> {
+    fn start_rebuild(&self, tables: &[ShadowTable]) -> Result<GuardFingerprint, RebuildError> {
         let mut client = self.client()?;
-        PostgresTxn::begin(&mut client, Arc::default(), None)
-            .and_then(|txn| exec::start_shadow_rebuild(txn, tables))
-            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+        Ok(PostgresTxn::begin(&mut client, Arc::default(), None)
+            .and_then(|txn| exec::start_shadow_rebuild(txn, tables))?)
     }
 
     fn finish_rebuild(
         &self,
         tables: &[ShadowTable],
         before: GuardFingerprint,
-    ) -> Result<(), AdapterError> {
+    ) -> Result<(), RebuildError> {
         let mut client = self.client()?;
-        PostgresTxn::begin(&mut client, Arc::default(), None)
-            .and_then(|txn| exec::swap_shadow_rebuild(txn, tables, before))
-            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+        Ok(PostgresTxn::begin(&mut client, Arc::default(), None)
+            .and_then(|txn| exec::swap_shadow_rebuild(txn, tables, before))?)
     }
 }
 

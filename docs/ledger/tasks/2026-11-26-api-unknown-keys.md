@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # Unknown keys refused in every built-in config, mapping and routing struct (step 4, D5)
@@ -42,7 +42,7 @@ tranche 3 of Phase D (D5, D6, D7).
   - the rc.1 notes (behaviour change, upgrade advice).
 - [x] Gates: fmt, clippy `-D warnings`, workspace tests, examples, every Docker
   backend suite.
-- [ ] PR merged with the 12 required checks green.
+- [x] PR #33 merged with the 12 required checks green (all 18 pass; merge commit 463af2c).
 
 ## Constraints and assumptions
 
@@ -78,4 +78,4 @@ tranche 3 of Phase D (D5, D6, D7).
 
 ## Outcome
 
-In progress.
+Completed. Every built-in config, mapping and routing struct refuses an unknown key, naming the key, the file and its line.

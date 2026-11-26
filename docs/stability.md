@@ -157,9 +157,19 @@ Commands: `init [DIR]`, `run`, `sources`, `ingest`, `reload`, `explain`,
 | Item | Proposal |
 |---|---|
 | Command and flag names, defaults | FREEZE |
-| Exit codes. Today: `0` success, `1` for everything else (an event failed, events failed beyond those dead-lettered, a retry-exhausted halt, `dry-run` with a failed adapter, a refused `reload`, any error) | **CHANGE** (step 4, §9.5), then FREEZE: `0` success; `1` internal or unexpected error; `2` usage, config, mapping or routing invalid (clap already exits `2` on bad arguments); `3` event processing failures (events failed or dead-lettered in a `--once`, `replay` or `rebuild` run); `4` refused by a safety check (a lock held, a rebuild preflight or swap refused, a newer on-disk format). Each tested through the CLI |
+| Exit codes. 0.12: `0` success, `1` for everything else | **CHANGED** (step 4, D7, done) and FREEZE: the table below, tested through the CLI (`crates/cli/tests/exit_codes.rs`) |
 | `--output json` documents (execution report, replay report, source-run report, dry-run report, `sources` list with `details`, `rebuild` `{tables, replay}`) | FREEZE their field names; they are what scripts parse |
 | `--output text` and everything on stderr (progress, `kulyrax: source …` log lines) | **UNSTABLE**: human-readable |
+
+### Exit codes (frozen at 1.0)
+
+| Code | Meaning | When |
+|---|---|---|
+| `0` | Success | Everything the command was asked to do was done. |
+| `1` | Internal or unexpected error | I/O failures, a database that failed, an adapter that could not be prepared (a server unreachable, a held file-store lock), `reload` that no running process answered. |
+| `2` | Invalid input | Bad arguments (clap). `config.yaml`, a mapping or the routing file does not parse, has an unknown key or fails validation. A bad `--event` / `--events` file. An adapter or source factory refusing its config (an unknown `type:`, a bad `config:` block). A `rebuild` of an adapter that is not in the config, has no SQL mapping, or cannot rebuild. A `reload` refused because the new config is invalid. |
+| `3` | Events failed or were dead-lettered | `run --event`, `run --once`, `replay` or `rebuild` with an event that failed. A `--once` run that dead-lettered any event. A halt after the retry budget. `dry-run` with an adapter that would fail. A continuous `run` or `ingest` ends with 3 only for failures it did not dead-letter. |
+| `4` | Refused by a safety check | A source's lock is held by another process. A `rebuild` refused before it starts (a table the swap would break, a mapped table named like a shadow) or at the swap (another writer touched the tables). `init` would overwrite a file. A newer on-disk format (step 5). Nothing was changed. |
 
 ---
 

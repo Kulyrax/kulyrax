@@ -11,6 +11,7 @@ use kulyrax_core::adapter::graph::adapter::GraphError;
 use kulyrax_core::adapter::keyvalue::adapter::KvError;
 use kulyrax_core::adapter::sql::adapter::SqlError;
 use kulyrax_core::pipeline::{InitError, LoadError, PipelineError, load_config, load_mappings};
+use kulyrax_core::rebuild::RebuildError;
 use kulyrax_core::replay::ReplayLoadError;
 use kulyrax_core::runtime::config::ConfigError;
 use kulyrax_core::runtime::dependency_graph::DependencyOrderError;
@@ -38,6 +39,7 @@ fn every_public_error_is_send_sync_static() {
     is_error::<SourceError>();
     is_error::<UpcastError>();
     is_error::<YamlError>();
+    is_error::<RebuildError>();
 }
 
 #[test]
@@ -85,4 +87,13 @@ fn a_dependency_order_error_reads_like_the_dispatch_report() {
         adapters: vec!["a".into(), "b".into()],
     };
     assert_eq!(err.to_string(), "cyclic adapter dependencies among: a, b");
+}
+
+#[test]
+fn a_backend_refusal_stays_a_refusal() {
+    use kulyrax_core::adapter::sql::adapter::SqlError;
+    let refused = RebuildError::from(SqlError::RebuildRefused("another writer".into()));
+    assert!(matches!(refused, RebuildError::Refused(_)), "{refused:?}");
+    let failed = RebuildError::from(SqlError::ExecutionFailed("disk full".into()));
+    assert!(matches!(failed, RebuildError::Failed(_)), "{failed:?}");
 }

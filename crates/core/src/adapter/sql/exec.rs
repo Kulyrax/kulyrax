@@ -327,7 +327,7 @@ pub fn start_shadow_rebuild<T: SqlTxn>(
         }
     }
     if !blockers.is_empty() {
-        return Err(SqlError::ExecutionFailed(format!(
+        return Err(SqlError::RebuildRefused(format!(
             "cannot rebuild into shadow tables, the swap would fail or drop these: {}. Remove \
              them, or rebuild another way",
             blockers.join("; ")
@@ -355,7 +355,7 @@ pub fn swap_shadow_rebuild<T: SqlTxn>(
     txn.lock_tables(&names)?;
     let now = txn.guard_fingerprint(&names, true)?;
     if now != before {
-        return Err(SqlError::ExecutionFailed(format!(
+        return Err(SqlError::RebuildRefused(format!(
             "another writer projected into {} during the rebuild ({} guard lanes before, {} \
              now); the rebuilt tables were not swapped in. Stop every other writer to these \
              tables and run the rebuild again",

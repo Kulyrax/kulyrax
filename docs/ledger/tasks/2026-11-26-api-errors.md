@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # Errors: `Send + Sync + 'static`, typed safe causes, `AdapterFailure` (step 4, D6)
@@ -36,7 +36,7 @@ owner chose to chain only the safe causes: decision
   before/after code).
 - [x] Gates: fmt, clippy `-D warnings`, workspace tests, examples, every Docker
   backend suite.
-- [ ] PR merged with the 12 required checks green.
+- [x] PR #34 merged with the 12 required checks green (all 18 pass; merge commit f9e9f84).
 
 ## Constraints and assumptions
 
@@ -69,4 +69,4 @@ owner chose to chain only the safe causes: decision
 
 ## Outcome
 
-In progress.
+Completed. Every public error is Send + Sync + 'static; YAML, JSON and I/O causes are chained; driver errors stay redacted strings; AdapterFailure replaces AdapterReportError.
