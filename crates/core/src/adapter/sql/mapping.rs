@@ -47,6 +47,7 @@ impl From<&str> for OneOrMany<String> {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct SqlMapping {
     pub event: String,

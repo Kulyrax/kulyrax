@@ -85,6 +85,7 @@ const BULK_MAX_BYTES: usize = 8 * 1024 * 1024;
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct ElasticsearchConfig {
     /// The adapter's id. In YAML it is the entry's `id:`, not a key of the

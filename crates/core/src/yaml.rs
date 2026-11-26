@@ -31,6 +31,8 @@ pub struct YamlError {
     file: Option<String>,
     /// The field the error belongs to (`adapters[0].priority`), if any.
     field: Option<String>,
+    /// Set when the error is an unknown key whose own line was found.
+    unknown_key: Option<UnknownKey>,
     kind: Kind,
 }
 
@@ -68,6 +70,9 @@ impl fmt::Display for YamlError {
         if let Some(field) = &self.field {
             write!(f, "field `{field}`: ")?;
         }
+        if let Some(UnknownKey { line, message }) = &self.unknown_key {
+            return write!(f, "line {line}: {message}");
+        }
         match &self.kind {
             Kind::Read(e) => write!(f, "cannot read: {e}"),
             Kind::Parse(e) => write!(f, "{e}"),
@@ -101,6 +106,7 @@ pub fn from_file<T: DeserializeOwned>(path: &Path) -> Result<T, YamlError> {
     let input = std::fs::read_to_string(path).map_err(|e| YamlError {
         file: Some(file.clone()),
         field: None,
+        unknown_key: None,
         kind: Kind::Read(e),
     })?;
     parse(&input, Some(&file))
@@ -134,8 +140,55 @@ fn parse<T: DeserializeOwned>(input: &str, file: Option<&str>) -> Result<T, Yaml
     .map_err(|e| YamlError {
         file: file.map(str::to_string),
         field,
+        unknown_key: unknown_key(input, &e),
         kind: Kind::Parse(Box::new(e)),
     })
+}
+
+/// A key the receiving type does not know, and the line it is on.
+#[derive(Debug)]
+struct UnknownKey {
+    line: u64,
+    /// The parser's own message: "unknown field `k`, expected …".
+    message: String,
+}
+
+/// For an "unknown field `k`" error, the line of the key `k` itself.
+///
+/// The parser can place such an error only at the start of the enclosing
+/// entry, or nowhere: a tagged enum (`type:` / `kind:`) or a hand-written
+/// `Deserialize` buffers its input first, which drops each key's position. So
+/// the key is looked up in the text as a mapping key (`k:`), at or after the
+/// line the parser reported. `None` when the error is about something else or
+/// the key is not found; the parser's own message is then shown as it is.
+fn unknown_key(input: &str, e: &serde_saphyr::Error) -> Option<UnknownKey> {
+    const MARK: &str = "unknown field `";
+    let text = e.to_string();
+    let at = text.find(MARK)?;
+    let message = text[at..].lines().next()?.trim_end().to_string();
+    let key = text[at + MARK.len()..].split('`').next()?;
+    let from = e.location().map(|l| l.line()).unwrap_or(1).max(1);
+    let line = input
+        .lines()
+        .zip(1u64..)
+        .skip_while(|(_, n)| *n < from)
+        .find(|(l, _)| is_key_line(l, key))
+        .map(|(_, n)| n)?;
+    Some(UnknownKey { line, message })
+}
+
+/// `line` holds `key` as a mapping key: `key:`, `- key:`, or quoted.
+fn is_key_line(line: &str, key: &str) -> bool {
+    let mut rest = line.trim_start();
+    while let Some(r) = rest.strip_prefix('-') {
+        rest = r.trim_start();
+    }
+    [key.to_string(), format!("\"{key}\""), format!("'{key}'")]
+        .iter()
+        .any(|k| {
+            rest.strip_prefix(k.as_str())
+                .is_some_and(|r| r.trim_start().starts_with(':'))
+        })
 }
 
 #[cfg(test)]
@@ -205,5 +258,51 @@ mod tests {
             err.to_string().contains("kulyrax.yaml: cannot read"),
             "{err}"
         );
+    }
+
+    /// Internally tagged, so the parser buffers each entry and loses the
+    /// position of the keys inside it.
+    #[derive(Debug, Deserialize)]
+    #[serde(tag = "type")]
+    #[allow(dead_code)]
+    enum Tagged {
+        #[serde(rename = "a")]
+        A(Entry),
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[allow(dead_code)]
+    struct TaggedDoc {
+        adapters: Vec<Tagged>,
+    }
+
+    #[test]
+    fn an_unknown_key_in_a_tagged_entry_is_shown_at_its_own_line() {
+        let yaml = "adapters:\n  - type: a\n    id: x\n    priority: 1\n  - type: a\n    id: y\n    priority: 2\n    prioirty: 3\n";
+        let err = from_str_in::<TaggedDoc>(yaml, "kulyrax.yaml").unwrap_err();
+        let text = err.to_string();
+        // The second entry starts on line 5; its misspelt key is on line 8.
+        assert!(text.contains("line 8: unknown field `prioirty`"), "{text}");
+    }
+
+    #[test]
+    fn an_unknown_key_may_be_quoted_or_open_a_list_entry() {
+        assert!(is_key_line("  - \"prioirty\": 3", "prioirty"));
+        assert!(is_key_line("  - - 'prioirty' : 3", "prioirty"));
+        assert!(!is_key_line("  id: prioirty", "prioirty"));
+        assert!(!is_key_line("  prioirtyx: 3", "prioirty"));
+    }
+
+    #[test]
+    fn an_unknown_key_not_written_as_a_line_keeps_the_parsers_message() {
+        // A flow mapping: the key is not at the start of a line.
+        let err = from_str_in::<TaggedDoc>(
+            "adapters: [{ type: a, id: x, priority: 1, bad: 2 }]\n",
+            "kulyrax.yaml",
+        )
+        .unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("unknown field `bad`"), "{text}");
+        assert!(text.contains("line 1"), "{text}");
     }
 }

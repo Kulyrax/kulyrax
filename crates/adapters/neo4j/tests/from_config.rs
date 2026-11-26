@@ -38,13 +38,35 @@ fn the_factory_takes_id_and_priority_from_the_entry() {
     assert_eq!((adapter.id(), adapter.priority()), ("a1", 7));
 }
 
+/// `id` and `priority` belong to the entry. Inside the `config:` block they
+/// are unknown keys (D5, `deny_unknown_fields`).
 #[test]
-fn an_id_inside_the_config_block_is_not_the_adapter_id() {
+fn an_id_inside_the_config_block_is_refused() {
+    for key in ["id", "priority"] {
+        let mut block = serde_json::json!({ "uri": "bolt://127.0.0.1:1", "user": "neo4j", "password": "secret", "database": "neo4j" });
+        block[key] = "x".into();
+        let err = serde_json::from_value::<Neo4jConfig>(block)
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default();
+        assert!(err.contains(&format!("unknown field `{key}`")), "{err}");
+    }
+}
+
+#[test]
+fn the_factory_refuses_a_misspelt_key_naming_it_and_the_adapter() {
     let mut block = serde_json::json!({ "uri": "bolt://127.0.0.1:1", "user": "neo4j", "password": "secret", "database": "neo4j" });
-    block["id"] = "inner".into();
-    block["priority"] = 99.into();
-    let cfg: Neo4jConfig = serde_json::from_value(block).expect("config block");
-    assert_eq!((cfg.id.as_str(), cfg.priority), ("", 0));
+    block["pool_sise"] = 4.into();
+    let raw = serde_json::json!({
+        "type": "neo4j", "id": "a1", "priority": 7, "config": block,
+    });
+    let entry = CustomAdapterConfig::new("neo4j", "a1", 7, raw);
+    let err = factory(&entry, &ctx())
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default();
+    assert!(err.contains("unknown field `pool_sise`"), "{err}");
+    assert!(err.contains("\"a1\""), "{err}");
 }
 
 #[test]

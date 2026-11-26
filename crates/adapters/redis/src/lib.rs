@@ -48,6 +48,7 @@ const KEY_CHUNK: usize = 1_000;
 /// and `priority`. Build one in code with [`Self::new`] and the `with_*`
 /// setters, then [`RedisAdapter::from_config`].
 #[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct RedisConfig {
     /// The adapter's id. In YAML it is the entry's `id:`, not a key of the

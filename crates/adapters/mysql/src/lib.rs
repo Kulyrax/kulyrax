@@ -50,6 +50,7 @@ use kulyrax_core::upcast::UpcasterRegistry;
 
 /// The `config:` block of a `type: mysql` adapter entry.
 #[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct MySqlConfig {
     /// The adapter's id. In YAML it is the entry's `id:`, not a key of the

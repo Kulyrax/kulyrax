@@ -6,6 +6,34 @@ use crate::routing::AdapterId;
 
 const KNOWN_ADAPTER_TYPES: &[&str] = &["sqlite", "file", "keyvalue", "graph"];
 
+/// The keys of a custom adapter or source entry that core reads. A backend's
+/// own settings go under `config:`, which its factory parses with its own
+/// rule, so they are not checked here.
+const CUSTOM_ADAPTER_KEYS: &[&str] = &[
+    "type",
+    "id",
+    "priority",
+    "config",
+    "capabilities",
+    "depends_on",
+];
+const CUSTOM_SOURCE_KEYS: &[&str] = &["type", "id", "state_dir", "config"];
+
+/// Refuse an entry key outside `known`, with serde's own "unknown field"
+/// message, as the built-in entries do through `deny_unknown_fields`.
+fn deny_unknown_keys<E: serde::de::Error>(
+    entry: &serde_json::Value,
+    known: &'static [&'static str],
+) -> Result<(), E> {
+    let unknown = entry
+        .as_object()
+        .and_then(|fields| fields.keys().find(|k| !known.contains(&k.as_str())));
+    match unknown {
+        Some(key) => Err(E::unknown_field(key, known)),
+        None => Ok(()),
+    }
+}
+
 // ------------------------------------------------------------
 // Failure Policy (Phase 6.2)
 // ------------------------------------------------------------
@@ -76,6 +104,7 @@ pub type AdapterCapabilities = Vec<AdapterCapability>;
 // ------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct KulyraxConfig {
     pub version: u32,
@@ -181,6 +210,7 @@ impl KulyraxConfig {
 // ------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct RoutingConfig {
     pub file: String,
@@ -318,6 +348,7 @@ impl<'de> Deserialize<'de> for AdapterConfig {
             };
         }
 
+        deny_unknown_keys::<D::Error>(&value, CUSTOM_ADAPTER_KEYS)?;
         let id = value
             .get("id")
             .and_then(|v| v.as_str())
@@ -350,6 +381,7 @@ impl<'de> Deserialize<'de> for AdapterConfig {
 
 /// A `type: sqlite` entry in `config.yaml`. Build one in code with [`Self::new`].
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct SqliteAdapterConfig {
     pub id: String,
@@ -390,6 +422,7 @@ impl SqliteAdapterConfig {
 
 /// The `config:` block of a `type: sqlite` entry.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct SqliteConfig {
     /// The SQLite database file.
@@ -404,6 +437,7 @@ impl SqliteConfig {
 
 /// A `type: file` entry in `config.yaml`. Build one in code with [`Self::new`].
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct FileAdapterConfig {
     pub id: String,
@@ -444,6 +478,7 @@ impl FileAdapterConfig {
 
 /// The `config:` block of a `type: file` entry.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct FileConfig {
     /// The directory the document store keeps its files in.
@@ -458,6 +493,7 @@ impl FileConfig {
 
 /// A `type: keyvalue` entry in `config.yaml`. Build one in code with [`Self::new`].
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct KeyValueAdapterConfig {
     pub id: String,
@@ -498,6 +534,7 @@ impl KeyValueAdapterConfig {
 
 /// The `config:` block of a `type: keyvalue` entry.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct KeyValueConfig {
     /// The directory the key-value store keeps its files in.
@@ -512,6 +549,7 @@ impl KeyValueConfig {
 
 /// A `type: graph` entry in `config.yaml`. Build one in code with [`Self::new`].
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct GraphAdapterConfig {
     pub id: String,
@@ -552,6 +590,7 @@ impl GraphAdapterConfig {
 
 /// The `config:` block of a `type: graph` entry.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct GraphConfig {
     /// The directory the graph store keeps its files in.
@@ -694,6 +733,7 @@ impl<'de> Deserialize<'de> for SourceConfig {
                 KnownSourceConfig::Stdin(c) => Ok(SourceConfig::Stdin(c)),
             };
         }
+        deny_unknown_keys::<D::Error>(&value, CUSTOM_SOURCE_KEYS)?;
         let field = |name: &str| value.get(name).and_then(|v| v.as_str()).map(str::to_string);
         let id = field("id").ok_or_else(|| D::Error::custom("source config missing `id` field"))?;
         Ok(SourceConfig::Custom(CustomSourceConfig {
@@ -707,6 +747,7 @@ impl<'de> Deserialize<'de> for SourceConfig {
 
 /// A `type: directory` source entry.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct DirectorySourceConfig {
     pub id: String,
@@ -732,6 +773,7 @@ impl DirectorySourceConfig {
 
 /// A `type: stdin` source entry.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct StdinSourceConfig {
     pub id: String,
