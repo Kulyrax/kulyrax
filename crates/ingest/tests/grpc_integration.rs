@@ -247,7 +247,9 @@ fn grpc_backpressure_bounds_the_channel() {
         let p = Producer::connect(endpoint).await.unwrap();
         let mut n = 0u32;
         for i in 0..20_000u64 {
-            let e = env(i, "x", &big, "");
+            // Each event has its own position: an empty one ends the stream
+            // with INVALID_ARGUMENT (since 1.0), which is not backpressure.
+            let e = env(i, "x", &big, &format!("p{i}"));
             match tokio::time::timeout(Duration::from_millis(250), p.send(e)).await {
                 Ok(Ok(())) => n += 1,
                 _ => break, // send blocked (backpressure) or errored

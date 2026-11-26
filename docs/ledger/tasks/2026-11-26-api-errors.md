@@ -60,6 +60,7 @@ owner chose to chain only the safe causes: decision
 | Workspace tests | `cargo test --workspace` | 586 pass, 0 fail |
 | Examples | the 6 example manifests; `examples/embedded` run | 0 errors each; `projected: users.u1.name = "Ada"` |
 | Docker suites (Neo4j on 7688) | `docker-suites.sh` | postgres 35, mysql 30, redis 19, mongodb 26, elasticsearch 16, neo4j 25, source-postgres 16, ingest 17, cli 32: all pass, 0 fail |
+| CI on #34, first run | PR checks | 17/18. `test (ubuntu-latest)` failed `grpc_backpressure_bounds_the_channel` ("only 113 sent"). Cause, not from D6: the test sent envelopes with an **empty position**, which the server has refused since D1 (R3 decision), so the stream ended with INVALID_ARGUMENT after a timing-dependent number of sends (≥256 on Windows and on earlier CI runs). Fixed: each event gets its own position (`p{i}`); 5/5 local runs pass |
 
 ## Risks and open questions
 
