@@ -4,11 +4,13 @@
 //! The flat re-exports below are kept for 0.12's paths but are
 //! `#[doc(hidden)]`, outside semver (decision 2026-11-26-canonical-paths).
 
+/// `config.yaml`: [`config::KulyraxConfig`] and every entry type.
 pub mod config;
 #[doc(hidden)]
 pub mod dependency_graph;
 pub mod dry_run;
 pub mod engine;
+/// The runtime error type.
 pub mod error;
 pub(crate) mod execute;
 pub(crate) mod factory;

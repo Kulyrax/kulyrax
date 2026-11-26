@@ -11,7 +11,9 @@ use crate::upcast::UpcasterRegistry;
 pub struct SqlProjection {
     /// Dialect-neutral write description (Phase 19.1); the backend renders it.
     pub write: super::exec::SqlWrite,
+    /// The payload version the event arrived with.
     pub source_version: u32,
+    /// The mapping's version, which the payload was upcast to.
     pub projected_version: u32,
     /// Resolved entity identity (Phase 11.1/11.2), canonicalized as an
     /// ordered JSON array of the `primary_key` column value(s) in declared
@@ -50,6 +52,7 @@ pub struct SqlRuntimeBuilder {
 }
 
 impl SqlRuntimeBuilder {
+    /// A builder over `mappings`, by event type.
     pub fn new(mappings: HashMap<String, SqlMapping>) -> Self {
         Self { mappings }
     }
@@ -59,6 +62,7 @@ impl SqlRuntimeBuilder {
         &self.mappings
     }
 
+    /// The mapping for `event_type`, if there is one.
     pub fn get_mapping(&self, event_type: &str) -> Option<&SqlMapping> {
         self.mappings.get(event_type)
     }

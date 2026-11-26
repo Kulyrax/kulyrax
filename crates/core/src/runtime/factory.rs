@@ -45,7 +45,9 @@ impl StorageAdapter for FailedAdapter {
 /// factory rejected the entry (e.g. a connection URL that does not parse).
 #[derive(Debug, Clone)]
 pub struct AdapterBuildFailure {
+    /// The adapter's id.
     pub adapter_id: String,
+    /// Why it could not be built.
     pub reason: String,
 }
 

@@ -28,7 +28,7 @@
 //! **Batches.** Between `begin_batch` and `commit_batch`, every event is
 //! decided in memory against the batch's documents, loaded up front with one
 //! `_mget`. `commit_batch` then sends each touched document's final state in
-//! one `_bulk` request (split past [`BULK_MAX_BYTES`]): `index` with the
+//! one `_bulk` request (split past `BULK_MAX_BYTES`): `index` with the
 //! `if_seq_no` / `if_primary_term` the batch read, or `create` for a
 //! document that did not exist. `_bulk` is not atomic, but each document
 //! carries its own guard, so a document that landed before another failed is
@@ -40,6 +40,8 @@
 //! elasticsearch` via [`factory`] — see `kulyrax-backends` for the wiring
 //! pattern, or `docs/writing-a-backend.md` for the extension pattern this
 //! crate is itself a worked example of.
+
+#![deny(missing_docs)]
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -84,6 +86,9 @@ const BULK_MAX_BYTES: usize = 8 * 1024 * 1024;
 // Config
 // ---------------------------------------------------------------------------
 
+/// A `type: elasticsearch` adapter: the entry's `config:` block, plus the entry's
+/// `id` and `priority`. Build one in code with [`Self::new`] and the `with_*`
+/// setters, then [`ElasticsearchAdapter::from_config`].
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -123,26 +128,31 @@ impl ElasticsearchConfig {
         }
     }
 
+    /// Set the adapter's id.
     pub fn with_id(mut self, id: impl Into<String>) -> Self {
         self.id = id.into();
         self
     }
 
+    /// Set the adapter's priority: lower runs first.
     pub fn with_priority(mut self, priority: u32) -> Self {
         self.priority = priority;
         self
     }
 
+    /// Set the HTTP basic-auth user name. Used only with a password.
     pub fn with_username(mut self, username: impl Into<String>) -> Self {
         self.username = Some(username.into());
         self
     }
 
+    /// Set the HTTP basic-auth password. `${ENV_VAR}` references are expanded.
     pub fn with_password(mut self, password: impl Into<String>) -> Self {
         self.password = Some(password.into());
         self
     }
 
+    /// Set the request timeout, in milliseconds.
     pub fn with_timeout_ms(mut self, timeout_ms: u64) -> Self {
         self.timeout_ms = Some(timeout_ms);
         self
@@ -177,6 +187,9 @@ fn es_err(e: reqwest::Error) -> DocumentError {
 // Adapter
 // ---------------------------------------------------------------------------
 
+/// Projects document mappings into Elasticsearch indexes, one document per
+/// entity, with its guard lanes kept in the document. Build it with
+/// [`ElasticsearchAdapter::from_config`].
 pub struct ElasticsearchAdapter {
     id: String,
     priority: u32,

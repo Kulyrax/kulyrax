@@ -24,9 +24,13 @@ pub enum GraphError {
 
     /// No upcaster chain from the event's version to the mapping's target version.
     UnsupportedVersion {
+        /// The event's type.
         event_type: String,
+        /// The payload version the event arrived with.
         from_version: u32,
+        /// The mapping's version.
         to_version: u32,
+        /// Why no upcast reaches it.
         reason: String,
     },
 }

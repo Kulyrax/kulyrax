@@ -33,6 +33,7 @@ use crate::upcast::UpcasterRegistry;
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct SqlWrite {
+    /// The target table.
     pub table: String,
     /// All inserted columns, in a deterministic (sorted) order.
     pub columns: Vec<String>,
@@ -120,12 +121,19 @@ pub const GUARD_TABLE: &str = "kulyrax_projection_state";
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct GuardRow {
+    /// The projected table.
     pub table: String,
+    /// The entity's key: its primary-key values, encoded as one string.
     pub entity_key: String,
+    /// The facet this lane belongs to; `""` for the default lane.
     pub facet: String,
+    /// The sequence of the last event projected into this lane.
     pub last_sequence: u64,
+    /// That event's id.
     pub last_event_id: String,
+    /// The lane is tombstoned.
     pub deleted: bool,
+    /// The tombstone is permanent: nothing projects this entity again.
     pub permanent: bool,
 }
 
@@ -241,6 +249,7 @@ pub trait SqlTxn: Sized {
         event_id: &str,
     ) -> Result<(), SqlError>;
 
+    /// Commit the transaction: the writes and their guard rows together.
     fn commit(self) -> Result<(), SqlError>;
 
     /// For a rebuild ([`crate::rebuild`]): the objects that would make
@@ -296,7 +305,9 @@ fn rebuild_unsupported(tables: &str) -> SqlError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ShadowTable {
+    /// The table being rebuilt.
     pub table: String,
+    /// The shadow table its new content is built in.
     pub shadow: String,
 }
 
@@ -308,7 +319,9 @@ pub struct ShadowTable {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct GuardFingerprint {
+    /// How many guard lanes the tables have.
     pub lanes: i64,
+    /// The sum of those lanes' last sequences.
     pub sequence_sum: i128,
 }
 
@@ -375,9 +388,13 @@ pub fn swap_shadow_rebuild<T: SqlTxn>(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SqlOutcome {
+    /// The row was inserted.
     Created,
+    /// An existing row was overwritten.
     Updated,
+    /// The row was removed and its tombstone recorded.
     Deleted,
+    /// Nothing was written, for this reason.
     Skipped(crate::adapter::SkipReason),
 }
 
@@ -385,14 +402,23 @@ pub enum SqlOutcome {
 /// plus the resolved identity and the mapping's gating fields.
 #[non_exhaustive]
 pub struct SqlPlan {
+    /// The target table.
     pub table: String,
+    /// The entity's key: its primary-key values, encoded as one string.
     pub entity_key: String,
+    /// The primary-key values, paired with `primary_key_columns`.
     pub key_values: Vec<Value>,
+    /// The primary-key columns, in the mapping's order.
     pub primary_key_columns: Vec<String>,
+    /// The mapping's `on_existing`.
     pub on_existing: OnExisting,
+    /// The mapping's operation.
     pub operation: Operation,
+    /// Whether a delete is permanent.
     pub permanent: bool,
+    /// The facet this write owns; `""` for the default lane.
     pub facet: String,
+    /// The row write itself.
     pub write: SqlWrite,
 }
 
@@ -791,8 +817,11 @@ pub fn project_in<T: SqlTxn>(
 /// An event's [`SqlPlan`] and its observed / target schema versions.
 #[non_exhaustive]
 pub struct PlannedEvent {
+    /// The write to make.
     pub plan: SqlPlan,
+    /// The payload version the event arrived with.
     pub source_version: u32,
+    /// The mapping's version, which the payload was upcast to.
     pub projected_version: u32,
 }
 

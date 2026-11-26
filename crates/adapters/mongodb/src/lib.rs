@@ -14,6 +14,8 @@
 //! memory; each touched entity's writes collapse to one document operation
 //! and one guard write, applied and committed by `commit_batch`.
 
+#![deny(missing_docs)]
+
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
@@ -54,6 +56,7 @@ pub struct MongoDbConfig {
     /// `mongodb://[user:pass@]host[:port][/?options]`; `${ENV_VAR}` references
     /// are expanded.
     pub url: String,
+    /// The database the mapped collections live in.
     pub database: String,
     /// Becomes the `maxPoolSize` connection-string option (default 4).
     #[serde(default)]
@@ -72,16 +75,19 @@ impl MongoDbConfig {
         }
     }
 
+    /// Set the adapter's id.
     pub fn with_id(mut self, id: impl Into<String>) -> Self {
         self.id = id.into();
         self
     }
 
+    /// Set the adapter's priority: lower runs first.
     pub fn with_priority(mut self, priority: u32) -> Self {
         self.priority = priority;
         self
     }
 
+    /// Set the connection pool size.
     pub fn with_pool_size(mut self, pool_size: u32) -> Self {
         self.pool_size = Some(pool_size);
         self

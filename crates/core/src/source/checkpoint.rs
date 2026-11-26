@@ -10,9 +10,11 @@ use serde::{Deserialize, Serialize};
 
 use super::{SourceError, SourcePosition};
 
+/// A source's committed position, as kept in its state directory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Checkpoint {
+    /// The position committed past.
     pub position: SourcePosition,
     /// ISO-8601-ish wall time the commit was written (observability only).
     pub committed_at: String,

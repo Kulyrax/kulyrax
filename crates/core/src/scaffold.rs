@@ -84,11 +84,13 @@ const FILES: &[(&str, &str)] = &[
     (".gitignore", GITIGNORE),
 ];
 
+/// Why `kulyrax init` did not create the starter project.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum InitError {
     /// Nothing was written because these files already exist.
     WouldOverwrite(Vec<PathBuf>),
+    /// A file could not be written.
     Io(io::Error),
 }
 

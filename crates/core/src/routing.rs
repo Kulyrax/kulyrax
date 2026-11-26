@@ -7,13 +7,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::event::Event;
 
+/// The kind of storage an adapter projects into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum StorageKind {
+    /// Tables.
     Sql,
+    /// Documents in collections.
     Document,
+    /// Values under keys.
     KeyValue,
+    /// Nodes and edges.
     Graph,
     /// Phase 25.2: reported only by the internal `FailedAdapter` placeholder
     /// pushed for an `AdapterConfig::Custom` whose `type:` has no factory
@@ -22,6 +27,7 @@ pub enum StorageKind {
     Custom,
 }
 
+/// An adapter's id, as `config.yaml` names it.
 pub type AdapterId = String;
 
 impl fmt::Display for StorageKind {

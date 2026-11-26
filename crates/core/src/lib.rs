@@ -1,15 +1,28 @@
+//! The Kulyrax engine: a deterministic, projection-only engine for event
+//! sourcing. It reads an event log it does not own and projects each event
+//! into SQL, document, key-value and graph stores. Every write is gated by
+//! the entity's sequence ([`adapter::decide`]), so a redelivered event is
+//! skipped, never applied twice. Start with [`KulyraxRuntime`] to embed
+//! it, or [`pipeline`] for what the `kulyrax` CLI does. A new backend
+//! implements one of the storage kinds' traits (`docs/writing-a-backend.md`).
+//!
 //! Public paths (stability §1, decision 2026-11-26-canonical-paths): a type's
 //! canonical path is the module that defines it. The crate root also
 //! re-exports the front door (the runtime, reports, sources, upcasting,
 //! validation). Every other re-export, and every module stability §1 marks
 //! UNSTABLE, is `#[doc(hidden)]`: reachable, but outside semver.
 
+#![deny(missing_docs)]
+
+/// Storage adapters: the [`adapter::StorageAdapter`] trait, the four storage
+/// kinds, the write decision ([`adapter::decide`]), and the built-in adapters.
 pub mod adapter;
 pub(crate) mod batch;
 #[doc(hidden)]
 pub mod crash;
 #[doc(hidden)]
 pub mod dispatch;
+/// The [`event::Event`] envelope.
 pub mod event;
 pub mod execution;
 #[doc(hidden)]
@@ -19,6 +32,7 @@ pub mod rebuild;
 #[doc(hidden)]
 pub mod redact;
 pub mod replay;
+/// Routing: event types to adapter ids.
 pub mod routing;
 pub mod runtime;
 pub(crate) mod scaffold;

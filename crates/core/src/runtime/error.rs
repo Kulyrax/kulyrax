@@ -1,9 +1,13 @@
 use core::fmt;
 
+/// A runtime-level error. Nothing in Kulyrax returns it today; it is kept for
+/// compatibility.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RuntimeError {
+    /// No adapter is available for routing.
     NoAdaptersForRouting,
+    /// An adapter's config is invalid.
     AdapterConfigInvalid(String),
 }
 

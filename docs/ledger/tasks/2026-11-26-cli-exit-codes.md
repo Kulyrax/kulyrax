@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # Exit codes 0/1/2/3/4, each tested through the CLI (step 4, D7)
@@ -53,7 +53,7 @@ needed typed signals. The owner approved the mapping on 2026-11-26: decision
   - the README reload line.
 - [x] Gates: fmt, clippy `-D warnings`, workspace tests, examples, every Docker
   backend suite.
-- [ ] PR merged with the 12 required checks green.
+- [x] PR #35 merged with the 12 required checks green (all 18 pass; merge commit 7793502).
 
 ## Constraints and assumptions
 
@@ -84,4 +84,4 @@ needed typed signals. The owner approved the mapping on 2026-11-26: decision
 
 ## Outcome
 
-In progress.
+Completed. The CLI exits 0, 1, 2, 3 or 4 by the frozen table in `docs/stability.md` §3, each code tested through the binary. The owner's go after the tranche 3 report accepted the filled-in cases; the file-store lock stays 1.

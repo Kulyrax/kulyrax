@@ -30,6 +30,8 @@
 //! event, which rolls the batch back; the per-event path that follows has
 //! the usual retry.
 
+#![deny(missing_docs)]
+
 use std::sync::{Arc, Mutex};
 
 mod legacy;
@@ -70,6 +72,7 @@ pub struct Neo4jConfig {
     /// Bolt URI (`bolt://host:port` or `neo4j://host:port`); `${ENV_VAR}`
     /// references are expanded.
     pub uri: String,
+    /// The user to authenticate as.
     pub user: String,
     /// `${ENV_VAR}` references are expanded, so credentials can stay out of
     /// the committed config.
@@ -96,16 +99,19 @@ impl Neo4jConfig {
         }
     }
 
+    /// Set the adapter's id.
     pub fn with_id(mut self, id: impl Into<String>) -> Self {
         self.id = id.into();
         self
     }
 
+    /// Set the adapter's priority: lower runs first.
     pub fn with_priority(mut self, priority: u32) -> Self {
         self.priority = priority;
         self
     }
 
+    /// Set the database to use instead of the server's default.
     pub fn with_database(mut self, database: impl Into<String>) -> Self {
         self.database = Some(database.into());
         self

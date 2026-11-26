@@ -30,21 +30,28 @@ use crate::upcast::UpcasterRegistry;
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct DryRunReport {
+    /// The event's id.
     pub event_id: String,
+    /// The event's type.
     pub event_type: String,
+    /// Each routed adapter, in execution order.
     pub adapters: Vec<DryRunAdapter>,
 }
 
+/// What one adapter would do in a dry run.
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct DryRunAdapter {
+    /// The adapter's id.
     pub adapter_id: AdapterId,
     /// `None` for a third-party adapter type, whose storage kind is only
     /// known once its factory builds it.
     pub kind: Option<StorageKind>,
+    /// What it would do.
     pub outcome: DryRunOutcome,
 }
 
+/// What a dry run found for one adapter. Nothing is written in any case.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 #[non_exhaustive]
@@ -53,18 +60,29 @@ pub enum DryRunOutcome {
     Planned(PlannedWrite),
     /// The writes a graph `kind: subgraph` mapping would attempt, in order,
     /// in one transaction.
-    PlannedSubgraph { writes: Vec<PlannedWrite> },
+    PlannedSubgraph {
+        /// The writes, in order.
+        writes: Vec<PlannedWrite>,
+    },
     /// The projection could not be resolved (no mapping, a missing payload
     /// field, a failed upcast); a live run would fail the same way.
-    Failed { error: String },
+    Failed {
+        /// What a live run would fail with.
+        error: String,
+    },
     /// A third-party adapter type: its kind, and so its projection, is
     /// unknown without building it, which dry-run never does.
-    NotPreviewable { reason: String },
+    NotPreviewable {
+        /// Why it cannot be previewed.
+        reason: String,
+    },
 }
 
+/// One write a live run would attempt.
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PlannedWrite {
+    /// Upsert or delete.
     pub operation: Operation,
     /// Only meaningful for `operation: upsert`.
     pub on_existing: OnExisting,
@@ -74,11 +92,14 @@ pub struct PlannedWrite {
     pub facet: String,
     /// Table, collection, key-value namespace, `node <label>` or `edge <type>`.
     pub target: String,
+    /// The entity's key, as the guard records it.
     pub entity_key: String,
     /// Column values, the document, the stored value, or the node/edge
     /// properties.
     pub values: serde_json::Value,
+    /// The payload version the event arrived with.
     pub source_version: u32,
+    /// The mapping's version, which the payload would be upcast to.
     pub projected_version: u32,
 }
 

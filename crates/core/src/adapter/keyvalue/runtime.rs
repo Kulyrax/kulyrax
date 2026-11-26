@@ -10,8 +10,11 @@ use crate::upcast::UpcasterRegistry;
 /// 10.3 concept, reused as-is).
 #[non_exhaustive]
 pub struct KvProjection {
+    /// The value to write.
     pub value: serde_json::Value,
+    /// The payload version the event arrived with.
     pub source_version: u32,
+    /// The mapping's version, which the payload was upcast to.
     pub projected_version: u32,
     /// Resolved entity identity (Phase 11.1) — keys the idempotency guard and
     /// the output filename, rather than `event.event_id`.
@@ -38,6 +41,7 @@ pub struct KvRuntimeBuilder {
 }
 
 impl KvRuntimeBuilder {
+    /// A builder over `mappings`, by event type.
     pub fn new(mappings: HashMap<String, KvMapping>) -> Self {
         Self { mappings }
     }

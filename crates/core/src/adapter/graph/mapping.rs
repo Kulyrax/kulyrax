@@ -16,8 +16,11 @@ use serde_json::{Map, Value};
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum GraphMapping {
+    /// `kind: node`: one node per event.
     Node(GraphNodeMapping),
+    /// `kind: edge`: one edge per event.
     Edge(GraphEdgeMapping),
+    /// `kind: subgraph`: several nodes and edges per event, applied together.
     Subgraph(GraphSubgraphMapping),
 }
 
@@ -30,7 +33,10 @@ pub enum GraphMapping {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct GraphSubgraphMapping {
+    /// The event type this mapping projects.
     pub event: String,
+    /// The payload version this mapping is written for; older events are upcast
+    /// to it.
     pub version: u32,
     /// Node and edge mappings, applied in this order.
     pub records: Vec<GraphMapping>,
@@ -84,23 +90,33 @@ impl<'de> Deserialize<'de> for GraphSubgraphMapping {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct GraphNodeMapping {
+    /// The event type this mapping projects.
     pub event: String,
+    /// The node label.
     pub label: String,
+    /// The payload version this mapping is written for; older events are upcast
+    /// to it.
     pub version: u32,
     /// Path expression resolving this event's node id (must be a JSON scalar).
     pub key: String,
     /// JSON template, leaves are payload/metadata paths. Empty for `operation: delete`.
     #[serde(default)]
     pub properties: Value,
+    /// What an upsert does to a node already projected ([`OnExisting`]; the
+    /// default ignores the event).
     #[serde(default)]
     pub on_existing: OnExisting,
+    /// Upsert (the default) or delete.
     #[serde(default)]
     pub operation: Operation,
+    /// With `operation: delete`: a permanent tombstone, so no later event
+    /// projects this node again.
     #[serde(default)]
     pub permanent: bool,
     /// Phase 15.1: the named facet this mapping owns (nodes only).
     #[serde(default)]
     pub facet: Option<String>,
+    /// Capabilities the adapter this is routed to must declare.
     #[serde(default)]
     pub requires_capabilities: Vec<AdapterCapability>,
 }
@@ -112,8 +128,12 @@ pub struct GraphNodeMapping {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct GraphEdgeMapping {
+    /// The event type this mapping projects.
     pub event: String,
+    /// The relationship type.
     pub edge_type: String,
+    /// The payload version this mapping is written for; older events are upcast
+    /// to it.
     pub version: u32,
     /// Path expression resolving the `from` endpoint node id (scalar).
     pub from: String,
@@ -122,14 +142,22 @@ pub struct GraphEdgeMapping {
     /// Optional 4th key component for parallel edges between one ordered pair.
     #[serde(default)]
     pub discriminator: Option<String>,
+    /// JSON template whose leaves are payload/metadata paths: the edge's
+    /// properties. Empty for `operation: delete`.
     #[serde(default)]
     pub properties: Value,
+    /// What an upsert does to an edge already projected ([`OnExisting`]; the
+    /// default ignores the event).
     #[serde(default)]
     pub on_existing: OnExisting,
+    /// Upsert (the default) or delete.
     #[serde(default)]
     pub operation: Operation,
+    /// With `operation: delete`: a permanent tombstone, so no later event
+    /// projects this edge again.
     #[serde(default)]
     pub permanent: bool,
+    /// Capabilities the adapter this is routed to must declare.
     #[serde(default)]
     pub requires_capabilities: Vec<AdapterCapability>,
 }
@@ -139,16 +167,26 @@ pub struct GraphEdgeMapping {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum ResolvedRecord {
+    /// A node.
     Node {
+        /// The node label.
         label: String,
+        /// The node id the mapping's `key` resolved to.
         node_id: String,
+        /// The projected properties.
         properties: Value,
     },
+    /// An edge.
     Edge {
+        /// The relationship type.
         edge_type: String,
+        /// The `from` endpoint's node id.
         from: String,
+        /// The `to` endpoint's node id.
         to: String,
+        /// The resolved discriminator, for parallel edges.
         discriminator: Option<String>,
+        /// The projected properties.
         properties: Value,
     },
 }
@@ -158,6 +196,7 @@ pub enum ResolvedRecord {
 static NO_PROPERTIES: Value = Value::Null;
 
 impl GraphMapping {
+    /// The event type this mapping projects.
     pub fn event(&self) -> &str {
         match self {
             GraphMapping::Node(m) => &m.event,
@@ -166,6 +205,7 @@ impl GraphMapping {
         }
     }
 
+    /// The payload version this mapping is written for.
     pub fn version(&self) -> u32 {
         match self {
             GraphMapping::Node(m) => m.version,
@@ -184,6 +224,7 @@ impl GraphMapping {
         }
     }
 
+    /// A node or edge mapping's operation; a subgraph's is the default (upsert).
     pub fn operation(&self) -> Operation {
         match self {
             GraphMapping::Node(m) => m.operation,
@@ -192,6 +233,7 @@ impl GraphMapping {
         }
     }
 
+    /// A node or edge mapping's `on_existing`; a subgraph's is the default.
     pub fn on_existing(&self) -> OnExisting {
         match self {
             GraphMapping::Node(m) => m.on_existing,
@@ -200,6 +242,7 @@ impl GraphMapping {
         }
     }
 
+    /// Whether a node or edge mapping's delete is permanent; `false` for a subgraph.
     pub fn permanent(&self) -> bool {
         match self {
             GraphMapping::Node(m) => m.permanent,
@@ -208,6 +251,7 @@ impl GraphMapping {
         }
     }
 
+    /// A node or edge mapping's required capabilities; none for a subgraph.
     pub fn requires_capabilities(&self) -> &[AdapterCapability] {
         match self {
             GraphMapping::Node(m) => &m.requires_capabilities,

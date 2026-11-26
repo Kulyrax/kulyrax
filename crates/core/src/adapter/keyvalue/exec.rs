@@ -27,14 +27,19 @@ use crate::execution::stages::{Stage, timed};
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct KvGuard {
+    /// The sequence of the last event projected into this entity's default lane.
     #[serde(default)]
     pub last_sequence: u64,
+    /// That event's id.
     #[serde(default)]
     pub last_event_id: String,
+    /// The default lane is tombstoned.
     #[serde(default)]
     pub deleted: bool,
+    /// The tombstone is permanent: nothing projects this entity again.
     #[serde(default)]
     pub permanent: bool,
+    /// The named facets' lanes, by facet name.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub facets: std::collections::BTreeMap<String, KvFacetGuard>,
 }
@@ -43,10 +48,14 @@ pub struct KvGuard {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct KvFacetGuard {
+    /// The sequence of the last event projected into this lane.
     pub last_sequence: u64,
+    /// That event's id.
     pub last_event_id: String,
+    /// The lane is tombstoned.
     #[serde(default)]
     pub deleted: bool,
+    /// The tombstone is permanent.
     #[serde(default)]
     pub permanent: bool,
 }
@@ -91,7 +100,7 @@ impl KvGuard {
 /// - **File** ([`super::store`]): a single-writer assumption plus
 ///   write-to-temp-then-rename for the guard file, so a reader never
 ///   observes a half-written guard.
-/// - **Redis** ([`super::redis`]): no transaction with real isolation is
+/// - **Redis** (`kulyrax-adapter-redis`): no transaction with real isolation is
 ///   available, so `write`/`delete` use an optimistic `WATCH`/`MULTI`/`EXEC`
 ///   pipeline and return `Err(KvError::WriteConflict)` when a concurrent
 ///   writer touched the guard first. The caller (the adapter's own
@@ -129,9 +138,13 @@ pub trait KvBackend {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum KvOutcome {
+    /// The key was written for the first time.
     Created,
+    /// An existing value was overwritten.
     Updated,
+    /// The value was removed and its tombstone recorded.
     Deleted,
+    /// Nothing was written, for this reason.
     Skipped(SkipReason),
 }
 
@@ -139,12 +152,19 @@ pub enum KvOutcome {
 /// identity, value, and the mapping's gating fields.
 #[non_exhaustive]
 pub struct KvPlan {
+    /// The mapping's namespace.
     pub namespace: String,
+    /// The entity's key, resolved from the event.
     pub entity_key: String,
+    /// The value to write.
     pub value: Value,
+    /// The mapping's `on_existing`.
     pub on_existing: OnExisting,
+    /// The mapping's operation.
     pub operation: Operation,
+    /// Whether a delete is permanent.
     pub permanent: bool,
+    /// The facet this write owns; `""` for the default lane.
     pub facet: String,
 }
 

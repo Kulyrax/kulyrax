@@ -14,6 +14,8 @@
 //! `commit_batch` fails, and the batch falls back to one event at a time,
 //! with its usual retry.
 
+#![deny(missing_docs)]
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -76,16 +78,19 @@ impl RedisConfig {
         }
     }
 
+    /// Set the adapter's id.
     pub fn with_id(mut self, id: impl Into<String>) -> Self {
         self.id = id.into();
         self
     }
 
+    /// Set the adapter's priority: lower runs first.
     pub fn with_priority(mut self, priority: u32) -> Self {
         self.priority = priority;
         self
     }
 
+    /// Set the connection pool size.
     pub fn with_pool_size(mut self, pool_size: u32) -> Self {
         self.pool_size = Some(pool_size);
         self

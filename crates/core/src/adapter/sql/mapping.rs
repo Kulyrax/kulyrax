@@ -16,11 +16,14 @@ use serde_json::Value;
 #[serde(untagged)]
 #[non_exhaustive]
 pub enum OneOrMany<T> {
+    /// One value.
     One(T),
+    /// Several values, in declared order.
     Many(Vec<T>),
 }
 
 impl<T> OneOrMany<T> {
+    /// The values, in declared order.
     pub fn iter(&self) -> std::slice::Iter<'_, T> {
         match self {
             OneOrMany::One(v) => std::slice::from_ref(v).iter(),
@@ -28,6 +31,7 @@ impl<T> OneOrMany<T> {
         }
     }
 
+    /// How many values.
     pub fn len(&self) -> usize {
         match self {
             OneOrMany::One(_) => 1,
@@ -35,6 +39,7 @@ impl<T> OneOrMany<T> {
         }
     }
 
+    /// Whether there are none (only possible for an empty list).
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -46,11 +51,15 @@ impl From<&str> for OneOrMany<String> {
     }
 }
 
+/// A SQL mapping file: how one event type becomes one row (or one facet's
+/// columns of it) in a table. See `docs/mapping-reference.md`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct SqlMapping {
+    /// The event type this mapping projects.
     pub event: String,
+    /// The target table, optionally schema-qualified (`schema.table`).
     pub table: String,
 
     /// Target schema version this mapping projects into. Must be explicit ($\ge 1$).
@@ -61,6 +70,7 @@ pub struct SqlMapping {
     /// `columns`.
     pub primary_key: OneOrMany<String>,
 
+    /// Column name to payload/metadata path, for every column written.
     pub columns: HashMap<String, String>,
 
     /// Write mode for an entity that already has a projected row (Phase

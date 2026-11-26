@@ -13,6 +13,7 @@ use serde_json::{Map, Value};
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct KvMapping {
+    /// The event type this mapping projects.
     pub event: String,
 
     /// Keyspace segment — the KV analog of a SQL `table` / document `collection`.

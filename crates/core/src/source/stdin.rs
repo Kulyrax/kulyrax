@@ -18,6 +18,8 @@ use crate::event::Event;
 /// 2026-11-25-source-position-contract).
 const POS_WIDTH: usize = 12;
 
+/// Reads NDJSON events from standard input (`type: stdin`), one per line,
+/// checkpointed by line number. Built from config.
 pub struct StdinSource<R: BufRead> {
     id: String,
     state_dir: PathBuf,

@@ -12,7 +12,9 @@ use crate::upcast::UpcasterRegistry;
 pub struct GraphProjection {
     /// The single node or edge this event projects.
     pub record: ResolvedRecord,
+    /// The payload version the event arrived with.
     pub source_version: u32,
+    /// The mapping's version, which the payload was upcast to.
     pub projected_version: u32,
     /// Write mode (Phase 12.2). Read only when `operation: upsert`.
     pub on_existing: OnExisting,
@@ -31,6 +33,7 @@ pub struct GraphRuntimeBuilder {
 }
 
 impl GraphRuntimeBuilder {
+    /// A builder over `mappings`, by event type.
     pub fn new(mappings: HashMap<String, GraphMapping>) -> Self {
         Self { mappings }
     }

@@ -10,6 +10,9 @@ use super::checkpoint::{read_checkpoint, write_checkpoint};
 use super::{EventSource, SourceError, SourcePosition, SourcedEvent};
 use crate::replay::events_from_path;
 
+/// Reads event files from a directory (`type: directory`): one event per
+/// `*.json` file, or one per line of `*.ndjson` / `*.jsonl`, in file-name
+/// order, checkpointed by file and line. Built from config.
 pub struct DirectorySource {
     id: String,
     path: PathBuf,
