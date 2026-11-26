@@ -15,7 +15,7 @@ use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use kulyrax_core::runtime::config::{
     AdapterCapability, AdapterConfig, CustomAdapterConfig, FailurePolicy, KulyraxConfig,
-    MigrationPolicy, RoutingConfig, SqliteAdapterConfig, SqliteConfig,
+    MigrationPolicy, SqliteAdapterConfig, SqliteConfig,
 };
 use kulyrax_core::upcast::UpcasterRegistry;
 use kulyrax_core::{RunMode, SourceRunOptions, SourceRunReport, StoppedReason};
@@ -39,12 +39,9 @@ fn init_users(db: &Path) {
 }
 
 fn config(db: &Path) -> KulyraxConfig {
-    KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "r.json".into(),
-        },
-        adapters: vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
+    KulyraxConfig::new(
+        "r.json",
+        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
             id: "sql".into(),
             priority: 10,
             config: SqliteConfig {
@@ -53,10 +50,7 @@ fn config(db: &Path) -> KulyraxConfig {
             capabilities: None,
             depends_on: vec![],
         })],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    }
+    )
 }
 
 fn routing() -> HashMap<String, Vec<String>> {
@@ -133,14 +127,16 @@ impl Harness {
                 HashMap::new(),
                 HashMap::new(),
                 vec![Box::new(source)],
-                &SourceRunOptions {
-                    mode: RunMode::Continuous {
+                &{
+                    let mut o = SourceRunOptions::default();
+                    o.dlq_dir = dlq;
+                    o.max_batch = 64;
+                    o.max_batch_delay = std::time::Duration::ZERO;
+                    o.mode = RunMode::Continuous {
                         poll_interval: Duration::from_millis(20),
-                    },
-                    max_batch: 64,
-                    retry_budget: 1,
-                    max_batch_delay: std::time::Duration::ZERO,
-                    dlq_dir: dlq,
+                    };
+                    o.retry_budget = 1;
+                    o
                 },
                 &stop2,
             )
@@ -343,14 +339,12 @@ fn grpc_vs_directory_converge() {
     let events = dir.path().join("events");
     std::fs::create_dir_all(&events).unwrap();
     for (i, (seq, name)) in [(1u64, "a"), (3, "c"), (2, "b")].into_iter().enumerate() {
-        let e = kulyrax_core::event::Event {
-            event_id: format!("e{i}"),
-            event_type: "UserUpserted".into(),
-            payload: format!(r#"{{"id":"u1","name":"{name}"}}"#),
-            metadata: HashMap::new(),
-            version: 1,
-            sequence: seq,
-        };
+        let e = kulyrax_core::event::Event::new(
+            format!("e{i}"),
+            "UserUpserted",
+            seq,
+            format!(r#"{{"id":"u1","name":"{name}"}}"#),
+        );
         std::fs::write(
             events.join(format!("{i:02}.json")),
             serde_json::to_string(&e).unwrap(),
@@ -370,12 +364,14 @@ fn grpc_vs_directory_converge() {
         HashMap::new(),
         HashMap::new(),
         vec![src],
-        &SourceRunOptions {
-            mode: RunMode::Once,
-            max_batch: 64,
-            retry_budget: 0,
-            max_batch_delay: std::time::Duration::ZERO,
-            dlq_dir: None,
+        &{
+            let mut o = SourceRunOptions::default();
+            o.dlq_dir = None;
+            o.max_batch = 64;
+            o.max_batch_delay = std::time::Duration::ZERO;
+            o.mode = RunMode::Once;
+            o.retry_budget = 0;
+            o
         },
         &stop,
     )
@@ -453,12 +449,9 @@ fn grpc_dlq_count_reflects_a_real_cross_backend_failure() {
         AdapterCapability::Upsert,
         AdapterCapability::Delete,
     ]);
-    let cfg = KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "r.json".into(),
-        },
-        adapters: vec![
+    let cfg = KulyraxConfig::new(
+        "r.json",
+        vec![
             AdapterConfig::Custom(CustomAdapterConfig {
                 type_name: "postgres".into(),
                 id: "pg".into(),
@@ -476,15 +469,8 @@ fn grpc_dlq_count_reflects_a_real_cross_backend_failure() {
                 depends_on: vec![],
             }),
         ],
-        // ContinueOnError, deliberately not the default FailFast: Postgres
-        // and Elasticsearch are independent destinations, and this test's
-        // whole point is that one's permanent failure must not prevent the
-        // other from being attempted (see the same fix applied to
-        // examples/automotive-csv-producer/config.yaml, found via this test).
-        failure_policy: FailurePolicy::ContinueOnError,
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    };
+    )
+    .with_failure_policy(FailurePolicy::ContinueOnError);
     let routing_rules = HashMap::from([(
         "VehicleUpserted".to_string(),
         vec!["pg".to_string(), "es".to_string()],
@@ -527,16 +513,18 @@ fn grpc_dlq_count_reflects_a_real_cross_backend_failure() {
             routing_rules,
             adapters,
             vec![Box::new(source)],
-            &SourceRunOptions {
-                mode: RunMode::Continuous {
-                    poll_interval: Duration::from_millis(20),
-                },
-                max_batch: 64,
-                retry_budget: 1,
-                max_batch_delay: std::time::Duration::ZERO,
-                dlq_dir: Some(
+            &{
+                let mut o = SourceRunOptions::default();
+                o.dlq_dir = Some(
                     std::env::temp_dir().join(format!("kulyrax-dlq-cross-{}", std::process::id())),
-                ),
+                );
+                o.max_batch = 64;
+                o.max_batch_delay = std::time::Duration::ZERO;
+                o.mode = RunMode::Continuous {
+                    poll_interval: Duration::from_millis(20),
+                };
+                o.retry_budget = 1;
+                o
             },
             &stop2,
         )

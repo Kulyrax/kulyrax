@@ -30,14 +30,12 @@ use tempfile::tempdir;
 /// Same entity ("u1"), a different `event_id`/`sequence` each call, and a
 /// distinguishable payload field so we can tell which write actually landed.
 fn event_for_entity_u1(event_id: &str, sequence: u64, email: &str) -> Event {
-    Event {
-        event_id: event_id.to_string(),
-        event_type: "UserCreated".to_string(),
-        payload: format!(r#"{{ "id": "u1", "email": "{}" }}"#, email),
-        metadata: HashMap::new(),
-        version: 1,
+    Event::new(
+        event_id.to_string(),
+        "UserCreated".to_string(),
         sequence,
-    }
+        format!(r#"{{ "id": "u1", "email": "{}" }}"#, email),
+    )
 }
 
 // ------------------------------------------------------------

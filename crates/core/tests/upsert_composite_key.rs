@@ -19,17 +19,15 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 fn tag_assigned(sequence: u64, post_id: &str, tag_id: &str, note: &str) -> Event {
-    Event {
-        event_id: format!("evt-{sequence}"),
-        event_type: "TagAssigned".to_string(),
-        payload: format!(
+    Event::new(
+        format!("evt-{sequence}"),
+        "TagAssigned".to_string(),
+        sequence,
+        format!(
             r#"{{ "post_id": "{}", "tag_id": "{}", "note": "{}" }}"#,
             post_id, tag_id, note
         ),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence,
-    }
+    )
 }
 
 #[test]

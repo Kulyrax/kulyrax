@@ -23,6 +23,7 @@ use crate::runtime::dependency_graph::{AdapterExecutionMeta, execution_order_for
 
 /// Why a batch was rolled back instead of committed.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RollbackReason {
     /// The adapters' dependency order could not be resolved, or a routed
     /// adapter does not exist; the per-event path reports it.
@@ -39,6 +40,7 @@ pub enum RollbackReason {
 
 /// The result of [`dispatch_batch`].
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum BatchResult {
     /// Every adapter committed. One report per event, in batch order.
     Committed(Vec<ExecutionReport>),

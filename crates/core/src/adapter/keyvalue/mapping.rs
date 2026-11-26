@@ -10,6 +10,7 @@ use serde_json::{Map, Value};
 /// SQL and document mappings already use. `key` and `value` are the KV
 /// analogs of a document mapping's `id` and `document`.
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct KvMapping {
     pub event: String,
 

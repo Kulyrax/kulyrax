@@ -14,25 +14,21 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 fn set_event(sequence: u64, state: &str) -> Event {
-    Event {
-        event_id: format!("evt-set-{sequence}"),
-        event_type: "UserViewUpdated".to_string(),
-        payload: format!(r#"{{ "user_id": "u1", "state": "{state}" }}"#),
-        metadata: HashMap::new(),
-        version: 1,
+    Event::new(
+        format!("evt-set-{sequence}"),
+        "UserViewUpdated".to_string(),
         sequence,
-    }
+        format!(r#"{{ "user_id": "u1", "state": "{state}" }}"#),
+    )
 }
 
 fn invalidate_event(sequence: u64) -> Event {
-    Event {
-        event_id: format!("evt-invalidate-{sequence}"),
-        event_type: "CacheInvalidated".to_string(),
-        payload: r#"{ "user_id": "u1" }"#.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
+    Event::new(
+        format!("evt-invalidate-{sequence}"),
+        "CacheInvalidated".to_string(),
         sequence,
-    }
+        r#"{ "user_id": "u1" }"#.to_string(),
+    )
 }
 
 fn mappings() -> Result<HashMap<String, KvMapping>, Box<dyn std::error::Error>> {

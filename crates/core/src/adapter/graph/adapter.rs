@@ -4,6 +4,7 @@ use std::fmt;
 /// `KvError` / `DocumentError` / `SqlError` — same four cases, same meaning,
 /// named for the fourth storage kind (Phase 16).
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum GraphError {
     /// No mapping exists for the given event type.
     MappingNotFound(String),

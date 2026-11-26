@@ -44,6 +44,7 @@ use std::sync::atomic::AtomicBool;
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum PipelineError {
     Io(std::io::Error),
     ConfigParse(String),
@@ -200,6 +201,7 @@ pub fn load_event(path: &Path) -> Result<Event, PipelineError> {
 }
 
 /// A fully loaded and cross-validated project: config, mappings, and routing rules.
+#[non_exhaustive]
 pub struct LoadedProject {
     pub config: KulyraxConfig,
     pub sql_mappings: HashMap<String, SqlMapping>,
@@ -272,6 +274,7 @@ pub fn dry_run(
 }
 
 /// Result of [explain]: routing/dependency resolution for one event, without execution.
+#[non_exhaustive]
 pub struct ExplainResult {
     pub event: Event,
     pub routed_adapters: Vec<AdapterId>,
@@ -366,6 +369,7 @@ pub fn build_sources(
 
 /// One configured source, for `kulyrax sources`.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct SourceStatus {
     pub id: String,
     pub committed: Option<String>,

@@ -14,6 +14,7 @@ use serde_json::Value;
 /// many-to-many association tables).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
+#[non_exhaustive]
 pub enum OneOrMany<T> {
     One(T),
     Many(Vec<T>),
@@ -46,6 +47,7 @@ impl From<&str> for OneOrMany<String> {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct SqlMapping {
     pub event: String,
     pub table: String,

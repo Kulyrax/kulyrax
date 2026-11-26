@@ -23,14 +23,13 @@ use tempfile::tempdir;
 // ------------------------------------------------------------
 
 fn test_event(version: u32) -> Event {
-    Event {
-        event_id: "evt-1".to_string(),
-        event_type: "UserCreated".to_string(),
-        payload: r#"{ "id": "u1" }"#.to_string(),
-        metadata: HashMap::new(),
-        version,
-        sequence: 1,
-    }
+    Event::new(
+        "evt-1".to_string(),
+        "UserCreated".to_string(),
+        1,
+        r#"{ "id": "u1" }"#.to_string(),
+    )
+    .with_version(version)
 }
 
 /// Mapping targets schema v2 (expects a `tier` column added by the v1->v2 upcaster).

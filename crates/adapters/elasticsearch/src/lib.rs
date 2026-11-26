@@ -226,17 +226,19 @@ impl ElasticsearchAdapter {
                 ..
             }) => {
                 return Err(match self.migration_policy {
-                    MigrationPolicy::Strict => AdapterResult::unsupported_version(
-                        self.id.clone(),
-                        StorageKind::Document,
-                        reason,
-                        from_version,
-                        to_version,
-                    ),
                     MigrationPolicy::IgnoreUnmatched => AdapterResult::skipped_versioned(
                         self.id.clone(),
                         StorageKind::Document,
                         SkipReason::UnsupportedVersion,
+                        from_version,
+                        to_version,
+                    ),
+                    // `Strict`, and any policy this adapter does not know
+                    // (`MigrationPolicy` is `#[non_exhaustive]`): refuse.
+                    _ => AdapterResult::unsupported_version(
+                        self.id.clone(),
+                        StorageKind::Document,
+                        reason,
                         from_version,
                         to_version,
                     ),
@@ -256,15 +258,7 @@ impl ElasticsearchAdapter {
         Ok(Planned {
             source_version: projection.source_version,
             projected_version: projection.projected_version,
-            plan: DocumentPlan {
-                collection: projection.collection,
-                entity_id: projection.entity_id,
-                document: projection.document,
-                on_existing: projection.on_existing,
-                operation: projection.operation,
-                permanent: projection.permanent,
-                facet: projection.facet,
-            },
+            plan: DocumentPlan::from(projection),
         })
     }
 
@@ -282,6 +276,11 @@ impl ElasticsearchAdapter {
             Ok(DocumentOutcome::Skipped(reason)) => {
                 AdapterResult::skipped_versioned(id, kind, reason, sv, pv)
             }
+            // `DocumentOutcome` is `#[non_exhaustive]`: an outcome this
+            // adapter does not know is a failure, never a silent success.
+            Ok(other) => self.failure(AdapterError::WriteFailed(format!(
+                "elasticsearch: unknown document outcome {other:?}"
+            ))),
             Err(DocumentError::WriteConflict) => self.failure(AdapterError::WriteFailed(format!(
                 "elasticsearch write conflict: exceeded {MAX_ATTEMPTS} attempts against a contended entity"
             ))),

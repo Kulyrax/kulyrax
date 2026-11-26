@@ -103,12 +103,19 @@ lane last see?" `kulyrax-core` gives you a canonical answer for that
 question, [`GuardState`](../crates/core/src/adapter/mod.rs):
 
 ```rust
+#[non_exhaustive]
 pub struct GuardState {
     pub last_sequence: u64,
     pub deleted: bool,
     pub permanent: bool,
 }
 ```
+
+It is `#[non_exhaustive]`, like the other types a backend builds: make one with
+`GuardState::new(last_sequence, deleted, permanent)`. A backend that builds
+its own plan from a projection uses `DocumentPlan::from(projection)` or
+`KvPlan::from(projection)`, and a backend's tests build an
+`AdapterBuildContext::new(mappings, upcasters, migration_policy)`.
 
 Your trait's read method returns `Option<GuardState>` (or your kind's own
 richer guard type, which exposes a `GuardState` per lane — see

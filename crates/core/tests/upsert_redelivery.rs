@@ -23,14 +23,12 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 fn user_updated() -> Event {
-    Event {
-        event_id: "evt-1".to_string(),
-        event_type: "UserUpdated".to_string(),
-        payload: r#"{ "id": "u1", "state": "s1" }"#.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: 5,
-    }
+    Event::new(
+        "evt-1".to_string(),
+        "UserUpdated".to_string(),
+        5,
+        r#"{ "id": "u1", "state": "s1" }"#.to_string(),
+    )
 }
 
 #[test]

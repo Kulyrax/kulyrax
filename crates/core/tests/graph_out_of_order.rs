@@ -15,14 +15,12 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 fn rated(seq: u64, score: &str) -> Event {
-    Event {
-        event_id: format!("evt-rated-{seq}"),
-        event_type: "UserRated".to_string(),
-        payload: format!(r#"{{ "from": "u1", "to": "m1", "score": "{score}" }}"#),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-rated-{seq}"),
+        "UserRated".to_string(),
+        seq,
+        format!(r#"{{ "from": "u1", "to": "m1", "score": "{score}" }}"#),
+    )
 }
 
 fn mappings() -> HashMap<String, GraphMapping> {

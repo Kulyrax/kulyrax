@@ -7,6 +7,7 @@ use crate::event::Event;
 use crate::upcast::UpcasterRegistry;
 
 /// Document projection plus the version metadata used to produce it (Phase 10.3).
+#[non_exhaustive]
 pub struct DocumentProjection {
     pub document: serde_json::Value,
     pub source_version: u32,

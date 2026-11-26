@@ -31,6 +31,7 @@ use crate::upcast::UpcasterRegistry;
 /// `INSERT` (`on_existing: ignore`); non-empty → `INSERT … ON CONFLICT (…) DO
 /// UPDATE SET <set_columns = excluded.…>`.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct SqlWrite {
     pub table: String,
     /// All inserted columns, in a deterministic (sorted) order.
@@ -48,6 +49,7 @@ pub struct SqlWrite {
 /// as of Phase 25.3 it also picks the upsert clause, since MySQL has no
 /// `ON CONFLICT` at all (see [`SqlWrite::render`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Placeholders {
     /// SQLite: `?1, ?2, …`
     Question,
@@ -116,6 +118,7 @@ pub const GUARD_TABLE: &str = "kulyrax_projection_state";
 
 /// The guard row `kulyrax_projection_state` — one lane for `(table, entity_key, facet)`.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct GuardRow {
     pub table: String,
     pub entity_key: String,
@@ -291,6 +294,7 @@ fn rebuild_unsupported(tables: &str) -> SqlError {
 /// A table a rebuild replaces, and the shadow table it builds the new
 /// content in (see [`crate::rebuild`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ShadowTable {
     pub table: String,
     pub shadow: String,
@@ -302,6 +306,7 @@ pub struct ShadowTable {
 /// sequence, so any writer that projected into these tables during the
 /// rebuild changes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct GuardFingerprint {
     pub lanes: i64,
     pub sequence_sum: i128,
@@ -368,6 +373,7 @@ pub fn swap_shadow_rebuild<T: SqlTxn>(
 /// What [`project`] resolved to — the adapter maps this onto an `AdapterResult`
 /// with the version metadata it already holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SqlOutcome {
     Created,
     Updated,
@@ -377,6 +383,7 @@ pub enum SqlOutcome {
 
 /// Everything [`project`] needs from the runtime builder — the neutral write
 /// plus the resolved identity and the mapping's gating fields.
+#[non_exhaustive]
 pub struct SqlPlan {
     pub table: String,
     pub entity_key: String,
@@ -782,6 +789,7 @@ pub fn project_in<T: SqlTxn>(
 }
 
 /// An event's [`SqlPlan`] and its observed / target schema versions.
+#[non_exhaustive]
 pub struct PlannedEvent {
     pub plan: SqlPlan,
     pub source_version: u32,
@@ -878,6 +886,28 @@ pub fn outcome_result(
 /// binding fallback, the same way the in-tree SQLite adapter does.
 pub fn scalar_to_string(v: &Value) -> String {
     crate::adapter::json_scalar_to_string(v)
+}
+
+impl GuardFingerprint {
+    /// The guard table's lane count and sequence sum, as a backend computes
+    /// them. `GuardFingerprint` is `#[non_exhaustive]`; build it with this.
+    pub fn new(lanes: i64, sequence_sum: i128) -> Self {
+        Self {
+            lanes,
+            sequence_sum,
+        }
+    }
+}
+
+impl ShadowTable {
+    /// `table` and the shadow table a rebuild writes before the swap.
+    /// `ShadowTable` is `#[non_exhaustive]`; build it with this.
+    pub fn new(table: impl Into<String>, shadow: impl Into<String>) -> Self {
+        Self {
+            table: table.into(),
+            shadow: shadow.into(),
+        }
+    }
 }
 
 #[cfg(test)]

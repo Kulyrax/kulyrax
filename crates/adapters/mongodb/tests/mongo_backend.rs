@@ -131,14 +131,12 @@ fn doc_mapping(yaml: &str) -> DocumentMapping {
 }
 
 fn ev(event_type: &str, seq: u64, payload: serde_json::Value) -> Event {
-    Event {
-        event_id: format!("evt-{event_type}-{seq}"),
-        event_type: event_type.into(),
-        payload: payload.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-{event_type}-{seq}"),
+        event_type,
+        seq,
+        payload.to_string(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -537,9 +535,11 @@ fn batch_mappings(coll: &str) -> HashMap<String, DocumentMapping> {
 }
 
 fn bev(kind: &str, seq: u64, payload: serde_json::Value) -> Event {
-    Event {
-        event_id: format!("evt-{kind}-{}-{seq}", payload["id"].as_str().unwrap_or("")),
-        ..ev(kind, seq, payload)
+    {
+        let event_id = format!("evt-{kind}-{}-{seq}", payload["id"].as_str().unwrap_or(""));
+        let mut o = ev(kind, seq, payload);
+        o.event_id = event_id;
+        o
     }
 }
 

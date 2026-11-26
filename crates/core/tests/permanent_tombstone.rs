@@ -22,25 +22,21 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 fn upsert_event(sequence: u64, state: &str) -> Event {
-    Event {
-        event_id: format!("evt-upsert-{sequence}"),
-        event_type: "UserUpdated".to_string(),
-        payload: format!(r#"{{ "id": "u1", "state": "{state}" }}"#),
-        metadata: HashMap::new(),
-        version: 1,
+    Event::new(
+        format!("evt-upsert-{sequence}"),
+        "UserUpdated".to_string(),
         sequence,
-    }
+        format!(r#"{{ "id": "u1", "state": "{state}" }}"#),
+    )
 }
 
 fn delete_event(sequence: u64) -> Event {
-    Event {
-        event_id: format!("evt-delete-{sequence}"),
-        event_type: "UserDeleted".to_string(),
-        payload: r#"{ "id": "u1" }"#.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
+    Event::new(
+        format!("evt-delete-{sequence}"),
+        "UserDeleted".to_string(),
         sequence,
-    }
+        r#"{ "id": "u1" }"#.to_string(),
+    )
 }
 
 #[test]

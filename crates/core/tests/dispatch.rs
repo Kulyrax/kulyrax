@@ -59,14 +59,7 @@ fn test_routing() -> HashMap<String, Vec<AdapterId>> {
 }
 
 fn test_event(event_type: &str) -> Event {
-    Event {
-        event_id: "evt-1".into(),
-        event_type: event_type.into(),
-        payload: "{}".into(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: 1,
-    }
+    Event::new("evt-1", event_type, 1, "{}")
 }
 
 /// Matches typical config: SQL before document (priorities 10 / 20).

@@ -392,14 +392,14 @@ impl PostgresOutboxSource {
         };
         Ok((
             seq,
-            Event {
-                event_id: field(1, "event_id")?,
-                event_type: field(2, "event_type")?,
-                payload: field(3, "payload")?,
-                metadata,
-                version,
-                sequence: seq as u64,
-            },
+            Event::new(
+                field(1, "event_id")?,
+                field(2, "event_type")?,
+                seq as u64,
+                field(3, "payload")?,
+            )
+            .with_metadata(metadata)
+            .with_version(version),
         ))
     }
 }
@@ -582,10 +582,7 @@ impl EventSource for PostgresOutboxSource {
                 );
                 self.late.insert(pos.0.clone(), seq);
                 self.pending.insert(pos.0.clone(), state.clone());
-                out.push(SourcedEvent {
-                    event,
-                    position: pos,
-                });
+                out.push(SourcedEvent::new(event, pos));
                 continue;
             }
             if let Some(after) = state.after {
@@ -639,10 +636,7 @@ impl EventSource for PostgresOutboxSource {
             state.after = Some(seq);
             let pos = position(state.after, state.late_seq);
             self.pending.insert(pos.0.clone(), state.clone());
-            out.push(SourcedEvent {
-                event,
-                position: pos,
-            });
+            out.push(SourcedEvent::new(event, pos));
         }
         // Gaps behind the cursor are no longer open.
         let after = state.after;

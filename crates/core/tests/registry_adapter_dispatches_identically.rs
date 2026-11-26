@@ -23,7 +23,7 @@ use kulyrax_core::execution::{AdapterOutcome, ExecutionStatus};
 use kulyrax_core::routing::{AdapterId, StorageKind, load_routing};
 use kulyrax_core::runtime::build_adapters_from_config;
 use kulyrax_core::runtime::config::{
-    AdapterConfig, CustomAdapterConfig, FileAdapterConfig, FileConfig, KulyraxConfig, RoutingConfig,
+    AdapterConfig, CustomAdapterConfig, FileAdapterConfig, FileConfig, KulyraxConfig,
 };
 use kulyrax_core::runtime::{
     AdapterExecutionMeta, AdapterRegistry, MappingSet, adapter_metadata_map,
@@ -60,14 +60,12 @@ impl StorageAdapter for MockAdapter {
 }
 
 fn user_created_event() -> Event {
-    Event {
-        event_id: "evt-1".into(),
-        event_type: "UserCreated".into(),
-        payload: serde_json::json!({ "id": "u1", "name": "Ada" }).to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: 1,
-    }
+    Event::new(
+        "evt-1",
+        "UserCreated",
+        1,
+        serde_json::json!({ "id": "u1", "name": "Ada" }).to_string(),
+    )
 }
 
 fn doc_mapping() -> DocumentMapping {
@@ -100,12 +98,9 @@ fn registered_adapter_participates_identically_in_dependency_order_and_dispatch(
     });
 
     let tmp = tempfile::tempdir().unwrap();
-    let config = KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "routing.yaml".into(),
-        },
-        adapters: vec![
+    let config = KulyraxConfig::new(
+        "routing.yaml",
+        vec![
             AdapterConfig::Custom(CustomAdapterConfig {
                 type_name: type_name.into(),
                 id: "sql-primary".into(),
@@ -129,10 +124,7 @@ fn registered_adapter_participates_identically_in_dependency_order_and_dispatch(
                 depends_on: vec!["sql-primary".into()],
             }),
         ],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    };
+    );
     config
         .validate()
         .expect("config with a Custom adapter validates like any other");
@@ -142,9 +134,10 @@ fn registered_adapter_participates_identically_in_dependency_order_and_dispatch(
 
     let mut adapters = build_adapters_from_config(
         &config,
-        MappingSet {
-            document: doc_mappings,
-            ..Default::default()
+        {
+            let mut o = MappingSet::default();
+            o.document = doc_mappings;
+            o
         },
         Arc::new(kulyrax_core::UpcasterRegistry::new()),
         &registry,
@@ -179,14 +172,11 @@ fn registered_adapter_participates_identically_in_dependency_order_and_dispatch(
 
 #[test]
 fn unregistered_custom_type_becomes_a_failed_placeholder_not_a_panic() {
-    let config = KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "routing.yaml".into(),
-        },
-        // `CacheInvalidated` routes to `["kv-cache"]` alone in the shared
-        // routing fixture, so a single adapter fully covers this route.
-        adapters: vec![AdapterConfig::Custom(CustomAdapterConfig {
+    // `CacheInvalidated` routes to `["kv-cache"]` alone in the shared
+    // routing fixture, so a single adapter fully covers this route.
+    let config = KulyraxConfig::new(
+        "routing.yaml",
+        vec![AdapterConfig::Custom(CustomAdapterConfig {
             type_name: "definitely-unregistered-25-5".into(),
             id: "kv-cache".into(),
             priority: 10,
@@ -194,10 +184,7 @@ fn unregistered_custom_type_becomes_a_failed_placeholder_not_a_panic() {
             capabilities: None,
             depends_on: vec![],
         })],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    };
+    );
 
     let mut adapters = build_adapters_from_config(
         &config,
@@ -212,14 +199,7 @@ fn unregistered_custom_type_becomes_a_failed_placeholder_not_a_panic() {
     );
 
     let meta = adapter_metadata_map(&config);
-    let cache_event = Event {
-        event_id: "evt-2".into(),
-        event_type: "CacheInvalidated".into(),
-        payload: "{}".into(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: 1,
-    };
+    let cache_event = Event::new("evt-2", "CacheInvalidated", 1, "{}");
     let report = kulyrax_core::dispatch::dispatch(
         &cache_event,
         &mut adapters,

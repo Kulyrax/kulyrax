@@ -20,36 +20,30 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 fn created(sequence: u64, name: &str) -> Event {
-    Event {
-        event_id: format!("evt-created-{sequence}"),
-        event_type: "UserCreated".to_string(),
-        payload: format!(r#"{{ "id": "u1", "display_name": "{name}" }}"#),
-        metadata: HashMap::new(),
-        version: 1,
+    Event::new(
+        format!("evt-created-{sequence}"),
+        "UserCreated".to_string(),
         sequence,
-    }
+        format!(r#"{{ "id": "u1", "display_name": "{name}" }}"#),
+    )
 }
 
 fn deleted(sequence: u64) -> Event {
-    Event {
-        event_id: format!("evt-deleted-{sequence}"),
-        event_type: "UserDeleted".to_string(),
-        payload: r#"{ "id": "u1" }"#.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
+    Event::new(
+        format!("evt-deleted-{sequence}"),
+        "UserDeleted".to_string(),
         sequence,
-    }
+        r#"{ "id": "u1" }"#.to_string(),
+    )
 }
 
 fn email_changed(sequence: u64, email: &str) -> Event {
-    Event {
-        event_id: format!("evt-email-{sequence}"),
-        event_type: "UserEmailChanged".to_string(),
-        payload: format!(r#"{{ "id": "u1", "email": "{email}" }}"#),
-        metadata: HashMap::new(),
-        version: 1,
+    Event::new(
+        format!("evt-email-{sequence}"),
+        "UserEmailChanged".to_string(),
         sequence,
-    }
+        format!(r#"{{ "id": "u1", "email": "{email}" }}"#),
+    )
 }
 
 fn mappings() -> HashMap<String, SqlMapping> {

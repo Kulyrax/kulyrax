@@ -13,6 +13,7 @@ const KNOWN_ADAPTER_TYPES: &[&str] = &["sqlite", "file", "keyvalue", "graph"];
 /// When an adapter fails, stop immediately (default) or run all routed adapters and report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum FailurePolicy {
     /// Stop on first adapter failure; report includes only adapters run so far.
     #[default]
@@ -30,6 +31,7 @@ pub enum FailurePolicy {
 /// target version) is handled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum MigrationPolicy {
     /// Fail the adapter immediately when no upcaster chain exists (default).
     #[default]
@@ -47,6 +49,7 @@ pub enum MigrationPolicy {
 /// Used for mapping compatibility validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum AdapterCapability {
     /// Adapter can write data (baseline requirement).
     Write,
@@ -73,6 +76,7 @@ pub type AdapterCapabilities = Vec<AdapterCapability>;
 // ------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
+#[non_exhaustive]
 pub struct KulyraxConfig {
     pub version: u32,
     pub routing: RoutingConfig,
@@ -94,6 +98,38 @@ pub struct KulyraxConfig {
 }
 
 impl KulyraxConfig {
+    /// A version-1 config with the default failure and migration policies and
+    /// no sources. `KulyraxConfig` is `#[non_exhaustive]`: build it with this
+    /// and the `with_*` methods, or read it from YAML.
+    pub fn new(routing_file: impl Into<String>, adapters: Vec<AdapterConfig>) -> Self {
+        Self {
+            version: 1,
+            routing: RoutingConfig::new(routing_file),
+            adapters,
+            failure_policy: FailurePolicy::default(),
+            migration_policy: MigrationPolicy::default(),
+            sources: Vec::new(),
+        }
+    }
+
+    /// The config with `policy` as its failure policy.
+    pub fn with_failure_policy(mut self, policy: FailurePolicy) -> Self {
+        self.failure_policy = policy;
+        self
+    }
+
+    /// The config with `policy` as its migration policy.
+    pub fn with_migration_policy(mut self, policy: MigrationPolicy) -> Self {
+        self.migration_policy = policy;
+        self
+    }
+
+    /// The config with `sources` as its event sources.
+    pub fn with_sources(mut self, sources: Vec<SourceConfig>) -> Self {
+        self.sources = sources;
+        self
+    }
+
     pub fn validate(&self) -> Result<(), ConfigError> {
         if self.version != 1 {
             return Err(ConfigError::UnsupportedVersion(self.version));
@@ -145,8 +181,17 @@ impl KulyraxConfig {
 // ------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
+#[non_exhaustive]
 pub struct RoutingConfig {
     pub file: String,
+}
+
+impl RoutingConfig {
+    /// The routing file at `file`, relative to the config file. `RoutingConfig`
+    /// is `#[non_exhaustive]`; build it with this.
+    pub fn new(file: impl Into<String>) -> Self {
+        Self { file: file.into() }
+    }
 }
 
 // ------------------------------------------------------------
@@ -170,6 +215,7 @@ enum KnownAdapterConfig {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum AdapterConfig {
     Sqlite(SqliteAdapterConfig),
     File(FileAdapterConfig),
@@ -391,6 +437,7 @@ pub fn expand_env(s: &str) -> String {
 
 /// A configured event source — the input-side mirror of [`AdapterConfig`].
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum SourceConfig {
     /// Watches a directory for event files (`*.json` / `*.ndjson` / `*.jsonl`).
     Directory(DirectorySourceConfig),
@@ -502,6 +549,7 @@ impl SourceConfig {
 // ------------------------------------------------------------
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ConfigError {
     UnsupportedVersion(u32),
     NoAdaptersDefined,

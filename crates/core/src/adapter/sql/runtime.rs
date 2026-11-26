@@ -7,6 +7,7 @@ use crate::event::Event;
 use crate::upcast::UpcasterRegistry;
 
 /// SQL projection plus the version metadata used to produce it (Phase 10.3).
+#[non_exhaustive]
 pub struct SqlProjection {
     /// Dialect-neutral write description (Phase 19.1); the backend renders it.
     pub write: super::exec::SqlWrite,

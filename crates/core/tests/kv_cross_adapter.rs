@@ -28,30 +28,24 @@ use tempfile::tempdir;
 
 fn lifecycle_events() -> Vec<Event> {
     vec![
-        Event {
-            event_id: "e1".to_string(),
-            event_type: "UserUpdated".to_string(),
-            payload: r#"{"id":"u1","name":"Alice"}"#.to_string(),
-            metadata: HashMap::new(),
-            version: 1,
-            sequence: 1,
-        },
-        Event {
-            event_id: "e2".to_string(),
-            event_type: "UserUpdated".to_string(),
-            payload: r#"{"id":"u1","name":"Alice R1"}"#.to_string(),
-            metadata: HashMap::new(),
-            version: 1,
-            sequence: 2,
-        },
-        Event {
-            event_id: "e3".to_string(),
-            event_type: "UserDeleted".to_string(),
-            payload: r#"{"id":"u1"}"#.to_string(),
-            metadata: HashMap::new(),
-            version: 1,
-            sequence: 3,
-        },
+        Event::new(
+            "e1".to_string(),
+            "UserUpdated".to_string(),
+            1,
+            r#"{"id":"u1","name":"Alice"}"#.to_string(),
+        ),
+        Event::new(
+            "e2".to_string(),
+            "UserUpdated".to_string(),
+            2,
+            r#"{"id":"u1","name":"Alice R1"}"#.to_string(),
+        ),
+        Event::new(
+            "e3".to_string(),
+            "UserDeleted".to_string(),
+            3,
+            r#"{"id":"u1"}"#.to_string(),
+        ),
     ]
 }
 

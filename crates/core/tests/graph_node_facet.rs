@@ -16,36 +16,30 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 fn registered(seq: u64) -> Event {
-    Event {
-        event_id: format!("evt-reg-{seq}"),
-        event_type: "UserRegistered".to_string(),
-        payload: r#"{ "user_id": "u1", "name": "Ada" }"#.to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-reg-{seq}"),
+        "UserRegistered".to_string(),
+        seq,
+        r#"{ "user_id": "u1", "name": "Ada" }"#.to_string(),
+    )
 }
 
 fn profile_set(seq: u64, bio: &str) -> Event {
-    Event {
-        event_id: format!("evt-profile-{seq}"),
-        event_type: "ProfileUpdated".to_string(),
-        payload: format!(r#"{{ "user_id": "u1", "bio": "{bio}" }}"#),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-profile-{seq}"),
+        "ProfileUpdated".to_string(),
+        seq,
+        format!(r#"{{ "user_id": "u1", "bio": "{bio}" }}"#),
+    )
 }
 
 fn stats_set(seq: u64, followers: i64) -> Event {
-    Event {
-        event_id: format!("evt-stats-{seq}"),
-        event_type: "StatsRecomputed".to_string(),
-        payload: format!(r#"{{ "user_id": "u1", "followers": {followers} }}"#),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    Event::new(
+        format!("evt-stats-{seq}"),
+        "StatsRecomputed".to_string(),
+        seq,
+        format!(r#"{{ "user_id": "u1", "followers": {followers} }}"#),
+    )
 }
 
 fn mappings() -> HashMap<String, GraphMapping> {

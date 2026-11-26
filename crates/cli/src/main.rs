@@ -375,22 +375,24 @@ fn run_cmd(
         return Ok(exit_code_from_status(report.status));
     }
 
-    let opts = SourceRunOptions {
-        mode: if once {
+    let opts = {
+        let mut o = SourceRunOptions::default();
+        o.dlq_dir = dlq;
+        o.max_batch = max_batch.unwrap_or(if once {
+            kulyrax_core::replay::DEFAULT_REPLAY_BATCH
+        } else {
+            kulyrax_core::source::runner::DEFAULT_LIVE_BATCH
+        });
+        o.max_batch_delay = batch_delay(max_batch_delay_ms);
+        o.mode = if once {
             RunMode::Once
         } else {
             RunMode::Continuous {
                 poll_interval: Duration::from_millis(poll_interval_ms.unwrap_or(1000)),
             }
-        },
-        max_batch: max_batch.unwrap_or(if once {
-            kulyrax_core::replay::DEFAULT_REPLAY_BATCH
-        } else {
-            kulyrax_core::source::runner::DEFAULT_LIVE_BATCH
-        }),
-        max_batch_delay: batch_delay(max_batch_delay_ms),
-        retry_budget: 3,
-        dlq_dir: dlq,
+        };
+        o.retry_budget = 3;
+        o
     };
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -441,14 +443,12 @@ fn ingest_cmd(
         let _ = ctrlc::set_handler(move || stop.store(true, Ordering::Relaxed));
     }
 
-    let opts = kulyrax_ingest::ServeOptions {
-        listen,
-        max_batch: max_batch.unwrap_or(kulyrax_core::source::runner::DEFAULT_LIVE_BATCH),
-        max_batch_delay: batch_delay(max_batch_delay_ms),
-        retry_budget: 3,
-        dlq_dir: dlq,
-        ..Default::default()
-    };
+    let mut opts = kulyrax_ingest::ServeOptions::default();
+    opts.listen = listen;
+    opts.max_batch = max_batch.unwrap_or(kulyrax_core::source::runner::DEFAULT_LIVE_BATCH);
+    opts.max_batch_delay = batch_delay(max_batch_delay_ms);
+    opts.retry_budget = 3;
+    opts.dlq_dir = dlq;
 
     let report = kulyrax_ingest::serve(
         &config,
@@ -628,11 +628,13 @@ fn replay_cmd(
     validate_routing: bool,
     max_batch: Option<usize>,
 ) -> Result<i32, Box<dyn std::error::Error>> {
-    let opts = ReplayRunOptions {
-        max_per_event_summaries: max_per_event,
-        progress_interval: progress_every,
-        validate_routing,
-        max_batch,
+    let opts = {
+        let mut o = ReplayRunOptions::default();
+        o.max_batch = max_batch;
+        o.max_per_event_summaries = max_per_event;
+        o.progress_interval = progress_every;
+        o.validate_routing = validate_routing;
+        o
     };
     let report = pipeline::replay(
         &config,
@@ -661,12 +663,13 @@ fn rebuild_cmd(
     progress_every: Option<usize>,
     max_batch: Option<usize>,
 ) -> Result<i32, Box<dyn std::error::Error>> {
-    let opts = ReplayRunOptions {
-        // A rebuild replays the whole history: list failures only.
-        max_per_event_summaries: Some(0),
-        progress_interval: progress_every,
-        validate_routing: false,
-        max_batch,
+    let opts = {
+        let mut o = ReplayRunOptions::default();
+        o.max_batch = max_batch;
+        o.max_per_event_summaries = Some(0);
+        o.progress_interval = progress_every;
+        o.validate_routing = false;
+        o
     };
     let report = pipeline::rebuild(
         &config,
@@ -840,6 +843,11 @@ fn reload_cmd(config: PathBuf, timeout_secs: u64) -> Result<i32, Box<dyn std::er
             );
             2
         }
+        // `ReloadOutcome` is `#[non_exhaustive]`.
+        other => {
+            eprintln!("reload: unexpected outcome {other:?}");
+            1
+        }
     })
 }
 
@@ -850,7 +858,8 @@ fn log_reload(outcome: &ReloadOutcome) {
         ReloadOutcome::Rejected { reason } => {
             eprintln!("kulyrax: reload rejected, keeping the previous configuration: {reason}")
         }
-        ReloadOutcome::NotPickedUp => {}
+        // `ReloadOutcome` is `#[non_exhaustive]`; nothing else is reported.
+        _ => {}
     }
 }
 
@@ -924,6 +933,8 @@ fn print_dry_run_report(report: &DryRunReport) {
             }
             DryRunOutcome::Failed { error } => println!("   would fail: {error}"),
             DryRunOutcome::NotPreviewable { reason } => println!("   not previewable: {reason}"),
+            // `DryRunOutcome` is `#[non_exhaustive]`.
+            other => println!("   {other:?}"),
         }
     }
     println!();
@@ -1013,16 +1024,28 @@ fn print_text_report(report: &ExecutionReport) {
                     extract_error(r.error.as_ref())
                 );
             }
+            // `AdapterOutcome` is `#[non_exhaustive]`.
+            other => {
+                println!(
+                    "? {} ({}) — {other:?}",
+                    r.adapter_id,
+                    format_storage_kind(r.storage_kind)
+                );
+            }
         }
     }
 
     println!("------------------------");
 }
 
+// The enums below are `#[non_exhaustive]`: a variant added in a later
+// version prints as "unknown" here rather than failing to build.
+
 fn format_status(status: ExecutionStatus) -> &'static str {
     match status {
         ExecutionStatus::Succeeded => "succeeded",
         ExecutionStatus::Failed => "failed",
+        _ => "unknown",
     }
 }
 
@@ -1033,6 +1056,7 @@ fn format_storage_kind(kind: StorageKind) -> &'static str {
         StorageKind::KeyValue => "keyvalue",
         StorageKind::Graph => "graph",
         StorageKind::Custom => "custom",
+        _ => "unknown",
     }
 }
 
@@ -1040,7 +1064,7 @@ fn extract_error(err: Option<&AdapterReportError>) -> &str {
     match err {
         Some(AdapterReportError::WriteFailed { message }) => message,
         Some(AdapterReportError::UnsupportedVersion { message }) => message,
-        None => "unknown",
+        _ => "unknown",
     }
 }
 
@@ -1052,12 +1076,14 @@ fn format_skip_reason(reason: SkipReason) -> &'static str {
         SkipReason::AlreadyDeleted => "already deleted",
         SkipReason::Tombstoned => "permanently tombstoned",
         SkipReason::EntityAbsent => "entity absent (facet update with no created entity)",
+        _ => "unknown",
     }
 }
 
+/// A status this version does not know is a failure.
 fn exit_code_from_status(status: ExecutionStatus) -> i32 {
     match status {
         ExecutionStatus::Succeeded => 0,
-        ExecutionStatus::Failed => 1,
+        _ => 1,
     }
 }

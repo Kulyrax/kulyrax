@@ -28,6 +28,7 @@ use crate::upcast::UpcasterRegistry;
 
 /// What one event would write, adapter by adapter, in execution order.
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct DryRunReport {
     pub event_id: String,
     pub event_type: String,
@@ -35,6 +36,7 @@ pub struct DryRunReport {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct DryRunAdapter {
     pub adapter_id: AdapterId,
     /// `None` for a third-party adapter type, whose storage kind is only
@@ -45,6 +47,7 @@ pub struct DryRunAdapter {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum DryRunOutcome {
     /// The write a live run would attempt.
     Planned(PlannedWrite),
@@ -60,6 +63,7 @@ pub enum DryRunOutcome {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct PlannedWrite {
     pub operation: Operation,
     /// Only meaningful for `operation: upsert`.

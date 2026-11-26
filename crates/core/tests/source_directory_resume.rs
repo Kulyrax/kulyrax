@@ -42,12 +42,14 @@ impl EventSource for CrashOnFirstCommit {
 }
 
 fn opts() -> SourceRunOptions {
-    SourceRunOptions {
-        mode: RunMode::Once,
-        max_batch: 3,
-        retry_budget: 0,
-        max_batch_delay: std::time::Duration::ZERO,
-        dlq_dir: None,
+    {
+        let mut o = SourceRunOptions::default();
+        o.dlq_dir = None;
+        o.max_batch = 3;
+        o.max_batch_delay = std::time::Duration::ZERO;
+        o.mode = RunMode::Once;
+        o.retry_budget = 0;
+        o
     }
 }
 

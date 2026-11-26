@@ -2,7 +2,6 @@
 //! builders and never builds an adapter, so nothing is written and no store is
 //! contacted.
 
-use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -55,14 +54,7 @@ fn project(
 }
 
 fn event(event_type: &str, payload: &str) -> Event {
-    Event {
-        event_id: "e1".into(),
-        event_type: event_type.into(),
-        payload: payload.into(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: 1,
-    }
+    Event::new("e1", event_type, 1, payload)
 }
 
 fn planned(outcome: &DryRunOutcome) -> &PlannedWrite {

@@ -22,6 +22,7 @@ use crate::routing::StorageKind;
 /// mismatch under `IgnoreUnmatched`) is a [`SkipReason`] on [`AdapterOutcome`]
 /// instead, not an error (Phase 12.1).
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum AdapterError {
     WriteFailed(String),
     /// No upcaster chain to the mapping's target version, under `MigrationPolicy::Strict`.
@@ -45,6 +46,7 @@ impl std::error::Error for AdapterError {}
 /// [`crate::execution::AdapterOutcome`] into the JSON execution report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum SkipReason {
     /// Phase 11 idempotency: this entity already has a guard row/marker, and
     /// the mapping's `on_existing` is `ignore` (the default).
@@ -76,6 +78,7 @@ pub enum SkipReason {
 /// with `Deleted`). Replaces the old `success: bool` +
 /// `AdapterError::Skipped(String)` encoding with one enum.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum AdapterOutcome {
     /// A new entity was written (nothing existed yet, or it's a resurrection — Phase 13.4).
     Created,
@@ -90,6 +93,7 @@ pub enum AdapterOutcome {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct AdapterResult {
     pub adapter_id: String,
     pub kind: StorageKind,
@@ -232,6 +236,7 @@ impl AdapterResult {
 /// Mapping-level write mode for an entity that already has a projected state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum OnExisting {
     /// Entity already projected → clean skip (`SkipReason::AlreadyProjected`).
     /// Identical to Phase 11 behavior; the default, so every mapping written
@@ -248,6 +253,7 @@ pub enum OnExisting {
 /// third operation later doesn't multiply the matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Operation {
     /// Create or update the entity (Phase 11/12 behavior). Default.
     #[default]
@@ -260,6 +266,7 @@ pub enum Operation {
 /// (Phase 13.1). `None` (no `GuardState` at all) means this entity has never
 /// been projected here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct GuardState {
     pub last_sequence: u64,
     /// This entity's tombstone is currently set (Phase 13.2/13.3).
@@ -274,6 +281,7 @@ pub struct GuardState {
 /// state. Pure and side-effect free — no I/O, no adapter, exhaustively unit
 /// tested below.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum WriteDecision {
     Insert,
     Update,
@@ -491,6 +499,7 @@ impl Prepared {
 
 /// One adapter whose [`StorageAdapter::prepare`] failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct PrepareFailure {
     pub adapter_id: String,
     pub message: String,
@@ -514,6 +523,18 @@ pub fn prepare_adapters(adapters: &[Box<dyn StorageAdapter>]) -> Vec<PrepareFail
             })
         })
         .collect()
+}
+
+impl GuardState {
+    /// A guard lane as read back from storage. `GuardState` is
+    /// `#[non_exhaustive]`; build it with this.
+    pub fn new(last_sequence: u64, deleted: bool, permanent: bool) -> Self {
+        Self {
+            last_sequence,
+            deleted,
+            permanent,
+        }
+    }
 }
 
 #[cfg(test)]

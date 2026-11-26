@@ -73,11 +73,12 @@ fn reload_applies_valid_changes_and_rejects_invalid_ones() {
     let loop_thread = {
         let (root, stop, outcomes) = (root.clone(), Arc::clone(&stop), Arc::clone(&outcomes));
         thread::spawn(move || {
-            let opts = SourceRunOptions {
-                mode: RunMode::Continuous {
+            let opts = {
+                let mut o = SourceRunOptions::default();
+                o.mode = RunMode::Continuous {
                     poll_interval: Duration::from_millis(50),
-                },
-                ..SourceRunOptions::default()
+                };
+                o
             };
             run_source_loop(
                 &root.join("config.yaml"),

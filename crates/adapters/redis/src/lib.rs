@@ -348,17 +348,19 @@ impl RedisAdapter {
                 ..
             }) => {
                 return Err(match self.migration_policy {
-                    MigrationPolicy::Strict => AdapterResult::unsupported_version(
-                        self.id.clone(),
-                        StorageKind::KeyValue,
-                        reason,
-                        from_version,
-                        to_version,
-                    ),
                     MigrationPolicy::IgnoreUnmatched => AdapterResult::skipped_versioned(
                         self.id.clone(),
                         StorageKind::KeyValue,
                         SkipReason::UnsupportedVersion,
+                        from_version,
+                        to_version,
+                    ),
+                    // `Strict`, and any policy this adapter does not know
+                    // (`MigrationPolicy` is `#[non_exhaustive]`): refuse.
+                    _ => AdapterResult::unsupported_version(
+                        self.id.clone(),
+                        StorageKind::KeyValue,
+                        reason,
                         from_version,
                         to_version,
                     ),
@@ -369,15 +371,7 @@ impl RedisAdapter {
         Ok(Planned {
             source_version: projection.source_version,
             projected_version: projection.projected_version,
-            plan: KvPlan {
-                namespace: projection.namespace,
-                entity_key: projection.entity_key,
-                value: projection.value,
-                on_existing: projection.on_existing,
-                operation: projection.operation,
-                permanent: projection.permanent,
-                facet: projection.facet,
-            },
+            plan: KvPlan::from(projection),
         })
     }
 
@@ -391,6 +385,11 @@ impl RedisAdapter {
             Ok(KvOutcome::Skipped(reason)) => {
                 AdapterResult::skipped_versioned(id, kind, reason, sv, pv)
             }
+            // `KvOutcome` is `#[non_exhaustive]`: an outcome this adapter does
+            // not know is a failure, never a silent success.
+            Ok(other) => self.failure(AdapterError::WriteFailed(format!(
+                "redis: unknown key-value outcome {other:?}"
+            ))),
             Err(KvError::WriteConflict) => self.failure(AdapterError::WriteFailed(format!(
                 "redis write conflict: exceeded {MAX_ATTEMPTS} attempts against a contended entity"
             ))),
@@ -621,11 +620,11 @@ mod tests {
             capabilities: None,
             depends_on: Vec::new(),
         };
-        let ctx = AdapterBuildContext {
-            mappings: Default::default(),
-            upcasters: Arc::new(UpcasterRegistry::new()),
-            migration_policy: MigrationPolicy::default(),
-        };
+        let ctx = AdapterBuildContext::new(
+            Default::default(),
+            Arc::new(UpcasterRegistry::new()),
+            MigrationPolicy::default(),
+        );
         factory(&entry, &ctx)
     }
 

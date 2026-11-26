@@ -6,6 +6,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct DocumentMapping {
     pub event: String,
     pub collection: String,

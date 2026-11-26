@@ -22,15 +22,14 @@ fn main() {
     // env var needed; a host embedding kulyrax-core builds this map however
     // it likes (loaded from disk via `routing::load_routing`, or built
     // in-process, as here) and passes it into every call.
-    let routing_rules: HashMap<String, Vec<String>> =
-        HashMap::from([("UserRegistered".to_string(), vec!["sql-primary".to_string()])]);
+    let routing_rules: HashMap<String, Vec<String>> = HashMap::from([(
+        "UserRegistered".to_string(),
+        vec!["sql-primary".to_string()],
+    )]);
 
-    let config = KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "routing.yaml".into(),
-        },
-        adapters: vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
+    let config = KulyraxConfig::new(
+        "routing.yaml",
+        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
             id: "sql-primary".into(),
             priority: 10,
             config: SqliteConfig {
@@ -39,10 +38,7 @@ fn main() {
             capabilities: None,
             depends_on: vec![],
         })],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    };
+    );
 
     let mut sql_mappings = HashMap::new();
     sql_mappings.insert(
@@ -53,14 +49,7 @@ fn main() {
         .unwrap(),
     );
 
-    let event = Event {
-        event_id: "e1".into(),
-        event_type: "UserRegistered".into(),
-        payload: r#"{"id":"u1","name":"Ada"}"#.into(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: 1,
-    };
+    let event = Event::new("e1", "UserRegistered", 1, r#"{"id":"u1","name":"Ada"}"#);
 
     let report = execute_event(
         &config,

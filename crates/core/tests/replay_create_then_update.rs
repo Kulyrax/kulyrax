@@ -8,7 +8,7 @@ use kulyrax_core::event::Event;
 use kulyrax_core::execute_event;
 use kulyrax_core::replay::{ReplayContext, events_from_path};
 use kulyrax_core::runtime::config::{
-    AdapterConfig, KulyraxConfig, RoutingConfig, SqliteAdapterConfig, SqliteConfig,
+    AdapterConfig, KulyraxConfig, SqliteAdapterConfig, SqliteConfig,
 };
 
 use rusqlite::Connection;
@@ -42,30 +42,24 @@ fn init_users_table(db_path: &std::path::Path) {
 /// `on_existing: replace` means later deliveries overwrite the full row.
 fn create_then_update_events() -> Vec<Event> {
     vec![
-        Event {
-            event_id: "e1".to_string(),
-            event_type: "UserUpdated".to_string(),
-            payload: r#"{"id":"u1","name":"Alice"}"#.to_string(),
-            metadata: HashMap::new(),
-            version: 1,
-            sequence: 1,
-        },
-        Event {
-            event_id: "e2".to_string(),
-            event_type: "UserUpdated".to_string(),
-            payload: r#"{"id":"u1","name":"Alice R1"}"#.to_string(),
-            metadata: HashMap::new(),
-            version: 1,
-            sequence: 2,
-        },
-        Event {
-            event_id: "e3".to_string(),
-            event_type: "UserUpdated".to_string(),
-            payload: r#"{"id":"u1","name":"Alice R2"}"#.to_string(),
-            metadata: HashMap::new(),
-            version: 1,
-            sequence: 3,
-        },
+        Event::new(
+            "e1".to_string(),
+            "UserUpdated".to_string(),
+            1,
+            r#"{"id":"u1","name":"Alice"}"#.to_string(),
+        ),
+        Event::new(
+            "e2".to_string(),
+            "UserUpdated".to_string(),
+            2,
+            r#"{"id":"u1","name":"Alice R1"}"#.to_string(),
+        ),
+        Event::new(
+            "e3".to_string(),
+            "UserUpdated".to_string(),
+            3,
+            r#"{"id":"u1","name":"Alice R2"}"#.to_string(),
+        ),
     ]
 }
 
@@ -110,12 +104,9 @@ fn replay_and_real_time_dispatch_agree_on_final_state() {
     let mut routing_rules = HashMap::new();
     routing_rules.insert("UserUpdated".to_string(), vec!["sql-primary".to_string()]);
 
-    let replay_config = KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "routing.yaml".into(),
-        },
-        adapters: vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
+    let replay_config = KulyraxConfig::new(
+        "routing.yaml",
+        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
             id: "sql-primary".into(),
             priority: 10,
             config: SqliteConfig {
@@ -127,10 +118,7 @@ fn replay_and_real_time_dispatch_agree_on_final_state() {
             ]),
             depends_on: vec![],
         })],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    };
+    );
     replay_config.validate().unwrap();
 
     let mut ctx = ReplayContext::new(
@@ -157,12 +145,9 @@ fn replay_and_real_time_dispatch_agree_on_final_state() {
     let live_db = tmp.path().join("live.db");
     init_users_table(&live_db);
 
-    let live_config = KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "routing.yaml".into(),
-        },
-        adapters: vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
+    let live_config = KulyraxConfig::new(
+        "routing.yaml",
+        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
             id: "sql-primary".into(),
             priority: 10,
             config: SqliteConfig {
@@ -174,10 +159,7 @@ fn replay_and_real_time_dispatch_agree_on_final_state() {
             ]),
             depends_on: vec![],
         })],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    };
+    );
     live_config.validate().unwrap();
 
     let routing_rules: HashMap<String, Vec<String>> =

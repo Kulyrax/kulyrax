@@ -171,9 +171,11 @@ impl EventSource for Offsets {
         }
         Ok([8u64, 9, 10]
             .into_iter()
-            .map(|i| kulyrax_core::SourcedEvent {
-                event: user_event(1, &format!("o{i}"), "x"),
-                position: SourcePosition(i.to_string()),
+            .map(|i| {
+                kulyrax_core::SourcedEvent::new(
+                    user_event(1, &format!("o{i}"), "x"),
+                    SourcePosition(i.to_string()),
+                )
             })
             .collect())
     }

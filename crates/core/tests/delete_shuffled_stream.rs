@@ -59,36 +59,30 @@ fn events() -> HashMap<u64, Event> {
     [
         (
             1,
-            Event {
-                event_id: "e1".to_string(),
-                event_type: "UserUpdated".to_string(),
-                payload: r#"{"id":"u1","state":"s1"}"#.to_string(),
-                metadata: HashMap::new(),
-                version: 1,
-                sequence: 1,
-            },
+            Event::new(
+                "e1".to_string(),
+                "UserUpdated".to_string(),
+                1,
+                r#"{"id":"u1","state":"s1"}"#.to_string(),
+            ),
         ),
         (
             2,
-            Event {
-                event_id: "e2".to_string(),
-                event_type: "UserUpdated".to_string(),
-                payload: r#"{"id":"u1","state":"s2"}"#.to_string(),
-                metadata: HashMap::new(),
-                version: 1,
-                sequence: 2,
-            },
+            Event::new(
+                "e2".to_string(),
+                "UserUpdated".to_string(),
+                2,
+                r#"{"id":"u1","state":"s2"}"#.to_string(),
+            ),
         ),
         (
             3,
-            Event {
-                event_id: "e3".to_string(),
-                event_type: "UserDeleted".to_string(),
-                payload: r#"{"id":"u1"}"#.to_string(),
-                metadata: HashMap::new(),
-                version: 1,
-                sequence: 3,
-            },
+            Event::new(
+                "e3".to_string(),
+                "UserDeleted".to_string(),
+                3,
+                r#"{"id":"u1"}"#.to_string(),
+            ),
         ),
     ]
     .into_iter()

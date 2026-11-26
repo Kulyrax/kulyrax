@@ -9,19 +9,15 @@ use kulyrax_core::adapter::keyvalue::mapping::KvMapping;
 use kulyrax_core::adapter::sql::mapping::SqlMapping;
 use kulyrax_core::runtime::config::{
     AdapterCapability, AdapterConfig, KeyValueAdapterConfig, KeyValueConfig, KulyraxConfig,
-    RoutingConfig,
 };
 use kulyrax_core::validate_projection_config;
 
 use std::collections::HashMap;
 
 fn config_with_kv_capabilities(capabilities: Option<Vec<AdapterCapability>>) -> KulyraxConfig {
-    KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "r.json".into(),
-        },
-        adapters: vec![AdapterConfig::KeyValue(KeyValueAdapterConfig {
+    KulyraxConfig::new(
+        "r.json",
+        vec![AdapterConfig::KeyValue(KeyValueAdapterConfig {
             id: "kv-cache".into(),
             priority: 10,
             config: KeyValueConfig {
@@ -30,10 +26,7 @@ fn config_with_kv_capabilities(capabilities: Option<Vec<AdapterCapability>>) -> 
             capabilities,
             depends_on: vec![],
         })],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    }
+    )
 }
 
 fn delete_kv_mapping() -> KvMapping {

@@ -7,7 +7,7 @@ use kulyrax_core::event::Event;
 use kulyrax_core::execute_event_with_upcasters;
 use kulyrax_core::replay::{ReplayContext, events_from_path};
 use kulyrax_core::runtime::config::{
-    AdapterConfig, KulyraxConfig, RoutingConfig, SqliteAdapterConfig, SqliteConfig,
+    AdapterConfig, KulyraxConfig, SqliteAdapterConfig, SqliteConfig,
 };
 use kulyrax_core::upcast::{Upcaster, UpcasterRegistry};
 
@@ -105,30 +105,26 @@ fn init_users_table(db_path: &std::path::Path) {
 /// - v3 already has both fields; needs none.
 fn mixed_version_events() -> Vec<Event> {
     vec![
-        Event {
-            event_id: "e1".to_string(),
-            event_type: "UserCreated".to_string(),
-            payload: r#"{"id":"u1"}"#.to_string(),
-            metadata: HashMap::new(),
-            version: 1,
-            sequence: 1,
-        },
-        Event {
-            event_id: "e2".to_string(),
-            event_type: "UserCreated".to_string(),
-            payload: r#"{"id":"u2","email":"u2@x.com"}"#.to_string(),
-            metadata: HashMap::new(),
-            version: 2,
-            sequence: 1,
-        },
-        Event {
-            event_id: "e3".to_string(),
-            event_type: "UserCreated".to_string(),
-            payload: r#"{"id":"u3","email":"u3@x.com","tier":"gold"}"#.to_string(),
-            metadata: HashMap::new(),
-            version: 3,
-            sequence: 1,
-        },
+        Event::new(
+            "e1".to_string(),
+            "UserCreated".to_string(),
+            1,
+            r#"{"id":"u1"}"#.to_string(),
+        ),
+        Event::new(
+            "e2".to_string(),
+            "UserCreated".to_string(),
+            1,
+            r#"{"id":"u2","email":"u2@x.com"}"#.to_string(),
+        )
+        .with_version(2),
+        Event::new(
+            "e3".to_string(),
+            "UserCreated".to_string(),
+            1,
+            r#"{"id":"u3","email":"u3@x.com","tier":"gold"}"#.to_string(),
+        )
+        .with_version(3),
     ]
 }
 
@@ -188,12 +184,9 @@ fn replay_and_real_time_dispatch_produce_identical_state_for_mixed_versions() {
     let mut routing_rules = HashMap::new();
     routing_rules.insert("UserCreated".to_string(), vec!["sql-primary".to_string()]);
 
-    let replay_config = KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "routing.yaml".into(),
-        },
-        adapters: vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
+    let replay_config = KulyraxConfig::new(
+        "routing.yaml",
+        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
             id: "sql-primary".into(),
             priority: 10,
             config: SqliteConfig {
@@ -202,10 +195,7 @@ fn replay_and_real_time_dispatch_produce_identical_state_for_mixed_versions() {
             capabilities: None,
             depends_on: vec![],
         })],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    };
+    );
     replay_config.validate().unwrap();
 
     let mut ctx = ReplayContext::new_with_upcasters(
@@ -237,12 +227,9 @@ fn replay_and_real_time_dispatch_produce_identical_state_for_mixed_versions() {
     let live_db = tmp.path().join("live.db");
     init_users_table(&live_db);
 
-    let live_config = KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "routing.yaml".into(),
-        },
-        adapters: vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
+    let live_config = KulyraxConfig::new(
+        "routing.yaml",
+        vec![AdapterConfig::Sqlite(SqliteAdapterConfig {
             id: "sql-primary".into(),
             priority: 10,
             config: SqliteConfig {
@@ -251,10 +238,7 @@ fn replay_and_real_time_dispatch_produce_identical_state_for_mixed_versions() {
             capabilities: None,
             depends_on: vec![],
         })],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    };
+    );
     live_config.validate().unwrap();
 
     let shared_upcasters = Arc::new(registry());

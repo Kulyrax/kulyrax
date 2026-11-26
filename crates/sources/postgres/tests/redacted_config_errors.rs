@@ -36,10 +36,7 @@ fn the_connect_error_hides_the_secrets() {
         state_dir: Some("state".into()),
         raw,
     };
-    let ctx = SourceBuildContext {
-        base_dir: dir.path().to_path_buf(),
-        inspect: false,
-    };
+    let ctx = SourceBuildContext::new(dir.path().to_path_buf(), false);
     let err = factory(&entry, &ctx)
         .err()
         .expect("an unparseable url is refused");

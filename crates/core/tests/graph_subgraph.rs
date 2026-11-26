@@ -12,7 +12,7 @@ use kulyrax_core::adapter::{AdapterOutcome, SkipReason, StorageAdapter};
 use kulyrax_core::event::Event;
 use kulyrax_core::runtime::config::{
     AdapterCapability, AdapterConfig, GraphAdapterConfig, GraphConfig, KulyraxConfig,
-    MigrationPolicy, RoutingConfig,
+    MigrationPolicy,
 };
 use kulyrax_core::upcast::UpcasterRegistry;
 use kulyrax_core::validate_projection_config;
@@ -45,10 +45,11 @@ records:
 ";
 
 fn placed(seq: u64, order: &str, customer: &str) -> Event {
-    Event {
-        event_id: format!("evt-{order}-{seq}"),
-        event_type: "OrderPlaced".into(),
-        payload: serde_json::json!({
+    Event::new(
+        format!("evt-{order}-{seq}"),
+        "OrderPlaced",
+        seq,
+        serde_json::json!({
             "order_id": order,
             "customer_id": customer,
             "customer": format!("{customer} name"),
@@ -56,10 +57,7 @@ fn placed(seq: u64, order: &str, customer: &str) -> Event {
             "at": format!("t{seq}"),
         })
         .to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: seq,
-    }
+    )
 }
 
 fn mapping() -> GraphMapping {
@@ -207,12 +205,9 @@ fn records_take_event_and_version_from_the_subgraph() {
 }
 
 fn config(capabilities: Vec<AdapterCapability>) -> KulyraxConfig {
-    KulyraxConfig {
-        version: 1,
-        routing: RoutingConfig {
-            file: "r.json".into(),
-        },
-        adapters: vec![AdapterConfig::Graph(GraphAdapterConfig {
+    KulyraxConfig::new(
+        "r.json",
+        vec![AdapterConfig::Graph(GraphAdapterConfig {
             id: "g".into(),
             priority: 10,
             config: GraphConfig {
@@ -221,10 +216,7 @@ fn config(capabilities: Vec<AdapterCapability>) -> KulyraxConfig {
             capabilities: Some(capabilities),
             depends_on: vec![],
         })],
-        failure_policy: Default::default(),
-        migration_policy: Default::default(),
-        sources: Vec::new(),
-    }
+    )
 }
 
 fn validate(config: &KulyraxConfig, mapping: GraphMapping) -> Result<(), String> {

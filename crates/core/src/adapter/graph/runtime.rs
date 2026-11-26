@@ -8,6 +8,7 @@ use crate::upcast::UpcasterRegistry;
 
 /// Graph projection plus the version metadata used to produce it (Phase 10.3
 /// concept, reused as-is).
+#[non_exhaustive]
 pub struct GraphProjection {
     /// The single node or edge this event projects.
     pub record: ResolvedRecord,

@@ -8,6 +8,7 @@ use crate::upcast::UpcasterRegistry;
 
 /// Key-value projection plus the version metadata used to produce it (Phase
 /// 10.3 concept, reused as-is).
+#[non_exhaustive]
 pub struct KvProjection {
     pub value: serde_json::Value,
     pub source_version: u32,

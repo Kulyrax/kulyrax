@@ -93,8 +93,8 @@ A **position** is an opaque resume token. One source makes it, for itself: a fil
   Positions of different sources, or of different gRPC streams, are never compared. Text order is not delivery order (`"9"` sorts after `"10"`).
 - **A batch is committed at its last event in delivery order.** Committing it means every event the source delivered up to and including that event is resolved: projected, skipped, or dead-lettered. After a restart the source resumes after it. It delivers those events again only if Kulyrax crashed before the commit.
 - **What a gRPC producer sends.** Any token it can resume from. Kulyrax does not require it to increase, or to compare as text. Several events may share one. Each stream's `Ack.position` is the last committed position that stream sent, in its own send order.
-- **The position must not be empty.** A stream that sends an empty position gets empty positions back, and has nothing to resume from. In 0.12.x Kulyrax accepts it and logs a warning once per stream. **From 1.0 the stream is refused with `InvalidArgument`.**
-- **`SourcePosition` has no order.** In 0.12.x the Rust type still derives `PartialOrd`/`Ord` (text order, not delivery order). Both are removed in 1.0; `Eq` stays.
+- **The position must not be empty.** An event with an empty position ends its stream with `InvalidArgument`: its acks would have nothing to resume from. The events the stream sent before it keep their acks. (0.12.x accepted it and logged a warning once per stream.) Build an envelope from an `Event` with `EventEnvelope::from_event(&event, position)`.
+- **`SourcePosition` has no order.** It derives `Eq` and `Hash` only. (0.12.x derived `PartialOrd`/`Ord`, which was text order, not delivery order.)
 
 **If violated.** A custom `EventSource` whose batch's last event is not its furthest position is committed at the wrong place. It resumes too early (redelivery, absorbed by the guards) or too late (events skipped).
 

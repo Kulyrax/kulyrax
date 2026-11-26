@@ -17,6 +17,7 @@ use serde::Serialize;
 /// contains `Adapter` and `Batch`, which contain `Read`, `Write` and `Commit`.
 /// `Schema` runs in `StorageAdapter::prepare`, before any dispatch.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub enum Stage {
     /// `EventSource::poll`: reading the source and parsing its events.
     SourceRead,

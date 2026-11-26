@@ -318,7 +318,9 @@ impl StorageAdapter for Neo4jAdapter {
             let name = match record {
                 GraphMapping::Node(n) => &n.label,
                 GraphMapping::Edge(e) => &e.edge_type,
-                GraphMapping::Subgraph(_) => continue,
+                // A subgraph's records are checked one by one; a record kind
+                // this version does not know names no label or edge type.
+                _ => continue,
             };
             if name.is_empty() || name.contains('`') {
                 bad.push(format!("{name:?}"));
@@ -391,17 +393,19 @@ impl StorageAdapter for Neo4jAdapter {
                 ..
             }) => {
                 return match self.migration_policy {
-                    MigrationPolicy::Strict => AdapterResult::unsupported_version(
-                        self.id.clone(),
-                        StorageKind::Graph,
-                        reason,
-                        from_version,
-                        to_version,
-                    ),
                     MigrationPolicy::IgnoreUnmatched => AdapterResult::skipped_versioned(
                         self.id.clone(),
                         StorageKind::Graph,
                         SkipReason::UnsupportedVersion,
+                        from_version,
+                        to_version,
+                    ),
+                    // `Strict`, and any policy this adapter does not know
+                    // (`MigrationPolicy` is `#[non_exhaustive]`): refuse.
+                    _ => AdapterResult::unsupported_version(
+                        self.id.clone(),
+                        StorageKind::Graph,
+                        reason,
                         from_version,
                         to_version,
                     ),
@@ -457,6 +461,11 @@ impl StorageAdapter for Neo4jAdapter {
                 source_version,
                 projected_version,
             ),
+            // `GraphOutcome` is `#[non_exhaustive]`: an outcome this adapter
+            // does not know is a failure, never a silent success.
+            Ok(other) => self.failure(AdapterError::WriteFailed(format!(
+                "neo4j: unknown graph outcome {other:?}"
+            ))),
             Err(GraphError::WriteConflict) => self.failure(AdapterError::WriteFailed(format!(
                 "neo4j write conflict: exceeded {MAX_ATTEMPTS} attempts against a contended entity"
             ))),
@@ -565,12 +574,7 @@ impl Neo4jBackend<'_> {
             } else {
                 guard.facets.insert(
                     facet,
-                    GraphFacetGuard {
-                        last_sequence: last_sequence as u64,
-                        last_event_id,
-                        deleted,
-                        permanent,
-                    },
+                    GraphFacetGuard::new(last_sequence as u64, last_event_id, deleted, permanent),
                 );
             }
         }
@@ -896,11 +900,11 @@ mod tests {
             capabilities: None,
             depends_on: Vec::new(),
         };
-        let ctx = AdapterBuildContext {
-            mappings: Default::default(),
-            upcasters: Arc::new(UpcasterRegistry::new()),
-            migration_policy: MigrationPolicy::default(),
-        };
+        let ctx = AdapterBuildContext::new(
+            Default::default(),
+            Arc::new(UpcasterRegistry::new()),
+            MigrationPolicy::default(),
+        );
         factory(&entry, &ctx)
             .err()
             .map(|e| e.to_string())

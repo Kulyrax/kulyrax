@@ -65,9 +65,10 @@ fn run_loop_projects_through_an_adapter_without_prepare() {
             seen: Arc::clone(&seen),
         })],
         vec![src],
-        &SourceRunOptions {
-            mode: RunMode::Once,
-            ..SourceRunOptions::default()
+        &{
+            let mut o = SourceRunOptions::default();
+            o.mode = RunMode::Once;
+            o
         },
         &AtomicBool::new(false),
     )

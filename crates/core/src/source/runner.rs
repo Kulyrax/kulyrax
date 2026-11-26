@@ -41,6 +41,7 @@ pub const DEFAULT_BATCH_DELAY: Duration = Duration::from_millis(100);
 
 /// Whether to drain every source once and exit, or keep polling.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub enum RunMode {
     /// Drain every source to its current end, commit, return. Subsumes `replay`.
     Once,
@@ -49,6 +50,7 @@ pub enum RunMode {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SourceRunOptions {
     pub mode: RunMode,
     /// Max events per source per poll: one batch, committed in one
@@ -82,6 +84,7 @@ impl Default for SourceRunOptions {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum StoppedReason {
     /// Every source returned an empty poll (`RunMode::Once`, or a graceful
     /// shutdown while caught up).
@@ -93,6 +96,7 @@ pub enum StoppedReason {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct BatchSummary {
     pub source_id: String,
     /// The position of the batch's first event, in delivery order.
@@ -117,6 +121,7 @@ pub struct BatchSummary {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct SourceRunReport {
     pub batches: Vec<BatchSummary>,
     pub events_processed: u64,

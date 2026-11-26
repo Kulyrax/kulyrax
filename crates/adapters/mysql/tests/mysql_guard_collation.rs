@@ -91,14 +91,12 @@ fn prepare_makes_old_case_insensitive_guard_keys_binary() -> R {
 
     // `a` is its own entity now: an event at sequence 1 is applied, where
     // the old table matched `A`'s lane at 7 and skipped it.
-    let event = Event {
-        event_id: "evt-a-1".into(),
-        event_type: "Up".into(),
-        payload: serde_json::json!({ "id": "a", "name": "lower" }).to_string(),
-        metadata: HashMap::new(),
-        version: 1,
-        sequence: 1,
-    };
+    let event = Event::new(
+        "evt-a-1",
+        "Up",
+        1,
+        serde_json::json!({ "id": "a", "name": "lower" }).to_string(),
+    );
     let r = adapter.handle(&event);
     assert!(
         matches!(r.outcome, AdapterOutcome::Created),
