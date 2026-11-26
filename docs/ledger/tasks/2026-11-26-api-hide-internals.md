@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # Hide internals; one canonical path per type (step 4, D2)
@@ -24,7 +24,7 @@ Decision: [2026-11-26-canonical-paths](../decisions/2026-11-26-canonical-paths.m
 - [x] Dead code exposed by `pub(crate)` removed, or marked with the reason.
 - [x] Docs point at stable paths (the embedded example's README now uses
   `pipeline::load_project`).
-- [ ] Four gates green; every Docker suite green; PR merged.
+- [x] Four gates green; every Docker suite green; PR merged: #29, `989261d` (CI 16/16).
 - [x] Re-count of undocumented public items after D2, and a new D8 estimate (the
   owner's request for the tranche 1 report).
 

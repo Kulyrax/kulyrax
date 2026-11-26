@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # `#[non_exhaustive]` and constructors (step 4, D1), plus R3's carry-overs
@@ -34,7 +34,7 @@ Decision: [2026-11-26-non-exhaustive-scope](../decisions/2026-11-26-non-exhausti
   options and contexts). The embedded example runs.
 - [x] The R3 items: empty gRPC positions refused; `SourcePosition` unordered
   and `Hash`; `EventEnvelope` built from an event carries its position.
-- [ ] Four gates green; every Docker suite green; PR merged.
+- [x] Four gates green; every Docker suite green; PR merged: #28, `47f2687` (CI 16/16).
 
 ## Verification
 
