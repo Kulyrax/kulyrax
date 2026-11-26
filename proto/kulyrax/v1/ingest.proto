@@ -42,7 +42,7 @@ message EventEnvelope {
   // events share the same position stream; each still needs its own
   // `sequence` above. See docs/concepts.md. Required: an event with an empty
   // position ends its stream with INVALID_ARGUMENT (producer-contract.md §9).
-  string position = 9;
+  string position = 6;
   // Optional. Recorded on the guard row and in the execution report / DLQ
   // filename. When empty Kulyrax derives one from `position` (or
   // `event_type + sequence`) — it is not load-bearing for gating.

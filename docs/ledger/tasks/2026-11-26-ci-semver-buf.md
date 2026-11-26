@@ -24,7 +24,7 @@ breaking` guards the wire while D3 reworks the gRPC types.
   '.git#tag=v0.12.2,subdir=proto'`.
 - [x] Job `API changes since v0.12.2 (report)`: `cargo semver-checks --workspace
   --baseline-rev v0.12.2`. It never fails, and uploads `semver-report.txt`.
-- [ ] Both run on the PR. The buf job passes on the current proto and fails on a
+- [x] Both run on the PR. The buf job passes on the current proto and fails on a
   deliberately breaking commit, which is then reverted.
 - [ ] The buf job is made required in the ruleset (the owner's setting).
 - [ ] PR merged.
@@ -45,3 +45,6 @@ breaking` guards the wire while D3 reworks the gRPC types.
 
 | Check | Command | Result |
 |---|---|---|
+| CI on a60e909 (recorded afterwards) | PR #30 checks | 18/18 pass; `proto wire compatible with v0.12.2` passes on the current proto; `API changes since v0.12.2 (report)` passes and uploads `semver-report` with the D1/D2 breaking changes per crate |
+| buf negative test | 65cbe73 changes `EventEnvelope.position` from field 6 to 9; CI | `proto wire compatible with v0.12.2` **fails** (exit 100): `ingest.proto:24:1: Previously present field "6" with name "position" on message "EventEnvelope" was deleted.` Expected failure |
+| Revert | this commit restores field 6; CI | see the PR checks on this commit |
