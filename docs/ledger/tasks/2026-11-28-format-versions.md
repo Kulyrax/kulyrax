@@ -1,5 +1,5 @@
 ---
-status: blocked
+status: in-progress
 ---
 
 # A format version in every persisted format (step 5, E1 + E2)
@@ -15,23 +15,29 @@ required.
 E2: tests that a future version is refused, that each format round-trips, and
 that each migrates from 0.12.1.
 
-Blocked on the owner's choice of design: decision
-[2026-11-28-format-versions](../decisions/2026-11-28-format-versions.md)
-(proposed).
-
 ## Acceptance criteria
 
 - [x] Inventory of every persisted format, read in source (decision record,
   Context).
-- [ ] The owner approves the design (decision record).
+- [x] The owner approves the design: approved 2026-11-28 with five changes,
+  quoted in the decision record.
+- [x] **Change 1:** a batch log with a foreign magic is refused (exit 4),
+  never deleted, whatever its position. Its own commit, with a unit test and a
+  CLI test. Docker suites and the workspace run follow at the PR's gates.
 - [ ] Each format in the inventory records its version as decided.
 - [ ] A newer version is refused before anything is read, replayed or written.
   The error names the file or store and both versions, and the CLI exits 4
   (a CLI test).
 - [ ] An unversioned (0.12.x) file or store is read as format 1 and stamped.
-- [ ] The newest batch log with a newer magic is refused, not deleted.
-- [ ] The layout marker's content is read; new stores and migrated stores write
-  the same version.
+- [ ] **Change 5:** the layout marker's content is read. A store holding `1`
+  and a store holding `2` are each tested; new and migrated stores write `2`.
+- [ ] **Change 2:** the SQL `kulyrax_format` table is in the guard table's
+  schema; tested with a non-default Postgres schema.
+- [ ] **Change 3:** every marker is created insert-if-absent, atomically per
+  backend. Concurrent first starts leave one marker with one version (a test
+  per backend).
+- [ ] **Change 4:** a marker that cannot be created refuses the start (exit 4),
+  naming the store and the grant. The grants per backend are in the user docs.
 - [ ] E2 tests: future version refused, round-trip, and migration from 0.12.1
   (the `upgrade from 0.12.1` CI job), for each format and backend.
 - [ ] `stability.md`: the formats, their versions, and what is out of scope.
@@ -49,6 +55,21 @@ Blocked on the owner's choice of design: decision
 - Assumed, to be verified by the upgrade job: no persisted shape changed
   between 0.12.1 and main except the rename step 2 already migrates. R4
   recorded none for Phase R; Phase D changed APIs, not serde shapes.
+- Budget: about 2 days, accepted. Past 3 days: stop and report.
+
+## Decisions
+
+- [2026-11-28-format-versions](../decisions/2026-11-28-format-versions.md):
+  one marker per store, a field in single-file formats (accepted, with the
+  owner's five changes).
+- The typed path, chosen in the code:
+  - `kulyrax_core::format::FormatError` names the store and the problem
+    (newer / unrecognised / marker not created).
+  - `AdapterError::Format` carries it.
+  - `PrepareFailure::refused` marks it.
+  - The CLI maps a refused prepare failure to 4.
+  - A format refusal during `handle` reports as `write_failed` in the JSON
+    report, so the report's schema does not change.
 
 ## Verification
 
@@ -61,16 +82,23 @@ Blocked on the owner's choice of design: decision
 | Batch log with unknown magic | `file_store.rs:159-163`, `752-760` | `decode_log` returns `None`; the newest such log is deleted as torn |
 | Replay before layout check | `file_store.rs:938-947` | `recover` runs before `check_layout` |
 | Exit 4 reserved | decision `2026-11-26-exit-codes`, line 77 | "Step 5 adds the newer-format refusal: map it to 4 here, with a CLI test." |
+| Logs are renamed only after fsync | `file_store.rs` `write_log` | temp file, `sync_all`, rename, directory fsync: a complete foreign magic cannot be crash damage |
+| Change 1, unit tests, first run | `cargo test -p kulyrax-core --lib -- file_store format` | 8 pass, 1 fail: `foreign_magic_is_refused_not_torn` listed `KLX` as foreign, but it is a prefix of the magic, so the torn-log rule rightly applies (a test bug). Replaced with `KLY`; then 9 pass |
+| Change 1, CLI test | `cargo test -p kulyrax-cli --test exit_codes` | 6 pass, including `exit_4_when_a_batch_log_is_not_this_versions` (`KLXWAL02` and `NOTALOG!`: exit 4, message, log kept byte for byte) |
+| Change 1, the test catches the bug | the same CLI test with `file_store.rs` from `HEAD` (before the fix), then restored | fails at `exit_codes.rs:248`: no refusal; the log was replayed as torn |
+| clippy | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| fmt | `cargo fmt --check` | first run: 2 diffs in the new tests; `cargo fmt` applied, then clean |
+| Change 1, core and CLI tests | `cargo test -p kulyrax-core -p kulyrax-cli` (log summed with awk) | 402 pass, 0 fail, 105 test binaries, exit 0. The first run's summary was cut by a `head -20` in my pipeline, so it was rerun; only the rerun counts |
+| `FormatError` in the D6 error test | `cargo test -p kulyrax-core --test error_traits` | 7 pass: `Send + Sync + 'static`, and `AdapterError::Format`'s `source()` is the `FormatError` |
 
 ## Risks and open questions
 
-- The marker objects in networked backends (the decision lists them) are the
-  owner's call: they add one create right per backend.
 - Estimate: about 2 days.
   - Core: typed error, checkpoint, outbox state, file stores, exit 4 (~0.75 day).
   - Six networked backends plus SQLite, with tests (~1 day).
   - Upgrade-job cases and docs (~0.25 day).
+- Elasticsearch has no `prepare` today. Its per-index marker check needs one.
 
 ## Outcome
 
-Pending: blocked on the design approval.
+In progress.

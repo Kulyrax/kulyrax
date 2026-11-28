@@ -249,6 +249,7 @@ fn main() {
 /// The exit codes, frozen at 1.0 (`docs/stability.md` §3). clap exits 2 on
 /// bad arguments by itself.
 mod exit {
+    use kulyrax_core::adapter::PrepareFailure;
     use kulyrax_core::pipeline::PipelineError;
     use kulyrax_core::rebuild::RebuildError;
     use kulyrax_core::replay::ReplayLoadError;
@@ -264,7 +265,7 @@ mod exit {
     /// Events failed or were dead-lettered.
     pub const EVENTS_FAILED: i32 = 3;
     /// Refused by a safety check: a held lock, a refused rebuild, a project
-    /// `init` would overwrite.
+    /// `init` would overwrite, an on-disk format this version does not read.
     pub const REFUSED: i32 = 4;
 
     /// The code for an error a command returned. Each error enum is
@@ -298,6 +299,7 @@ mod exit {
             | PipelineError::AdapterBuild(_)
             | PipelineError::Replay(ReplayLoadError::Json { .. }) => INVALID,
             PipelineError::Source(e) => source(e),
+            PipelineError::AdapterPrepare(failures) => prepare(failures),
             PipelineError::Rebuild(RebuildError::Invalid(_)) => INVALID,
             PipelineError::Rebuild(RebuildError::Refused(_)) => REFUSED,
             PipelineError::Rebuild(RebuildError::EventsFailed(_)) => EVENTS_FAILED,
@@ -309,7 +311,18 @@ mod exit {
         match e {
             SourceError::Locked(_) => REFUSED,
             SourceError::InvalidConfig(_) => INVALID,
+            SourceError::Prepare(failures) => prepare(failures),
             _ => INTERNAL,
+        }
+    }
+
+    /// A refused on-disk format (newer, unknown, or no marker possible) is a
+    /// safety refusal; any other prepare failure is internal.
+    fn prepare(failures: &[PrepareFailure]) -> i32 {
+        if failures.iter().any(|f| f.refused) {
+            REFUSED
+        } else {
+            INTERNAL
         }
     }
 }

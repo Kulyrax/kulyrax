@@ -10,6 +10,7 @@ use kulyrax_core::adapter::document::adapter::DocumentError;
 use kulyrax_core::adapter::graph::adapter::GraphError;
 use kulyrax_core::adapter::keyvalue::adapter::KvError;
 use kulyrax_core::adapter::sql::adapter::SqlError;
+use kulyrax_core::format::{FormatError, FormatProblem};
 use kulyrax_core::pipeline::{InitError, LoadError, PipelineError, load_config, load_mappings};
 use kulyrax_core::rebuild::RebuildError;
 use kulyrax_core::replay::ReplayLoadError;
@@ -40,6 +41,21 @@ fn every_public_error_is_send_sync_static() {
     is_error::<UpcastError>();
     is_error::<YamlError>();
     is_error::<RebuildError>();
+    is_error::<FormatError>();
+}
+
+#[test]
+fn a_format_refusal_chains_to_the_format_error() {
+    let refused = AdapterError::from(FormatError::new(
+        "store",
+        FormatProblem::Newer {
+            found: 3,
+            supported: 2,
+        },
+    ));
+    let cause = refused.source().expect("a source");
+    assert!(cause.downcast_ref::<FormatError>().is_some(), "{cause:?}");
+    assert!(refused.to_string().contains("format 3"), "{refused}");
 }
 
 #[test]

@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Format versions: where each persisted format records its version (step 5, E1)
@@ -73,7 +73,53 @@ Not persisted state that Kulyrax reads back:
 
 ## Decision
 
-Proposed: **A.** The details for the owner:
+**A**, approved by the owner on 2026-11-28 with five changes. Their message,
+quoted:
+
+> E1 proposal: approved, with these changes (record them in the decision
+> record, quoting this message):
+> 1. Batch log with an unknown magic number: refused (exit 4), never deleted.
+>    This is a data-loss fix in its own commit, with a test.
+> 2. SQL format marker (kulyrax_format) lives in the same schema as the guard
+>    table; test with a non-default schema.
+> 3. Every marker is created insert-if-absent (atomic per backend); test
+>    concurrent first starts (as the rename tests did) — one marker, one
+>    version.
+> 4. If the marker can't be created (permissions), refuse to start, naming the
+>    store and the grant needed. Document the required grants per backend in
+>    the docs (README or CONTRIBUTING → user docs).
+> 5. Define what existing layout-marker values 1 and 2 mean in the new scheme;
+>    test a store with each.
+>
+> Estimate accepted (~2 days, over the 1-day E rule). Stop and report if it
+> grows past 3.
+
+How the changes are applied:
+- **Change 1, the batch log.**
+  - A `.log` reaches its name only by a rename after fsync (`write_log`), so a
+    foreign magic cannot be crash damage. `KLXWAL` with a version above `01`
+    is refused as a newer format; any other complete 8-byte magic is refused
+    as not a Kulyrax batch log. Both are refused whatever the log's position,
+    and both exit 4.
+  - A file too short to hold the magic, or one with the right magic but a
+    short or bad-checksum body, keeps today's rule: dropped if it is the
+    newest log, refused otherwise.
+- **Change 4, exit code.** A marker that cannot be created is a safety refusal
+  like a newer format: exit 4.
+- **Change 5, layout-marker values.**
+  - A file store's format version is the integer in
+    `.kulyrax/layout/<kind>` (one marker per adapter kind, as today).
+  - `2` is the current format: the `.kulyrax/` layout, written by every start
+    from 1.0.0-rc.1, and by step 2's migration since `f3af04b`.
+  - `1` under `.kulyrax/` was written only by unreleased builds between
+    `f3af04b` and this change, for stores created fresh (same layout and
+    files as `2`). It is read as `2` and rewritten to `2`.
+  - `1` under `.conduit/` (0.12.1) is unchanged: step 2's migration moves it
+    and writes `2`.
+  - Above `2` is refused (exit 4); content that is not an integer is refused
+    as unrecognised (exit 4).
+
+The proposal as approved:
 
 1. **Numbering.** Every format starts at `1` = what 1.0.0-rc.1 writes. A store
    or file with no version is a 0.12.x (or dev-build) one: read as format 1 and

@@ -221,3 +221,35 @@ fn exit_4_when_a_safety_check_refuses() {
     let p = project("users", &[GOOD]);
     assert_code(kulyrax(p.path(), &["init", "."]), 4);
 }
+
+/// A file store whose batch log a newer Kulyrax wrote (magic `KLXWAL02`), or
+/// that is not a Kulyrax batch log at all: the start is refused and the log
+/// is kept. Before step 5 the newest such log was deleted as torn.
+#[test]
+fn exit_4_when_a_batch_log_is_not_this_versions() {
+    for (magic, says) in [
+        (&b"KLXWAL02"[..], "written by a newer Kulyrax"),
+        (
+            &b"NOTALOG!"[..],
+            "not in a format this version of Kulyrax knows",
+        ),
+    ] {
+        let p = project("users", &[GOOD]);
+        let config = std::fs::read_to_string(p.path().join("config.yaml")).expect("read");
+        let doc = "  - type: file\n    id: doc\n    priority: 20\n    config:\n      root: store\nsources:";
+        write(
+            p.path().join("config.yaml"),
+            &config.replacen("sources:", doc, 1),
+        );
+        let log = p.path().join("store/.kulyrax/wal/0000000000000001.log");
+        let mut bytes = magic.to_vec();
+        bytes.extend_from_slice(&[0; 12]);
+        std::fs::create_dir_all(log.parent().expect("parent")).expect("mkdir");
+        std::fs::write(&log, &bytes).expect("write the log");
+
+        let got = kulyrax(p.path(), RUN_ONCE);
+        assert!(got.1.contains(says), "{}", got.1);
+        assert_code(got, 4);
+        assert_eq!(std::fs::read(&log).expect("the log is kept"), bytes);
+    }
+}

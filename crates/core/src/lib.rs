@@ -25,6 +25,7 @@ pub mod dispatch;
 /// The [`event::Event`] envelope.
 pub mod event;
 pub mod execution;
+pub mod format;
 #[doc(hidden)]
 pub mod kulyrax_dir;
 pub mod pipeline;

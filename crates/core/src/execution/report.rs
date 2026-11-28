@@ -76,6 +76,9 @@ impl From<AdapterError> for AdapterFailure {
             AdapterError::UnsupportedVersion(msg) => {
                 AdapterFailure::UnsupportedVersion { message: msg }
             }
+            AdapterError::Format(e) => AdapterFailure::WriteFailed {
+                message: e.to_string(),
+            },
         }
     }
 }
@@ -88,6 +91,9 @@ impl From<&AdapterError> for AdapterFailure {
             },
             AdapterError::UnsupportedVersion(msg) => AdapterFailure::UnsupportedVersion {
                 message: msg.clone(),
+            },
+            AdapterError::Format(e) => AdapterFailure::WriteFailed {
+                message: e.to_string(),
             },
         }
     }

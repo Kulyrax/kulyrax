@@ -28,6 +28,7 @@ use std::time::{Duration, Instant};
 use crate::adapter::{AdapterError, file_names};
 use crate::crash::crash_point;
 use crate::execution::stages::{self, Stage, timed};
+use crate::format::{FormatError, FormatProblem};
 use crate::kulyrax_dir::{self, DIR, LAYOUT, LOCK, WAL};
 
 /// The content of a layout marker (`.kulyrax/layout/<kind>`): version 2 is the
@@ -38,7 +39,10 @@ pub(crate) const LAYOUT_VERSION: &[u8] = b"2
 /// Batch log layout: magic, body length (u64 LE), CRC-32 of the body (u32 LE),
 /// then the body: per entry, a tag byte (1 write, 0 remove), the path length
 /// (u32 LE) and path, and for a write the content length (u32 LE) and content.
+/// The magic's last two digits are the batch log's format version.
 const MAGIC: &[u8; 8] = b"KLXWAL01";
+const MAGIC_FAMILY: &[u8; 6] = b"KLXWAL";
+const LOG_FORMAT: u32 = 1;
 const HEADER_LEN: usize = 8 + 8 + 4;
 
 /// A sync point runs after this many batches or this long since the last one,
@@ -68,7 +72,10 @@ const IO_THREADS: usize = 8;
 const PARALLEL_MIN: usize = 64;
 
 fn io_err(e: io::Error) -> AdapterError {
-    AdapterError::WriteFailed(e.to_string())
+    match FormatError::from_io(&e) {
+        Some(format) => AdapterError::Format(format),
+        None => AdapterError::WriteFailed(e.to_string()),
+    }
 }
 
 fn other(msg: String) -> io::Error {
@@ -192,6 +199,44 @@ fn decode_log(bytes: &[u8]) -> Option<Pending> {
         pending.set(&path, content);
     }
     Some(pending)
+}
+
+/// Refuse a batch log whose magic is not this version's.
+///
+/// A `.log` gets its name only by a rename after its content was fsynced
+/// (`write_log`), so a complete magic that differs is never crash damage: it
+/// is a newer format, or not a Kulyrax batch log. Deleting it as torn would
+/// lose a batch whose checkpoint may already have moved past it. Only a file
+/// too short to hold the magic, holding a prefix of it, is left to
+/// [`decode_log`]'s torn-log rule.
+fn check_magic(bytes: &[u8]) -> Result<(), FormatProblem> {
+    let Some(magic) = bytes.get(..MAGIC.len()) else {
+        return if MAGIC.starts_with(bytes) {
+            Ok(())
+        } else {
+            Err(FormatProblem::Unrecognized(
+                "a batch log that does not start with a Kulyrax magic".to_string(),
+            ))
+        };
+    };
+    if magic == MAGIC {
+        return Ok(());
+    }
+    let version = magic
+        .strip_prefix(MAGIC_FAMILY.as_slice())
+        .and_then(|digits| std::str::from_utf8(digits).ok())
+        .filter(|digits| digits.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|digits| digits.parse::<u32>().ok());
+    match version {
+        Some(found) if found > LOG_FORMAT => Err(FormatProblem::Newer {
+            found,
+            supported: LOG_FORMAT,
+        }),
+        _ => Err(FormatProblem::Unrecognized(format!(
+            "batch log magic {:?}",
+            String::from_utf8_lossy(magic)
+        ))),
+    }
 }
 
 fn log_name(seq: u64) -> String {
@@ -749,7 +794,10 @@ pub(crate) fn replay_logs(
     let mut decoded = Vec::with_capacity(logs.len());
     let mut valid = Vec::with_capacity(logs.len());
     for (i, (_, path)) in logs.iter().enumerate() {
-        match decode_log(&fs::read(path)?) {
+        let bytes = fs::read(path)?;
+        check_magic(&bytes)
+            .map_err(|problem| FormatError::new(path.display().to_string(), problem).into_io())?;
+        match decode_log(&bytes) {
             Some(p) => {
                 decoded.push(p);
                 valid.push(path.clone());
@@ -1249,6 +1297,69 @@ mod tests {
         let mut longer = bytes;
         longer.push(0);
         assert!(decode_log(&longer).is_none());
+    }
+
+    #[test]
+    fn foreign_magic_is_refused_not_torn() {
+        let bytes = encode_log(&pending(&[("a/b.json", Some("hello"))]));
+        assert_eq!(check_magic(&bytes), Ok(()));
+        // Shorter than the magic and a prefix of it: the torn-log rule.
+        for n in 0..MAGIC.len() {
+            assert_eq!(check_magic(&bytes[..n]), Ok(()), "prefix of {n}");
+        }
+        assert_eq!(
+            check_magic(b"KLXWAL02 and the rest"),
+            Err(FormatProblem::Newer {
+                found: 2,
+                supported: 1
+            })
+        );
+        for foreign in [
+            &b"KLXWAL00...."[..],
+            b"KLXWALxy....",
+            b"\0\0\0\0\0\0\0\0....",
+            b"KLY",
+        ] {
+            assert!(
+                matches!(check_magic(foreign), Err(FormatProblem::Unrecognized(_))),
+                "{foreign:?}"
+            );
+        }
+    }
+
+    /// The newest log is the one the torn-log rule used to delete: with a
+    /// foreign magic it is now refused and left on disk, as is an older one.
+    #[test]
+    fn replay_keeps_a_log_with_a_foreign_magic() {
+        for newest in [true, false] {
+            let dir = tempfile::tempdir().expect("temp dir");
+            let wal = dir.path().join("wal");
+            fs::create_dir_all(&wal).expect("mkdir");
+            let good = encode_log(&pending(&[("a.json", Some("1"))]));
+            let (foreign_seq, good_seq) = if newest { (2, 1) } else { (1, 2) };
+            fs::write(wal.join(log_name(good_seq)), &good).expect("write");
+            let foreign = wal.join(log_name(foreign_seq));
+            fs::write(&foreign, b"KLXWAL09 from the future").expect("write");
+
+            let err = replay_logs(dir.path(), &wal, &mut HashSet::new())
+                .expect_err("a foreign log refuses the start");
+            let format = FormatError::from_io(&err).expect("a format error");
+            assert_eq!(
+                format.problem,
+                FormatProblem::Newer {
+                    found: 9,
+                    supported: 1
+                }
+            );
+            assert!(
+                format.store.ends_with(&log_name(foreign_seq)),
+                "{}",
+                format.store
+            );
+            assert!(foreign.exists(), "the foreign log is kept");
+            assert!(wal.join(log_name(good_seq)).exists(), "nothing is replayed");
+            assert!(!dir.path().join("a.json").exists(), "nothing is applied");
+        }
     }
 
     #[test]
