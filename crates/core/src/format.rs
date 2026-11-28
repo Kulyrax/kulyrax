@@ -99,8 +99,7 @@ impl fmt::Display for FormatError {
             FormatProblem::MarkerNotCreated { grant, cause } => write!(
                 f,
                 "{} has no format marker and Kulyrax could not create one ({cause}). \
-                 Grant the store's user {grant}, or create the marker once with a user \
-                 who has it",
+                 Grant the user Kulyrax connects as {grant}",
                 self.store
             ),
         }

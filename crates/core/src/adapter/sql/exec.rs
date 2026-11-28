@@ -117,6 +117,28 @@ impl SqlWrite {
 /// The guard table every SQL backend keeps its lanes in.
 pub const GUARD_TABLE: &str = "kulyrax_projection_state";
 
+/// The format-marker table (step 5), created beside [`GUARD_TABLE`] in the
+/// same schema or database: `(component text PRIMARY KEY, version integer)`.
+pub const FORMAT_TABLE: &str = "kulyrax_format";
+/// The [`FORMAT_TABLE`] row that versions the guard table.
+pub const GUARDS_COMPONENT: &str = "guards";
+/// The guard table's format version. A database with guard rows and no
+/// marker was written by 0.12.x and is format 1.
+pub const GUARDS_FORMAT: u32 = 1;
+
+/// Refuse a stored guard format this version does not read. `store` names
+/// the database (never a URL); `found` is the marker row's value as read.
+pub fn check_guards_format(store: &str, found: i64) -> Result<(), SqlError> {
+    let found = u32::try_from(found).map_err(|_| {
+        crate::format::FormatError::new(
+            store,
+            crate::format::FormatProblem::Unrecognized(format!("{FORMAT_TABLE} version {found}")),
+        )
+    })?;
+    crate::format::FormatError::check(store, found, GUARDS_FORMAT)?;
+    Ok(())
+}
+
 /// The guard row `kulyrax_projection_state` — one lane for `(table, entity_key, facet)`.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
@@ -176,6 +198,23 @@ pub struct GuardRow {
 /// around its own `handle()` — the pattern `KvBackend`'s Redis
 /// implementation and `GraphBackend`'s Neo4j implementation both use.
 pub trait SqlTxn: Sized {
+    /// Step 5's format marker, run by [`ensure_schema`] before
+    /// [`SqlTxn::ensure_guard_table`] (and so before any 0.12 migration):
+    /// 1. `CREATE TABLE IF NOT EXISTS` [`FORMAT_TABLE`], unqualified, so it is
+    ///    in the schema or database the guard table is in. (Postgres and
+    ///    MySQL check the create right even when the table exists; the guard
+    ///    table's own `CREATE TABLE IF NOT EXISTS` already needs it at every
+    ///    start, so the marker asks for no right the guard table does not);
+    /// 2. insert `(`[`GUARDS_COMPONENT`]`, `[`GUARDS_FORMAT`]`)` only if the
+    ///    row is absent, atomically (`ON CONFLICT DO NOTHING`, `INSERT
+    ///    IGNORE`, `INSERT OR IGNORE`): concurrent first starts leave one row;
+    /// 3. read the row back and pass it to [`check_guards_format`].
+    ///
+    /// A permission error in 1 or 2 is [`SqlError::Format`] with
+    /// [`crate::format::FormatProblem::MarkerNotCreated`], naming the store
+    /// and the grant it needs.
+    fn ensure_format_marker(&mut self) -> Result<(), SqlError>;
+
     /// `CREATE TABLE IF NOT EXISTS kulyrax_projection_state (…)` — Phase 11.2 /
     /// 13.2 / 15.2 shape, in the backend's own DDL. Only ever called through
     /// [`ensure_schema`], from the adapter's `StorageAdapter::prepare`, in a
@@ -471,6 +510,7 @@ pub fn check_identifiers(builder: &SqlRuntimeBuilder) -> Result<(), SqlError> {
 /// write and guard write would stop being atomic.
 pub fn ensure_schema<T: SqlTxn>(mut txn: T) -> Result<(), SqlError> {
     timed(Stage::Schema, || {
+        txn.ensure_format_marker()?;
         txn.ensure_guard_table()?;
         txn.commit()
     })

@@ -48,16 +48,78 @@ pub struct SqliteAdapter {
 /// could lose the last commits on power loss.
 fn open_connection(path: &str) -> rusqlite::Result<Connection> {
     let conn = Connection::open(path)?;
-    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.busy_timeout(BUSY_TIMEOUT)?;
+    set_wal(&conn)?;
     conn.pragma_update(None, "synchronous", "FULL")?;
-    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     // Room for the guard statements plus one write per mapped table.
     conn.set_prepared_statement_cache_capacity(64);
     Ok(conn)
 }
 
+/// How long a connection waits for another's lock.
+const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Switch to WAL, retrying while another connection holds the lock, for up
+/// to [`BUSY_TIMEOUT`]. The switch needs the database to itself and SQLite
+/// reports `database is locked` at once there, without the busy handler, so
+/// connections opening a new database together failed (observed: 8 threads,
+/// 2, 3 and 6 of 8 failed in three runs; with the database already in WAL,
+/// 0 of 10 runs failed).
+fn set_wal(conn: &Connection) -> rusqlite::Result<()> {
+    let deadline = std::time::Instant::now() + BUSY_TIMEOUT;
+    loop {
+        match conn.pragma_update(None, "journal_mode", "WAL") {
+            Err(e)
+                if e.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy)
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            result => return result,
+        }
+    }
+}
+
 fn poisoned() -> AdapterError {
     AdapterError::WriteFailed("SQLite connection lock poisoned by an earlier panic".to_string())
+}
+
+/// Opening writes (the WAL switch), so a database Kulyrax may not write fails
+/// here, before the format marker is reached. When it has no marker yet, that
+/// is the marker refusal of step 5 (exit 4, naming the right it needs); when
+/// it has one, it is an ordinary read-only error.
+fn open_err(path: &str, e: rusqlite::Error) -> SqlError {
+    let denied = matches!(
+        e.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::ReadOnly | rusqlite::ErrorCode::PermissionDenied)
+    );
+    if !denied || has_marker(path) != Some(false) {
+        return sql_err(e);
+    }
+    crate::format::FormatError::new(
+        format!("SQLite database {path}"),
+        crate::format::FormatProblem::MarkerNotCreated {
+            grant: "write access to the database file and its directory".to_string(),
+            cause: e.to_string(),
+        },
+    )
+    .into()
+}
+
+/// Whether the database already holds the guards' format marker, read
+/// without writing anything. `None` when that cannot be read (a read-only
+/// WAL database may not open read-only): then nothing is claimed about it.
+fn has_marker(path: &str) -> Option<bool> {
+    Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .and_then(|c| {
+            c.query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'kulyrax_format'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+        })
+        .ok()
+        .map(|n| n > 0)
 }
 
 impl SqliteAdapter {
@@ -148,16 +210,17 @@ impl StorageAdapter for SqliteAdapter {
             .prepare(|| {
                 exec::check_identifiers(&self.builder)?;
                 if guard.is_none() {
-                    *guard = Some(open_connection(&self.path).map_err(sql_err)?);
+                    *guard =
+                        Some(open_connection(&self.path).map_err(|e| open_err(&self.path, e))?);
                 }
                 let Some(conn) = guard.as_ref() else {
                     return Err(SqlError::ExecutionFailed(
                         "SQLite connection unavailable".to_string(),
                     ));
                 };
-                exec::ensure_schema(SqliteTxn::begin(conn)?)
+                exec::ensure_schema(SqliteTxn::begin_schema(conn)?)
             })
-            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+            .map_err(AdapterError::from)
     }
 
     /// `BEGIN` on the held connection, then every guard lane the batch will
@@ -328,7 +391,109 @@ fn guard_state(row: &rusqlite::Row<'_>, from: usize) -> rusqlite::Result<GuardSt
     })
 }
 
+impl<'a> SqliteTxn<'a> {
+    /// Names the database in errors: its file.
+    fn store_name(&self) -> String {
+        format!(
+            "SQLite database {}",
+            self.conn.path().unwrap_or("(in memory)")
+        )
+    }
+
+    /// `BEGIN IMMEDIATE`, for [`exec::ensure_schema`]: the write lock is
+    /// taken up front, waiting on the busy timeout. A deferred transaction
+    /// reads the schema first (`CREATE TABLE IF NOT EXISTS` does), and under
+    /// WAL a read-then-write fails at once with `database is locked` when
+    /// another connection committed in between: concurrent first starts did.
+    fn begin_schema(conn: &'a Connection) -> Result<Self, SqlError> {
+        conn.execute_batch("BEGIN IMMEDIATE")
+            .map_err(|e| refuse_unwritable(conn, e))?;
+        Ok(Self { conn, owns: true })
+    }
+}
+
+/// A write SQLite refused because Kulyrax may not write the database (its
+/// only right is write access to the file and its directory), judged by
+/// reading the marker on `conn`:
+/// - no marker: step 5's marker refusal, naming the right (exit 4);
+/// - a marker of a newer format: that refusal (exit 4);
+/// - otherwise, or when the marker cannot be read: an ordinary error.
+fn refuse_unwritable(conn: &Connection, e: rusqlite::Error) -> SqlError {
+    let denied = matches!(
+        e.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::ReadOnly | rusqlite::ErrorCode::PermissionDenied)
+    );
+    if !denied {
+        return sql_err(e);
+    }
+    let store = format!("SQLite database {}", conn.path().unwrap_or("(in memory)"));
+    let has_table = conn
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'kulyrax_format'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|n| n > 0);
+    match has_table {
+        Ok(false) => crate::format::FormatError::new(
+            store,
+            crate::format::FormatProblem::MarkerNotCreated {
+                grant: "write access to the database file and its directory".to_string(),
+                cause: e.to_string(),
+            },
+        )
+        .into(),
+        Ok(true) => {
+            let version = conn
+                .query_row(
+                    "SELECT version FROM kulyrax_format WHERE component = ?1",
+                    params![exec::GUARDS_COMPONENT],
+                    |r| r.get::<_, i64>(0),
+                )
+                .optional();
+            match version {
+                Ok(Some(found)) => match exec::check_guards_format(&store, found) {
+                    Err(refused) => refused,
+                    Ok(()) => sql_err(e),
+                },
+                _ => sql_err(e),
+            }
+        }
+        Err(_) => sql_err(e),
+    }
+}
+
 impl SqlTxn for SqliteTxn<'_> {
+    /// Runs in [`SqliteTxn::begin_schema`]'s `BEGIN IMMEDIATE` transaction,
+    /// so concurrent first starts take turns. SQLite has no create right
+    /// apart from write access, so no existence check comes first.
+    fn ensure_format_marker(&mut self) -> Result<(), SqlError> {
+        self.conn
+            .execute(
+                "CREATE TABLE IF NOT EXISTS kulyrax_format (
+                    component TEXT PRIMARY KEY,
+                    version INTEGER NOT NULL
+                )",
+                [],
+            )
+            .map_err(|e| refuse_unwritable(self.conn, e))?;
+        self.conn
+            .execute(
+                "INSERT OR IGNORE INTO kulyrax_format (component, version) VALUES (?1, ?2)",
+                params![exec::GUARDS_COMPONENT, exec::GUARDS_FORMAT],
+            )
+            .map_err(|e| refuse_unwritable(self.conn, e))?;
+        let found: i64 = self
+            .conn
+            .query_row(
+                "SELECT version FROM kulyrax_format WHERE component = ?1",
+                params![exec::GUARDS_COMPONENT],
+                |r| r.get(0),
+            )
+            .map_err(sql_err)?;
+        exec::check_guards_format(&self.store_name(), found)
+    }
+
     fn ensure_guard_table(&mut self) -> Result<(), SqlError> {
         crate::adapter::legacy::migrate_sqlite_guard_table(self.conn)?;
         self.conn

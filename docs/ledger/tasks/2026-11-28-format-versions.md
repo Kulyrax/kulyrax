@@ -100,6 +100,15 @@ that each migrates from 0.12.1.
 | Checkpoint, CLI | `exit_4_when_a_checkpoint_is_newer` in `exit_codes.rs` | 7 pass: exit 4, "written by a newer Kulyrax", checkpoint kept, no row projected |
 | Outbox state format | `cargo test -p kulyrax-source-postgres --lib` | 2 pass: a 0.12.1 body reads as 1 and round-trips with `format: 1`; `format: 2` refused as newer, `"two"` as unrecognised |
 | Checkpoint + outbox commit gates | fmt; workspace clippy `-D warnings`; `cargo test -p kulyrax-core -p kulyrax-cli -p kulyrax-source-postgres` | clean; exit 0; 431 pass, 0 fail, 111 binaries. The outbox crate's database tests skip without `KULYRAX_PG_URL` (not set here) and count as passes; they run in the Docker suites at the PR gates |
+| SQLite marker, first run | `cargo test -p kulyrax-core --test format_versions` (5 SQLite cases) | 8 pass, 1 fail: the read-only database failed at open (the WAL switch writes), before the marker, as a plain write error. Fixed: a refused write is classified by reading the marker on the open connection (none: `MarkerNotCreated`, naming the grant; newer: refused as newer; else an ordinary error) |
+| SQLite marker, second run | the same | 7 pass, 2 fail. (a) The read-only case's second half (marker present) was reported as "no marker": `CREATE TABLE IF NOT EXISTS` also fails read-only when the table exists; now the same classifier. (b) `concurrent_first_starts_leave_one_marker`: `database is locked` in 2 to 6 of 8 threads, 19 of 20 and then 29 of 30 runs, in under 1 s (so not the 5 s busy timeout) |
+| Where the lock error comes from | experiment: the same test with the database put in WAL mode before the threads (scratch copy of the test, restored, `cmp` identical) | 0 of 10 runs fail: the WAL switch at open (`open_connection`) on a new database, which SQLite refuses at once without the busy handler. Present before step 5 for any concurrent first open of a new SQLite database |
+| SQLite fixes | `set_wal` retries the switch while busy, up to the 5 s busy timeout; `ensure_schema` runs in `BEGIN IMMEDIATE` (a deferred read-then-write under WAL also fails at once) | 9 pass; the concurrency test 30 of 30 |
+| Postgres marker, first run | `cargo test -p kulyrax-adapter-postgres --test pg_format` against `kx-pg` | 5 pass, 1 fail: the permission test's second half (admin creates the marker, grants SELECT/INSERT, app starts) failed with `db error` (the driver's Display hides the server text) |
+| Why | the same steps by hand as the role (`docker exec kx-pg psql`, schema `kx_probe`, dropped after) | the advisory lock and the marker insert pass; `CREATE TABLE IF NOT EXISTS kulyrax_projection_state` on the existing table fails: `permission denied for schema kx_probe`. Postgres checks CREATE even when the table exists, so the guard table has needed CREATE on its schema at every start since before step 5. The "create the marker once with a privileged user" remedy was wrong: removed from the message and from both SQL markers (they no longer check existence first) |
+| Postgres marker, after | the same | 6 pass: beside the guard table in a non-default schema; a `kulyrax_format` later on the `search_path` (version 9) is not taken for this schema's; 0.12 schema stamped, lane kept; newer refused, no guard table created; 8 concurrent first starts, one row; no CREATE: refused, `grant` = `CREATE on schema <s>`, then starts once granted |
+| MySQL marker | `cargo test -p kulyrax-adapter-mysql --test mysql_format` against `kx-mysql` | 5 pass on the first run: the same cases (the database is the guard table's); the permission case names `CREATE on \`<db>\`.*`, the message holds no password, and the user starts once granted |
+| SQL marker commit gates | workspace clippy `-D warnings`; then `cargo test -p <crate> -- --test-threads=1` with `KULYRAX_PG_URL` / `KULYRAX_MYSQL_URL` on the local containers | clippy exit 0; core 379, cli 39, postgres 41, mysql 35, source-postgres 18: all pass, 0 fail (the existing rename, upgrade-free and backend suites included) |
 | `FormatError` in the D6 error test | `cargo test -p kulyrax-core --test error_traits` | 7 pass: `Send + Sync + 'static`, and `AdapterError::Format`'s `source()` is the `FormatError` |
 
 ## Risks and open questions
@@ -109,6 +118,14 @@ that each migrates from 0.12.1.
   - Six networked backends plus SQLite, with tests (~1 day).
   - Upgrade-job cases and docs (~0.25 day).
 - Elasticsearch has no `prepare` today. Its per-index marker check needs one.
+- **For the owner: SQL least privilege.** Postgres and MySQL check the CREATE
+  right even for `CREATE TABLE IF NOT EXISTS` on an existing table. So the
+  guard table has always needed CREATE on its schema (Postgres) or database
+  (MySQL) at every start, and a DBA cannot pre-create the tables for an
+  app user that has DML rights only. This predates step 5; the marker needs
+  no new right. Supporting it would mean checking existence before each
+  `CREATE`, a new feature, so it is reported, not done. The required grants
+  go in the user docs as they are.
 
 ## Outcome
 

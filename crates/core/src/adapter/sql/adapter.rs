@@ -25,6 +25,27 @@ pub enum SqlError {
         /// Why no upcast reaches it.
         reason: String,
     },
+    /// The database's format marker (`kulyrax_format`) refuses the start:
+    /// newer than this version reads, not recognised, or absent and not
+    /// creatable. Raised by `prepare`, before the guard table is touched.
+    Format(crate::format::FormatError),
+}
+
+/// A format refusal stays typed ([`AdapterError::Format`], exit 4); any other
+/// SQL error is a write failure with its message.
+impl From<SqlError> for crate::adapter::AdapterError {
+    fn from(e: SqlError) -> Self {
+        match e {
+            SqlError::Format(f) => crate::adapter::AdapterError::Format(f),
+            other => crate::adapter::AdapterError::WriteFailed(other.to_string()),
+        }
+    }
+}
+
+impl From<crate::format::FormatError> for SqlError {
+    fn from(e: crate::format::FormatError) -> Self {
+        SqlError::Format(e)
+    }
 }
 
 impl fmt::Display for SqlError {
@@ -50,8 +71,16 @@ impl fmt::Display for SqlError {
                 "cannot project event {:?} from v{} to mapping v{}: {}",
                 event_type, from_version, to_version, reason
             ),
+            SqlError::Format(e) => write!(f, "{e}"),
         }
     }
 }
 
-impl std::error::Error for SqlError {}
+impl std::error::Error for SqlError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            SqlError::Format(e) => Some(e),
+            _ => None,
+        }
+    }
+}

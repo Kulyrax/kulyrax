@@ -26,13 +26,14 @@ use serde_json::Value;
 
 use kulyrax_core::adapter::sql::adapter::SqlError;
 use kulyrax_core::adapter::sql::exec::{
-    self, GuardCache, GuardFingerprint, GuardRow, KnownGuards, Placeholders, ShadowTable, SqlTxn,
-    SqlWrite,
+    self, GUARDS_COMPONENT, GUARDS_FORMAT, GuardCache, GuardFingerprint, GuardRow, KnownGuards,
+    Placeholders, ShadowTable, SqlTxn, SqlWrite, check_guards_format,
 };
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use kulyrax_core::adapter::{AdapterError, AdapterResult, GuardState, Prepared, StorageAdapter};
 use kulyrax_core::event::Event;
 use kulyrax_core::execution::stages::{Stage, timed};
+use kulyrax_core::format::{FormatError, FormatProblem};
 use kulyrax_core::rebuild::{RebuildError, ShadowRebuild};
 use kulyrax_core::routing::StorageKind;
 use kulyrax_core::runtime::AdapterBuildContext;
@@ -309,7 +310,7 @@ impl StorageAdapter for PostgresAdapter {
                     .map_err(|e| SqlError::ExecutionFailed(e.to_string()))?;
                 exec::ensure_schema(PostgresTxn::begin(&mut client, Arc::default(), None)?)
             })
-            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+            .map_err(AdapterError::from)
     }
 
     /// Check out one connection for the whole batch, `BEGIN`, and lock and
@@ -695,7 +696,89 @@ fn guard_state(row: &postgres::Row, from: usize) -> GuardState {
     )
 }
 
+/// A permission refusal while creating or writing the format marker.
+fn marker_not_created(store: &str, grant: String, e: &postgres::Error) -> Option<SqlError> {
+    (e.code() == Some(&postgres::error::SqlState::INSUFFICIENT_PRIVILEGE)).then(|| {
+        FormatError::new(
+            store,
+            FormatProblem::MarkerNotCreated {
+                grant,
+                cause: e.to_string(),
+            },
+        )
+        .into()
+    })
+}
+
 impl SqlTxn for PostgresTxn<'_> {
+    /// In `current_schema()`, the schema an unqualified `CREATE TABLE` uses,
+    /// so the marker always sits beside the guard table (change 2 of the
+    /// decision), and `IF NOT EXISTS` looks only there: a `kulyrax_format`
+    /// later on the `search_path` is another store's. The unqualified
+    /// `INSERT`/`SELECT` then find this one, as `current_schema()` comes first.
+    fn ensure_format_marker(&mut self) -> Result<(), SqlError> {
+        let row = self
+            .client
+            .query_one(
+                "SELECT current_database()::text, current_schema()::text",
+                &[],
+            )
+            .map_err(pg_err)?;
+        let database: String = row.get(0);
+        let schema: Option<String> = row.get(1);
+        let Some(schema) = schema else {
+            return Err(SqlError::ExecutionFailed(format!(
+                "Postgres database {database}: no schema on the search_path exists, so there \
+                 is nowhere to keep the guard table"
+            )));
+        };
+        let store = format!("Postgres database {database}, schema {schema}");
+        // As for the guard table: a concurrent first creation can lose the
+        // race on the pg_type insert with `unique_violation`.
+        self.client
+            .batch_execute("SAVEPOINT kulyrax_format_table")
+            .map_err(pg_err)?;
+        let created = self.client.batch_execute(
+            "CREATE TABLE IF NOT EXISTS kulyrax_format (
+                component text    PRIMARY KEY,
+                version   integer NOT NULL
+            )",
+        );
+        match created {
+            Ok(()) => self
+                .client
+                .batch_execute("RELEASE SAVEPOINT kulyrax_format_table")
+                .map_err(pg_err)?,
+            Err(e) if e.code() == Some(&postgres::error::SqlState::UNIQUE_VIOLATION) => self
+                .client
+                .batch_execute("ROLLBACK TO SAVEPOINT kulyrax_format_table")
+                .map_err(pg_err)?,
+            Err(e) => {
+                return Err(
+                    marker_not_created(&store, format!("CREATE on schema {schema}"), &e)
+                        .unwrap_or_else(|| pg_err(e)),
+                );
+            }
+        }
+        let grant = || format!("SELECT, INSERT on table {schema}.kulyrax_format");
+        self.client
+            .execute(
+                "INSERT INTO kulyrax_format (component, version) VALUES ($1, $2)
+                 ON CONFLICT (component) DO NOTHING",
+                &[&GUARDS_COMPONENT, &(GUARDS_FORMAT as i32)],
+            )
+            .map_err(|e| marker_not_created(&store, grant(), &e).unwrap_or_else(|| pg_err(e)))?;
+        let found: i32 = self
+            .client
+            .query_one(
+                "SELECT version FROM kulyrax_format WHERE component = $1",
+                &[&GUARDS_COMPONENT],
+            )
+            .map_err(|e| marker_not_created(&store, grant(), &e).unwrap_or_else(|| pg_err(e)))?
+            .get(0);
+        check_guards_format(&store, i64::from(found))
+    }
+
     fn ensure_guard_table(&mut self) -> Result<(), SqlError> {
         // `IF NOT EXISTS` isn't safe under concurrent first creation: two
         // sessions can both see the table missing and race on the pg_type

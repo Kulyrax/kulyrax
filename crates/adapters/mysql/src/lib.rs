@@ -37,12 +37,14 @@ use serde_json::Value;
 
 use kulyrax_core::adapter::sql::adapter::SqlError;
 use kulyrax_core::adapter::sql::exec::{
-    self, GuardCache, GuardRow, KnownGuards, Placeholders, SqlTxn, SqlWrite,
+    self, GUARDS_COMPONENT, GUARDS_FORMAT, GuardCache, GuardRow, KnownGuards, Placeholders, SqlTxn,
+    SqlWrite, check_guards_format,
 };
 use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
 use kulyrax_core::adapter::{AdapterError, AdapterResult, GuardState, Prepared, StorageAdapter};
 use kulyrax_core::event::Event;
 use kulyrax_core::execution::stages::{Stage, timed};
+use kulyrax_core::format::{FormatError, FormatProblem};
 use kulyrax_core::routing::StorageKind;
 use kulyrax_core::runtime::AdapterBuildContext;
 use kulyrax_core::runtime::config::{
@@ -251,7 +253,7 @@ impl StorageAdapter for MySqlAdapter {
                 exec::ensure_schema(MySqlTxn::begin(&mut conn)?)?;
                 ensure_binary_keys(&mut conn)
             })
-            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+            .map_err(AdapterError::from)
     }
 
     /// Check out one connection for the whole batch, start its transaction,
@@ -483,7 +485,72 @@ fn json_to_value(v: &Value) -> mysql::Value {
     }
 }
 
+/// A permission refusal while creating or writing the format marker:
+/// 1044 (database access denied), 1142 (table access denied), 1227 (a
+/// privilege missing).
+fn marker_not_created(store: &str, grant: String, e: &mysql::Error) -> Option<SqlError> {
+    let denied = matches!(e, mysql::Error::MySqlError(m) if [1044, 1142, 1227].contains(&m.code));
+    denied.then(|| {
+        FormatError::new(
+            store,
+            FormatProblem::MarkerNotCreated {
+                grant,
+                cause: e.to_string(),
+            },
+        )
+        .into()
+    })
+}
+
 impl SqlTxn for MySqlTxn<'_> {
+    /// In the connection's database, beside the guard table (change 2 of the
+    /// decision).
+    fn ensure_format_marker(&mut self) -> Result<(), SqlError> {
+        let database: Option<String> = self
+            .conn
+            .query_first("SELECT DATABASE()")
+            .map_err(my_err)?
+            .flatten();
+        let Some(database) = database else {
+            return Err(SqlError::ExecutionFailed(
+                "MySQL connection has no database selected: name one in the URL".to_string(),
+            ));
+        };
+        let store = format!("MySQL database {database}");
+        self.conn
+            .query_drop(
+                "CREATE TABLE IF NOT EXISTS kulyrax_format (
+                    component VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+                    version   INT NOT NULL,
+                    PRIMARY KEY (component)
+                )",
+            )
+            .map_err(|e| {
+                marker_not_created(&store, format!("CREATE on `{database}`.*"), &e)
+                    .unwrap_or_else(|| my_err(e))
+            })?;
+        let grant = || format!("SELECT, INSERT on `{database}`.`kulyrax_format`");
+        self.conn
+            .exec_drop(
+                "INSERT IGNORE INTO kulyrax_format (component, version) VALUES (?, ?)",
+                (GUARDS_COMPONENT, GUARDS_FORMAT),
+            )
+            .map_err(|e| marker_not_created(&store, grant(), &e).unwrap_or_else(|| my_err(e)))?;
+        let found: Option<i64> = self
+            .conn
+            .exec_first(
+                "SELECT version FROM kulyrax_format WHERE component = ?",
+                (GUARDS_COMPONENT,),
+            )
+            .map_err(|e| marker_not_created(&store, grant(), &e).unwrap_or_else(|| my_err(e)))?;
+        let Some(found) = found else {
+            return Err(SqlError::ExecutionFailed(format!(
+                "{store}: the kulyrax_format row was not written"
+            )));
+        };
+        check_guards_format(&store, found)
+    }
+
     fn ensure_guard_table(&mut self) -> Result<(), SqlError> {
         legacy::migrate_guard_table(self.conn)?;
         self.conn

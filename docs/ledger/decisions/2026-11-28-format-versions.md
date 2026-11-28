@@ -104,8 +104,47 @@ How the changes are applied:
   - A file too short to hold the magic, or one with the right magic but a
     short or bad-checksum body, keeps today's rule: dropped if it is the
     newest log, refused otherwise.
+- **Change 2, SQL.** The marker is created unqualified, as the guard table
+  is: Postgres puts it in `current_schema()`, MySQL in the connection's
+  database, SQLite in the file. Tested in a non-default Postgres schema, and
+  with a `kulyrax_format` of another store later on the `search_path`.
+- **Change 3, SQL.** `CREATE TABLE IF NOT EXISTS` (in a savepoint on
+  Postgres, as the guard table's creation race needs), then `INSERT … ON
+  CONFLICT DO NOTHING` / `INSERT IGNORE` / `INSERT OR IGNORE`, then read
+  back. On SQLite the schema transaction is `BEGIN IMMEDIATE`, and the WAL
+  switch at open retries while busy: both were needed for concurrent first
+  starts (see the task's Verification).
 - **Change 4, exit code.** A marker that cannot be created is a safety refusal
   like a newer format: exit 4.
+- **Redis.** The owner, 2026-11-28: "Redis E1 plan: approved. Add: document
+  that Kulyrax's Redis store requires maxmemory-policy noeviction (or
+  volatile-* with no TTLs on Kulyrax keys), since an evicted marker or guard
+  silently loses data. In prepare, try CONFIG GET maxmemory-policy: if it's
+  readable and allkeys-*, log a loud warning naming the policy (don't refuse;
+  managed Redis often blocks CONFIG). Add a line to the required-grants doc."
+  Then, the owner, 2026-11-28: "Redis E1, one addition: when CONFIG GET
+  maxmemory-policy is blocked or fails, don't skip silently. Log one line at
+  info level per adapter start: "redis adapter <id> (<host>/<db>): could not
+  read maxmemory-policy; Kulyrax requires noeviction (or volatile-* with no
+  TTLs on Kulyrax keys)". No warning and no refusal. A test that a blocked
+  CONFIG still starts and emits that line (or a unit test on the message if
+  Docker Redis can't block CONFIG). Note it in the decision record next to
+  the eviction rule."
+  So the policy check has three outcomes, none of which refuses:
+  `allkeys-*` gives a warning naming the policy; unreadable (blocked or
+  failed) gives that one info line; anything else is silent. Kulyrax has no
+  logging crate, so warning and info are both stderr lines, distinguished by
+  their prefix (`WARNING:` for the warning only).
+  The plan approved: in `prepare`, `HSETNX __kulyrax:format guards 1` (atomic
+  insert-if-absent), then `HGET`; a `NOPERM` reply is `MarkerNotCreated`,
+  naming the ACL rights; the store is named by host and database number,
+  never the URL.
+- **Change 4, the grants.** Postgres and MySQL check the create right even
+  for `CREATE TABLE IF NOT EXISTS` on a table that exists (probed). So the
+  guard table has always needed CREATE on its schema or database at every
+  start, and the marker needs no right beyond that. The refusal names that
+  grant only, with no "create the marker once as an administrator" remedy:
+  it would not help while the guard table still needs CREATE.
 - **Change 5, layout-marker values.**
   - A file store's format version is the integer in
     `.kulyrax/layout/<kind>` (one marker per adapter kind, as today).
