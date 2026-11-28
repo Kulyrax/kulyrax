@@ -464,7 +464,7 @@ fn refuse_unwritable(conn: &Connection, e: rusqlite::Error) -> SqlError {
 }
 
 impl SqlTxn for SqliteTxn<'_> {
-    /// Runs in [`SqliteTxn::begin_schema`]'s `BEGIN IMMEDIATE` transaction,
+    /// Runs in `SqliteTxn::begin_schema`'s `BEGIN IMMEDIATE` transaction,
     /// so concurrent first starts take turns. SQLite has no create right
     /// apart from write access, so no existence check comes first.
     fn ensure_format_marker(&mut self) -> Result<(), SqlError> {

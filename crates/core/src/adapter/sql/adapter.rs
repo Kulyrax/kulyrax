@@ -31,7 +31,7 @@ pub enum SqlError {
     Format(crate::format::FormatError),
 }
 
-/// A format refusal stays typed ([`AdapterError::Format`], exit 4); any other
+/// A format refusal stays typed ([`crate::adapter::AdapterError::Format`], exit 4); any other
 /// SQL error is a write failure with its message.
 impl From<SqlError> for crate::adapter::AdapterError {
     fn from(e: SqlError) -> Self {
