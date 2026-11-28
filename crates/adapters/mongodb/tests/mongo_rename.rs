@@ -136,6 +136,7 @@ fn a_0_12_1_mongodb_database_opens_with_every_lane() -> R {
         names,
         [
             "conduit_projection_state",
+            "kulyrax_format",
             "kulyrax_projection_state",
             "users"
         ]
@@ -211,6 +212,7 @@ fn a_tombstone_left_under_its_temporary_name_is_moved_into_place() -> R {
         collections(&client, &db),
         [
             "conduit_projection_state",
+            "kulyrax_format",
             "kulyrax_projection_state",
             "users"
         ]
@@ -247,6 +249,7 @@ fn concurrent_starts_all_migrate() -> R {
         collections(&client, &db),
         [
             "conduit_projection_state",
+            "kulyrax_format",
             "kulyrax_projection_state",
             "users"
         ]

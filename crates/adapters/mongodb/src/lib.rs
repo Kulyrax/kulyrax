@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 
 mod legacy;
 
-use mongodb::bson::{Document, doc, from_document, to_document};
+use mongodb::bson::{Bson, Document, doc, from_document, to_document};
 use mongodb::sync::{Client, ClientSession, Database};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -34,6 +34,7 @@ use kulyrax_core::adapter::document::runtime::DocumentRuntimeBuilder;
 use kulyrax_core::adapter::{AdapterError, AdapterResult, Prepared, SkipReason, StorageAdapter};
 use kulyrax_core::event::Event;
 use kulyrax_core::execution::stages::{Stage, timed};
+use kulyrax_core::format::{FormatError, FormatProblem};
 use kulyrax_core::routing::StorageKind;
 use kulyrax_core::runtime::AdapterBuildContext;
 use kulyrax_core::runtime::config::{
@@ -181,6 +182,89 @@ fn mongo_err(e: mongodb::error::Error) -> DocumentError {
 /// technically only requires retrying the *commit*, but retrying the whole
 /// transaction is also safe here (`decide()` is itself sequence-gated and
 /// idempotent) and keeps one retry path instead of two.
+/// The format marker's collection (step 5), beside the guard collection.
+const FORMAT_COLLECTION: &str = "kulyrax_format";
+/// The marker document versioning the guards.
+const GUARDS_COMPONENT: &str = "guards";
+/// The guards' format version.
+const GUARDS_FORMAT: i32 = 1;
+
+/// The server's error code, from a command or a write error.
+fn error_code(e: &mongodb::error::Error) -> Option<i32> {
+    use mongodb::error::{ErrorKind, WriteFailure};
+    match e.kind.as_ref() {
+        ErrorKind::Command(c) => Some(c.code),
+        ErrorKind::Write(WriteFailure::WriteError(w)) => Some(w.code),
+        _ => None,
+    }
+}
+
+/// `Unauthorized` (13): the user lacks the action.
+const UNAUTHORIZED: i32 = 13;
+/// `DuplicateKey` (11000): another start inserted the marker first.
+const DUPLICATE_KEY: i32 = 11000;
+
+/// Step 5's format marker (decision 2026-11-28-format-versions): the document
+/// `{_id: "guards", version}` in [`FORMAT_COLLECTION`]. An upsert with
+/// `$setOnInsert` writes it only if absent; two first starts racing on the
+/// `_id` leave one, the loser seeing `DuplicateKey`. Read back and checked.
+/// A database with guards and no marker was written by 0.12.x: format 1.
+fn ensure_format_marker(db: &Database) -> Result<(), DocumentError> {
+    let store = format!("MongoDB database {}", db.name());
+    let refused = |e: mongodb::error::Error| -> DocumentError {
+        if error_code(&e) == Some(UNAUTHORIZED) {
+            FormatError::new(
+                store.clone(),
+                FormatProblem::MarkerNotCreated {
+                    grant: format!(
+                        "find, insert and update on {}.{FORMAT_COLLECTION} (the readWrite role on \
+                         {} includes them)",
+                        db.name(),
+                        db.name()
+                    ),
+                    cause: e.to_string(),
+                },
+            )
+            .into()
+        } else {
+            mongo_err(e)
+        }
+    };
+    let markers = db.collection::<Document>(FORMAT_COLLECTION);
+    let upsert = markers
+        .update_one(
+            doc! { "_id": GUARDS_COMPONENT },
+            doc! { "$setOnInsert": { "version": GUARDS_FORMAT } },
+        )
+        .upsert(true)
+        .run();
+    match upsert {
+        Ok(_) => {}
+        Err(e) if error_code(&e) == Some(DUPLICATE_KEY) => {}
+        Err(e) => return Err(refused(e)),
+    }
+    let found = markers
+        .find_one(doc! { "_id": GUARDS_COMPONENT })
+        .run()
+        .map_err(refused)?
+        .ok_or_else(|| {
+            DocumentError::WriteFailed(format!("{store}: the format marker was not written"))
+        })?;
+    let version = match found.get("version") {
+        Some(Bson::Int32(v)) => u32::try_from(*v).ok(),
+        Some(Bson::Int64(v)) => u32::try_from(*v).ok(),
+        _ => None,
+    }
+    .ok_or_else(|| {
+        FormatError::new(
+            store.clone(),
+            FormatProblem::Unrecognized(format!("{FORMAT_COLLECTION} {GUARDS_COMPONENT}: {found}")),
+        )
+    })?;
+    FormatError::check(&store, version, GUARDS_FORMAT as u32)?;
+    Ok(())
+}
+
 fn is_retryable(e: &mongodb::error::Error) -> bool {
     e.contains_label("TransientTransactionError")
         || e.contains_label("UnknownTransactionCommitResult")
@@ -602,11 +686,12 @@ impl StorageAdapter for MongoDbAdapter {
             .prepare(|| {
                 timed(Stage::Schema, || {
                     let db = client.database(&self.database);
+                    ensure_format_marker(&db)?;
                     legacy::migrate_guard_collection(client, &db)?;
                     self.ensure_guard_index(&db)
                 })
             })
-            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+            .map_err(AdapterError::from)
     }
 
     /// Start the batch's transaction and read, inside it, the guard of every
