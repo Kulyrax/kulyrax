@@ -81,13 +81,15 @@ disagree, §9 is the decision.
 Generated with `cargo +nightly public-api -p <crate> --simplified`
 (cargo-public-api 0.52.0), one item per line. Two snapshots:
 - [`stability/api-1.0/`](stability/api-1.0/): **the record for 1.0**, taken
-  for 1.0.0-rc.1 (main `56413bc`).
+  for 1.0.0-rc.1 (main `f07db53`). First taken at `56413bc`; the only change
+  since is G0's graph edge labels (`EdgeRef`, the `from_label` / `to_label`
+  fields, and the `GraphBackend` edge methods).
 - [`stability/api/`](stability/api/): the 0.12.0 inventory, kept unchanged as
   history. The tables below were made from it.
 
 | Crate | 0.12.0 lines | 1.0 lines | What it exposes |
 |---|---|---|---|
-| `kulyrax-core` | 5,449 | 3,972 | 1.0: 49 public modules, 101 structs, 49 enums, 10 traits, 919 functions, 16 consts, 7 type aliases, 1,997 trait impls ([1.0 list](stability/api-1.0/kulyrax-core.txt)). 0.12.0: 67 modules, 145 structs, 70 enums, 15 traits, 1,186 functions, 11 consts, 9 type aliases, 2,643 trait impls ([0.12.0 list](stability/api/kulyrax-core.txt)) |
+| `kulyrax-core` | 5,449 | 4,003 | 1.0: 49 public modules, 102 structs, 49 enums, 10 traits, 923 functions, 16 consts, 7 type aliases, 2,011 trait impls ([1.0 list](stability/api-1.0/kulyrax-core.txt)). 0.12.0: 67 modules, 145 structs, 70 enums, 15 traits, 1,186 functions, 11 consts, 9 type aliases, 2,643 trait impls ([0.12.0 list](stability/api/kulyrax-core.txt)) |
 | `kulyrax-ingest` | 208 | 90 | `serve`, `start`, `ServeOptions`, `GrpcServer`, `GrpcSource`, `IngestError`, `ServeError`. 0.12.0 also exposed the generated `pb` module, now behind `unstable-pb` |
 | `kulyrax-client` | 198 | 175 | `Producer`, `EventEnvelope`, `Ack`, `AckOutcome`, `ClientError`, `RpcError`, `StatusCode` (Kulyrax's own types). 0.12.0 re-exported generated `pb` types, now behind `unstable-pb` |
 | `kulyrax-backends` | 2 | 2 | `register_default_backends` |

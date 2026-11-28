@@ -1731,7 +1731,7 @@ dependencies = [
 
 [[package]]
 name = "kulyrax-adapter-elasticsearch"
-version = "0.12.2"
+version = "1.0.0-rc.1"
 dependencies = [
  "kulyrax-core",
  "reqwest",
@@ -1743,7 +1743,7 @@ dependencies = [
 
 [[package]]
 name = "kulyrax-adapter-mongodb"
-version = "0.12.2"
+version = "1.0.0-rc.1"
 dependencies = [
  "kulyrax-core",
  "mongodb",
@@ -1754,7 +1754,7 @@ dependencies = [
 
 [[package]]
 name = "kulyrax-adapter-mysql"
-version = "0.12.2"
+version = "1.0.0-rc.1"
 dependencies = [
  "kulyrax-core",
  "mysql",
@@ -1766,7 +1766,7 @@ dependencies = [
 
 [[package]]
 name = "kulyrax-adapter-neo4j"
-version = "0.12.2"
+version = "1.0.0-rc.1"
 dependencies = [
  "kulyrax-core",
  "neo4rs",
@@ -1779,7 +1779,7 @@ dependencies = [
 
 [[package]]
 name = "kulyrax-adapter-postgres"
-version = "0.12.2"
+version = "1.0.0-rc.1"
 dependencies = [
  "chrono",
  "kulyrax-core",
@@ -1794,7 +1794,7 @@ dependencies = [
 
 [[package]]
 name = "kulyrax-adapter-redis"
-version = "0.12.2"
+version = "1.0.0-rc.1"
 dependencies = [
  "kulyrax-core",
  "r2d2",
@@ -1806,7 +1806,7 @@ dependencies = [
 
 [[package]]
 name = "kulyrax-backends"
-version = "0.12.2"
+version = "1.0.0-rc.1"
 dependencies = [
  "kulyrax-adapter-elasticsearch",
  "kulyrax-adapter-mongodb",
@@ -1820,7 +1820,7 @@ dependencies = [
 
 [[package]]
 name = "kulyrax-cli"
-version = "0.12.2"
+version = "1.0.0-rc.1"
 dependencies = [
  "clap",
  "ctrlc",
@@ -1841,7 +1841,7 @@ dependencies = [
 
 [[package]]
 name = "kulyrax-client"
-version = "0.12.2"
+version = "1.0.0-rc.1"
 dependencies = [
  "prost",
  "protoc-bin-vendored",
@@ -1853,7 +1853,7 @@ dependencies = [
 
 [[package]]
 name = "kulyrax-core"
-version = "0.12.2"
+version = "1.0.0-rc.1"
 dependencies = [
  "crc32fast",
  "once_cell",
@@ -1868,7 +1868,7 @@ dependencies = [
 
 [[package]]
 name = "kulyrax-ingest"
-version = "0.12.2"
+version = "1.0.0-rc.1"
 dependencies = [
  "futures-core",
  "kulyrax-adapter-elasticsearch",
@@ -1890,7 +1890,7 @@ dependencies = [
 
 [[package]]
 name = "kulyrax-source-postgres"
-version = "0.12.2"
+version = "1.0.0-rc.1"
 dependencies = [
  "kulyrax-core",
  "postgres",
