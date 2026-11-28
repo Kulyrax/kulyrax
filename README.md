@@ -208,7 +208,7 @@ database backend.
 
 ## Status
 
-Latest release notes: **[`RELEASES/v0.12.2.md`](RELEASES/v0.12.2.md)** (behaviour changes from the 1.0 review; read them before you upgrade). The last security release is [`v0.12.1`](RELEASES/v0.12.1.md).
+Latest release notes: **[`RELEASES/v1.0.0-rc.1.md`](RELEASES/v1.0.0-rc.1.md)** (start with "Data correctness: check your data", then the upgrade guide from 0.12.1). The last security release is [`v0.12.1`](RELEASES/v0.12.1.md).
 
 Kulyrax is a **1.0 release candidate**. The public Rust API, the YAML files, the
 CLI and its exit codes, the gRPC contract and the persisted formats are what

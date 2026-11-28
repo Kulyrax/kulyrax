@@ -279,12 +279,16 @@ impl core::panic::unwind_safe::UnwindSafe for kulyrax_core::adapter::graph::exec
 #[non_exhaustive] pub struct kulyrax_core::adapter::graph::exec::EdgePlan
 pub kulyrax_core::adapter::graph::exec::EdgePlan::edge_type: alloc::string::String
 pub kulyrax_core::adapter::graph::exec::EdgePlan::from: alloc::string::String
+pub kulyrax_core::adapter::graph::exec::EdgePlan::from_label: alloc::string::String
 pub kulyrax_core::adapter::graph::exec::EdgePlan::key: alloc::string::String
 pub kulyrax_core::adapter::graph::exec::EdgePlan::on_existing: kulyrax_core::adapter::OnExisting
 pub kulyrax_core::adapter::graph::exec::EdgePlan::operation: kulyrax_core::adapter::Operation
 pub kulyrax_core::adapter::graph::exec::EdgePlan::permanent: bool
 pub kulyrax_core::adapter::graph::exec::EdgePlan::properties: serde_json::value::Value
 pub kulyrax_core::adapter::graph::exec::EdgePlan::to: alloc::string::String
+pub kulyrax_core::adapter::graph::exec::EdgePlan::to_label: alloc::string::String
+impl kulyrax_core::adapter::graph::exec::EdgePlan
+pub fn kulyrax_core::adapter::graph::exec::EdgePlan::edge_ref(&self) -> kulyrax_core::adapter::graph::exec::EdgeRef<'_>
 impl core::marker::Forget for kulyrax_core::adapter::graph::exec::EdgePlan
 impl core::marker::Freeze for kulyrax_core::adapter::graph::exec::EdgePlan
 impl core::marker::Move for kulyrax_core::adapter::graph::exec::EdgePlan
@@ -294,6 +298,29 @@ impl core::marker::Unpin for kulyrax_core::adapter::graph::exec::EdgePlan
 impl core::marker::UnsafeUnpin for kulyrax_core::adapter::graph::exec::EdgePlan
 impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_core::adapter::graph::exec::EdgePlan
 impl core::panic::unwind_safe::UnwindSafe for kulyrax_core::adapter::graph::exec::EdgePlan
+#[non_exhaustive] pub struct kulyrax_core::adapter::graph::exec::EdgeRef<'a>
+pub kulyrax_core::adapter::graph::exec::EdgeRef::edge_type: &'a str
+pub kulyrax_core::adapter::graph::exec::EdgeRef::from: &'a str
+pub kulyrax_core::adapter::graph::exec::EdgeRef::from_label: &'a str
+pub kulyrax_core::adapter::graph::exec::EdgeRef::key: &'a str
+pub kulyrax_core::adapter::graph::exec::EdgeRef::to: &'a str
+pub kulyrax_core::adapter::graph::exec::EdgeRef::to_label: &'a str
+impl kulyrax_core::adapter::graph::exec::EdgeRef<'_>
+pub fn kulyrax_core::adapter::graph::exec::EdgeRef<'_>::endpoints(&self) -> alloc::vec::Vec<(&str, &str)>
+impl<'a> core::clone::Clone for kulyrax_core::adapter::graph::exec::EdgeRef<'a>
+pub fn kulyrax_core::adapter::graph::exec::EdgeRef<'a>::clone(&self) -> Self
+impl<'a> core::fmt::Debug for kulyrax_core::adapter::graph::exec::EdgeRef<'a>
+pub fn kulyrax_core::adapter::graph::exec::EdgeRef<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for kulyrax_core::adapter::graph::exec::EdgeRef<'a>
+impl<'a> core::marker::Forget for kulyrax_core::adapter::graph::exec::EdgeRef<'a>
+impl<'a> core::marker::Freeze for kulyrax_core::adapter::graph::exec::EdgeRef<'a>
+impl<'a> core::marker::Move for kulyrax_core::adapter::graph::exec::EdgeRef<'a>
+impl<'a> core::marker::Send for kulyrax_core::adapter::graph::exec::EdgeRef<'a>
+impl<'a> core::marker::Sync for kulyrax_core::adapter::graph::exec::EdgeRef<'a>
+impl<'a> core::marker::Unpin for kulyrax_core::adapter::graph::exec::EdgeRef<'a>
+impl<'a> core::marker::UnsafeUnpin for kulyrax_core::adapter::graph::exec::EdgeRef<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for kulyrax_core::adapter::graph::exec::EdgeRef<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for kulyrax_core::adapter::graph::exec::EdgeRef<'a>
 #[non_exhaustive] pub struct kulyrax_core::adapter::graph::exec::GraphFacetGuard
 pub kulyrax_core::adapter::graph::exec::GraphFacetGuard::deleted: bool
 pub kulyrax_core::adapter::graph::exec::GraphFacetGuard::last_event_id: alloc::string::String
@@ -365,12 +392,12 @@ impl core::marker::UnsafeUnpin for kulyrax_core::adapter::graph::exec::NodePlan
 impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_core::adapter::graph::exec::NodePlan
 impl core::panic::unwind_safe::UnwindSafe for kulyrax_core::adapter::graph::exec::NodePlan
 pub trait kulyrax_core::adapter::graph::exec::GraphBackend
-pub fn kulyrax_core::adapter::graph::exec::GraphBackend::delete_edge(&mut self, &str, &str, &str, &str, &kulyrax_core::adapter::graph::exec::GraphGuard) -> core::result::Result<(), kulyrax_core::adapter::graph::adapter::GraphError>
+pub fn kulyrax_core::adapter::graph::exec::GraphBackend::delete_edge(&mut self, &kulyrax_core::adapter::graph::exec::EdgeRef<'_>, &kulyrax_core::adapter::graph::exec::GraphGuard) -> core::result::Result<(), kulyrax_core::adapter::graph::adapter::GraphError>
 pub fn kulyrax_core::adapter::graph::exec::GraphBackend::delete_node_cascade(&mut self, &str, &str, &kulyrax_core::adapter::graph::exec::GraphGuard) -> core::result::Result<(), kulyrax_core::adapter::graph::adapter::GraphError>
-pub fn kulyrax_core::adapter::graph::exec::GraphBackend::node_is_tombstoned(&mut self, &str) -> core::result::Result<bool, kulyrax_core::adapter::graph::adapter::GraphError>
+pub fn kulyrax_core::adapter::graph::exec::GraphBackend::node_is_tombstoned(&mut self, &str, &str) -> core::result::Result<bool, kulyrax_core::adapter::graph::adapter::GraphError>
 pub fn kulyrax_core::adapter::graph::exec::GraphBackend::read_edge_guard(&mut self, &str, &str) -> core::result::Result<core::option::Option<kulyrax_core::adapter::graph::exec::GraphGuard>, kulyrax_core::adapter::graph::adapter::GraphError>
 pub fn kulyrax_core::adapter::graph::exec::GraphBackend::read_node_guard(&mut self, &str, &str) -> core::result::Result<core::option::Option<kulyrax_core::adapter::graph::exec::GraphGuard>, kulyrax_core::adapter::graph::adapter::GraphError>
-pub fn kulyrax_core::adapter::graph::exec::GraphBackend::write_edge(&mut self, &str, &str, &str, &str, core::option::Option<&serde_json::value::Value>, &kulyrax_core::adapter::graph::exec::GraphGuard) -> core::result::Result<(), kulyrax_core::adapter::graph::adapter::GraphError>
+pub fn kulyrax_core::adapter::graph::exec::GraphBackend::write_edge(&mut self, &kulyrax_core::adapter::graph::exec::EdgeRef<'_>, core::option::Option<&serde_json::value::Value>, &kulyrax_core::adapter::graph::exec::GraphGuard) -> core::result::Result<(), kulyrax_core::adapter::graph::adapter::GraphError>
 pub fn kulyrax_core::adapter::graph::exec::GraphBackend::write_node(&mut self, &str, &str, core::option::Option<&serde_json::value::Value>, &str, &kulyrax_core::adapter::graph::exec::GraphGuard) -> core::result::Result<(), kulyrax_core::adapter::graph::adapter::GraphError>
 pub fn kulyrax_core::adapter::graph::exec::combined_outcome(&[kulyrax_core::adapter::graph::exec::GraphOutcome]) -> kulyrax_core::adapter::graph::exec::GraphOutcome
 pub fn kulyrax_core::adapter::graph::exec::project_all<B: kulyrax_core::adapter::graph::exec::GraphBackend>(&mut B, &[kulyrax_core::adapter::graph::runtime::GraphProjection], &kulyrax_core::event::Event) -> core::result::Result<kulyrax_core::adapter::graph::exec::GraphOutcome, kulyrax_core::adapter::graph::adapter::GraphError>
@@ -413,8 +440,10 @@ pub kulyrax_core::adapter::graph::mapping::ResolvedRecord::Edge
 pub kulyrax_core::adapter::graph::mapping::ResolvedRecord::Edge::discriminator: core::option::Option<alloc::string::String>
 pub kulyrax_core::adapter::graph::mapping::ResolvedRecord::Edge::edge_type: alloc::string::String
 pub kulyrax_core::adapter::graph::mapping::ResolvedRecord::Edge::from: alloc::string::String
+pub kulyrax_core::adapter::graph::mapping::ResolvedRecord::Edge::from_label: alloc::string::String
 pub kulyrax_core::adapter::graph::mapping::ResolvedRecord::Edge::properties: serde_json::value::Value
 pub kulyrax_core::adapter::graph::mapping::ResolvedRecord::Edge::to: alloc::string::String
+pub kulyrax_core::adapter::graph::mapping::ResolvedRecord::Edge::to_label: alloc::string::String
 pub kulyrax_core::adapter::graph::mapping::ResolvedRecord::Node
 pub kulyrax_core::adapter::graph::mapping::ResolvedRecord::Node::label: alloc::string::String
 pub kulyrax_core::adapter::graph::mapping::ResolvedRecord::Node::node_id: alloc::string::String
@@ -437,12 +466,14 @@ pub kulyrax_core::adapter::graph::mapping::GraphEdgeMapping::discriminator: core
 pub kulyrax_core::adapter::graph::mapping::GraphEdgeMapping::edge_type: alloc::string::String
 pub kulyrax_core::adapter::graph::mapping::GraphEdgeMapping::event: alloc::string::String
 pub kulyrax_core::adapter::graph::mapping::GraphEdgeMapping::from: alloc::string::String
+pub kulyrax_core::adapter::graph::mapping::GraphEdgeMapping::from_label: alloc::string::String
 pub kulyrax_core::adapter::graph::mapping::GraphEdgeMapping::on_existing: kulyrax_core::adapter::OnExisting
 pub kulyrax_core::adapter::graph::mapping::GraphEdgeMapping::operation: kulyrax_core::adapter::Operation
 pub kulyrax_core::adapter::graph::mapping::GraphEdgeMapping::permanent: bool
 pub kulyrax_core::adapter::graph::mapping::GraphEdgeMapping::properties: serde_json::value::Value
 pub kulyrax_core::adapter::graph::mapping::GraphEdgeMapping::requires_capabilities: alloc::vec::Vec<kulyrax_core::runtime::config::AdapterCapability>
 pub kulyrax_core::adapter::graph::mapping::GraphEdgeMapping::to: alloc::string::String
+pub kulyrax_core::adapter::graph::mapping::GraphEdgeMapping::to_label: alloc::string::String
 pub kulyrax_core::adapter::graph::mapping::GraphEdgeMapping::version: u32
 impl core::clone::Clone for kulyrax_core::adapter::graph::mapping::GraphEdgeMapping
 pub fn kulyrax_core::adapter::graph::mapping::GraphEdgeMapping::clone(&self) -> Self
@@ -504,7 +535,7 @@ impl core::marker::Unpin for kulyrax_core::adapter::graph::mapping::GraphSubgrap
 impl core::marker::UnsafeUnpin for kulyrax_core::adapter::graph::mapping::GraphSubgraphMapping
 impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_core::adapter::graph::mapping::GraphSubgraphMapping
 impl core::panic::unwind_safe::UnwindSafe for kulyrax_core::adapter::graph::mapping::GraphSubgraphMapping
-pub fn kulyrax_core::adapter::graph::mapping::canonical_edge_key(&str, &str, &str, core::option::Option<&str>) -> alloc::string::String
+pub fn kulyrax_core::adapter::graph::mapping::canonical_edge_key(&str, &str, &str, &str, &str, core::option::Option<&str>) -> alloc::string::String
 pub fn kulyrax_core::adapter::graph::mapping::encode_edge_key(&str) -> alloc::string::String
 pub mod kulyrax_core::adapter::graph::runtime
 #[non_exhaustive] pub struct kulyrax_core::adapter::graph::runtime::GraphProjection
