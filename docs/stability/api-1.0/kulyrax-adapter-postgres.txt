@@ -1,0 +1,50 @@
+pub mod kulyrax_adapter_postgres
+pub struct kulyrax_adapter_postgres::PostgresAdapter
+impl kulyrax_adapter_postgres::PostgresAdapter
+pub fn kulyrax_adapter_postgres::PostgresAdapter::from_config(&kulyrax_adapter_postgres::PostgresConfig, &kulyrax_core::runtime::registry::AdapterBuildContext) -> core::result::Result<Self, kulyrax_core::runtime::config::ConfigError>
+impl kulyrax_core::adapter::StorageAdapter for kulyrax_adapter_postgres::PostgresAdapter
+pub fn kulyrax_adapter_postgres::PostgresAdapter::begin_batch(&self, &[&kulyrax_core::event::Event]) -> core::result::Result<(), kulyrax_core::adapter::AdapterError>
+pub fn kulyrax_adapter_postgres::PostgresAdapter::commit_batch(&self) -> core::result::Result<(), kulyrax_core::adapter::AdapterError>
+pub fn kulyrax_adapter_postgres::PostgresAdapter::handle(&self, &kulyrax_core::event::Event) -> kulyrax_core::adapter::AdapterResult
+pub fn kulyrax_adapter_postgres::PostgresAdapter::id(&self) -> &str
+pub fn kulyrax_adapter_postgres::PostgresAdapter::kind(&self) -> kulyrax_core::routing::StorageKind
+pub fn kulyrax_adapter_postgres::PostgresAdapter::prepare(&self) -> core::result::Result<(), kulyrax_core::adapter::AdapterError>
+pub fn kulyrax_adapter_postgres::PostgresAdapter::priority(&self) -> u32
+pub fn kulyrax_adapter_postgres::PostgresAdapter::rollback_batch(&self)
+pub fn kulyrax_adapter_postgres::PostgresAdapter::shadow_rebuild(&self) -> core::option::Option<&dyn kulyrax_core::rebuild::ShadowRebuild>
+impl kulyrax_core::rebuild::ShadowRebuild for kulyrax_adapter_postgres::PostgresAdapter
+pub fn kulyrax_adapter_postgres::PostgresAdapter::finish_rebuild(&self, &[kulyrax_core::adapter::sql::exec::ShadowTable], kulyrax_core::adapter::sql::exec::GuardFingerprint) -> core::result::Result<(), kulyrax_core::rebuild::RebuildError>
+pub fn kulyrax_adapter_postgres::PostgresAdapter::start_rebuild(&self, &[kulyrax_core::adapter::sql::exec::ShadowTable]) -> core::result::Result<kulyrax_core::adapter::sql::exec::GuardFingerprint, kulyrax_core::rebuild::RebuildError>
+impl core::marker::Forget for kulyrax_adapter_postgres::PostgresAdapter
+impl !core::marker::Freeze for kulyrax_adapter_postgres::PostgresAdapter
+impl core::marker::Move for kulyrax_adapter_postgres::PostgresAdapter
+impl core::marker::Send for kulyrax_adapter_postgres::PostgresAdapter
+impl core::marker::Sync for kulyrax_adapter_postgres::PostgresAdapter
+impl core::marker::Unpin for kulyrax_adapter_postgres::PostgresAdapter
+impl core::marker::UnsafeUnpin for kulyrax_adapter_postgres::PostgresAdapter
+impl !core::panic::unwind_safe::RefUnwindSafe for kulyrax_adapter_postgres::PostgresAdapter
+impl !core::panic::unwind_safe::UnwindSafe for kulyrax_adapter_postgres::PostgresAdapter
+#[non_exhaustive] pub struct kulyrax_adapter_postgres::PostgresConfig
+pub kulyrax_adapter_postgres::PostgresConfig::id: alloc::string::String
+pub kulyrax_adapter_postgres::PostgresConfig::pool_size: core::option::Option<u32>
+pub kulyrax_adapter_postgres::PostgresConfig::priority: u32
+pub kulyrax_adapter_postgres::PostgresConfig::url: alloc::string::String
+impl kulyrax_adapter_postgres::PostgresConfig
+pub fn kulyrax_adapter_postgres::PostgresConfig::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn kulyrax_adapter_postgres::PostgresConfig::with_id(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn kulyrax_adapter_postgres::PostgresConfig::with_pool_size(self, u32) -> Self
+pub fn kulyrax_adapter_postgres::PostgresConfig::with_priority(self, u32) -> Self
+impl core::fmt::Debug for kulyrax_adapter_postgres::PostgresConfig
+pub fn kulyrax_adapter_postgres::PostgresConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'de> serde_core::de::Deserialize<'de> for kulyrax_adapter_postgres::PostgresConfig
+pub fn kulyrax_adapter_postgres::PostgresConfig::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Forget for kulyrax_adapter_postgres::PostgresConfig
+impl core::marker::Freeze for kulyrax_adapter_postgres::PostgresConfig
+impl core::marker::Move for kulyrax_adapter_postgres::PostgresConfig
+impl core::marker::Send for kulyrax_adapter_postgres::PostgresConfig
+impl core::marker::Sync for kulyrax_adapter_postgres::PostgresConfig
+impl core::marker::Unpin for kulyrax_adapter_postgres::PostgresConfig
+impl core::marker::UnsafeUnpin for kulyrax_adapter_postgres::PostgresConfig
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_adapter_postgres::PostgresConfig
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_adapter_postgres::PostgresConfig
+pub fn kulyrax_adapter_postgres::factory(&kulyrax_core::runtime::config::CustomAdapterConfig, &kulyrax_core::runtime::registry::AdapterBuildContext) -> core::result::Result<alloc::boxed::Box<dyn kulyrax_core::adapter::StorageAdapter>, kulyrax_core::runtime::config::ConfigError>

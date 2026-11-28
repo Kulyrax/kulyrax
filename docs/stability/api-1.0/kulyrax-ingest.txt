@@ -1,0 +1,90 @@
+pub mod kulyrax_ingest
+#[non_exhaustive] pub enum kulyrax_ingest::IngestError
+pub kulyrax_ingest::IngestError::Bind(alloc::string::String)
+pub kulyrax_ingest::IngestError::Config(alloc::string::String)
+pub kulyrax_ingest::IngestError::Runtime(core::io::error::Error)
+impl core::error::Error for kulyrax_ingest::IngestError
+pub fn kulyrax_ingest::IngestError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for kulyrax_ingest::IngestError
+pub fn kulyrax_ingest::IngestError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for kulyrax_ingest::IngestError
+pub fn kulyrax_ingest::IngestError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Forget for kulyrax_ingest::IngestError
+impl core::marker::Freeze for kulyrax_ingest::IngestError
+impl core::marker::Move for kulyrax_ingest::IngestError
+impl core::marker::Send for kulyrax_ingest::IngestError
+impl core::marker::Sync for kulyrax_ingest::IngestError
+impl core::marker::Unpin for kulyrax_ingest::IngestError
+impl core::marker::UnsafeUnpin for kulyrax_ingest::IngestError
+impl !core::panic::unwind_safe::RefUnwindSafe for kulyrax_ingest::IngestError
+impl !core::panic::unwind_safe::UnwindSafe for kulyrax_ingest::IngestError
+#[non_exhaustive] pub enum kulyrax_ingest::ServeError
+pub kulyrax_ingest::ServeError::Ingest(kulyrax_ingest::IngestError)
+pub kulyrax_ingest::ServeError::Pipeline(kulyrax_core::pipeline::PipelineError)
+pub kulyrax_ingest::ServeError::Source(kulyrax_core::source::SourceError)
+impl core::error::Error for kulyrax_ingest::ServeError
+pub fn kulyrax_ingest::ServeError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for kulyrax_ingest::ServeError
+pub fn kulyrax_ingest::ServeError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for kulyrax_ingest::ServeError
+pub fn kulyrax_ingest::ServeError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Forget for kulyrax_ingest::ServeError
+impl core::marker::Freeze for kulyrax_ingest::ServeError
+impl core::marker::Move for kulyrax_ingest::ServeError
+impl core::marker::Send for kulyrax_ingest::ServeError
+impl core::marker::Sync for kulyrax_ingest::ServeError
+impl core::marker::Unpin for kulyrax_ingest::ServeError
+impl core::marker::UnsafeUnpin for kulyrax_ingest::ServeError
+impl !core::panic::unwind_safe::RefUnwindSafe for kulyrax_ingest::ServeError
+impl !core::panic::unwind_safe::UnwindSafe for kulyrax_ingest::ServeError
+#[non_exhaustive] pub struct kulyrax_ingest::GrpcServer
+pub kulyrax_ingest::GrpcServer::local_addr: core::option::Option<core::net::socket_addr::SocketAddr>
+pub kulyrax_ingest::GrpcServer::local_path: core::option::Option<std::path::PathBuf>
+impl kulyrax_ingest::GrpcServer
+pub fn kulyrax_ingest::GrpcServer::shutdown(self)
+impl core::marker::Forget for kulyrax_ingest::GrpcServer
+impl !core::marker::Freeze for kulyrax_ingest::GrpcServer
+impl core::marker::Move for kulyrax_ingest::GrpcServer
+impl core::marker::Send for kulyrax_ingest::GrpcServer
+impl core::marker::Sync for kulyrax_ingest::GrpcServer
+impl core::marker::Unpin for kulyrax_ingest::GrpcServer
+impl core::marker::UnsafeUnpin for kulyrax_ingest::GrpcServer
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_ingest::GrpcServer
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_ingest::GrpcServer
+pub struct kulyrax_ingest::GrpcSource
+impl kulyrax_core::source::EventSource for kulyrax_ingest::GrpcSource
+pub fn kulyrax_ingest::GrpcSource::commit(&mut self, kulyrax_core::source::SourcePosition) -> core::result::Result<(), kulyrax_core::source::SourceError>
+pub fn kulyrax_ingest::GrpcSource::commit_with_dlq_count(&mut self, kulyrax_core::source::SourcePosition, u32) -> core::result::Result<(), kulyrax_core::source::SourceError>
+pub fn kulyrax_ingest::GrpcSource::committed_position(&self) -> core::option::Option<&kulyrax_core::source::SourcePosition>
+pub fn kulyrax_ingest::GrpcSource::id(&self) -> &str
+pub fn kulyrax_ingest::GrpcSource::on_resolved(&mut self, &kulyrax_core::source::SourcedEvent, &kulyrax_core::execution::report::ExecutionReport)
+pub fn kulyrax_ingest::GrpcSource::poll(&mut self, usize) -> core::result::Result<alloc::vec::Vec<kulyrax_core::source::SourcedEvent>, kulyrax_core::source::SourceError>
+impl core::marker::Forget for kulyrax_ingest::GrpcSource
+impl core::marker::Freeze for kulyrax_ingest::GrpcSource
+impl core::marker::Move for kulyrax_ingest::GrpcSource
+impl core::marker::Send for kulyrax_ingest::GrpcSource
+impl core::marker::Sync for kulyrax_ingest::GrpcSource
+impl core::marker::Unpin for kulyrax_ingest::GrpcSource
+impl core::marker::UnsafeUnpin for kulyrax_ingest::GrpcSource
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_ingest::GrpcSource
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_ingest::GrpcSource
+#[non_exhaustive] pub struct kulyrax_ingest::ServeOptions
+pub kulyrax_ingest::ServeOptions::dlq_dir: core::option::Option<std::path::PathBuf>
+pub kulyrax_ingest::ServeOptions::listen: alloc::string::String
+pub kulyrax_ingest::ServeOptions::max_batch: usize
+pub kulyrax_ingest::ServeOptions::max_batch_delay: core::time::Duration
+pub kulyrax_ingest::ServeOptions::poll_interval: core::time::Duration
+pub kulyrax_ingest::ServeOptions::retry_budget: u32
+impl core::default::Default for kulyrax_ingest::ServeOptions
+pub fn kulyrax_ingest::ServeOptions::default() -> Self
+impl core::marker::Forget for kulyrax_ingest::ServeOptions
+impl core::marker::Freeze for kulyrax_ingest::ServeOptions
+impl core::marker::Move for kulyrax_ingest::ServeOptions
+impl core::marker::Send for kulyrax_ingest::ServeOptions
+impl core::marker::Sync for kulyrax_ingest::ServeOptions
+impl core::marker::Unpin for kulyrax_ingest::ServeOptions
+impl core::marker::UnsafeUnpin for kulyrax_ingest::ServeOptions
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_ingest::ServeOptions
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_ingest::ServeOptions
+pub fn kulyrax_ingest::serve(&std::path::Path, &std::path::Path, &kulyrax_ingest::ServeOptions, &core::sync::atomic::AtomicBool, impl core::ops::function::Fn(&mut kulyrax_core::runtime::engine::KulyraxRuntime) + core::clone::Clone + 'static) -> core::result::Result<kulyrax_core::source::runner::SourceRunReport, kulyrax_ingest::ServeError>
+pub fn kulyrax_ingest::start(impl core::convert::Into<alloc::string::String>, &str) -> core::result::Result<(kulyrax_ingest::GrpcServer, kulyrax_ingest::GrpcSource), kulyrax_ingest::IngestError>
