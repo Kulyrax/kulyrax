@@ -142,6 +142,21 @@ How the changes are applied:
   insert-if-absent), then `HGET`; a `NOPERM` reply is `MarkerNotCreated`,
   naming the ACL rights; the store is named by host and database number,
   never the URL.
+- **Elasticsearch: the marker moved.** The proposal put it in each target
+  index's `_meta.kulyrax_format`. Change 3 rules that out: a mapping update
+  replaces `_meta` whole, last writer wins, so it cannot be an atomic
+  insert-if-absent. The owner was asked on 2026-11-28 with three options
+  (per-cluster index; per-index `_meta` as proposed; a marker document in
+  each target index) and chose **"Cluster index"**:
+  - one document per cluster, `PUT kulyrax_format/_create/guards {"version":
+    1}`, atomic (409 when it exists), then read back and checked;
+  - the same shape as MongoDB, Redis and Neo4j (one marker per store), and
+    it covers every target index, including ones a mapping names later;
+  - the grants are `create_index`, `write` and `read` on the index
+    `kulyrax_format`.
+  This supersedes "Elasticsearch: `_meta.kulyrax_format` in each target
+  index's mapping" in the list below, and its trade-off ("a newer binary's
+  index is refused only when a mapping targets it").
 - **Change 4, the grants.** Postgres and MySQL check the create right even
   for `CREATE TABLE IF NOT EXISTS` on a table that exists (probed). So the
   guard table has always needed CREATE on its schema or database at every
