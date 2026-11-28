@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # G0: the Postgres column-type lookup ignores the schema; Neo4j edge endpoints ignore labels (F-01b)
@@ -49,14 +49,14 @@ and chose "labels in identity" for the edge key: decision
 - [x] The owner's answer (above).
 - [x] The file graph store's label-blind cascade reproduced before the fix
   (below).
-- [ ] Fixes, each with its test green: `from_label`/`to_label` required on
+- [x] Fixes, each with its test green: `from_label`/`to_label` required on
   both stores (missing → exit 2); labelled placeholders merged on both
   stores; Postgres `to_regclass` with `table: app.users`; an edge without
   `properties` (the docs' subgraph example) on both stores; earlier graph
   stores with edges refused (exit 4), nodes-only re-stamped, on both.
-- [ ] rc.1 notes open with "Data correctness: check your data"; README known
+- [x] rc.1 notes open with "Data correctness: check your data"; README known
   issues; release-page notices drafted, not published.
-- [ ] Gates and Docker suites green; PR; merged with all required checks
+- [x] Gates and Docker suites green; PR; merged with all required checks
   green.
 
 ## Constraints and assumptions
@@ -161,3 +161,14 @@ the owner:
 - **Whether the rc.1 notes, or an advisory, should tell 0.12.1 / 0.12.2
   Postgres users and all Neo4j users to check their data.** A wrong-data bug
   in released versions, not a security one: the owner's call.
+
+## Outcome
+
+Fixed in PR #40, merged `f07db53` (all 18 checks green on `e024bd1`):
+`e9918aa` Postgres (`to_regclass`), `e024bd1` graph edge labels, the
+edge-without-properties fix, the graph format bump, docs and these records.
+
+Still open, for the owner:
+- The release-page notices for v0.12.1 and v0.12.2 are drafted outside the
+  repository, and are not published. v0.9.0 has both graph bugs too; its page
+  may want the same notice.
