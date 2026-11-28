@@ -19,7 +19,7 @@ use std::io::{self, Write};
 use std::path::Path;
 
 use crate::adapter::file_store::{
-    LAYOUT_VERSION, remove_if_exists, replay_logs, sync_dir, take_lock,
+    remove_if_exists, replay_logs, sync_dir, take_lock, write_marker,
 };
 use crate::adapter::sql::adapter::SqlError;
 use crate::crash::crash_point;
@@ -37,6 +37,13 @@ const TOMBSTONE: &str = "Moved to .kulyrax/ by Kulyrax 1.0. Kulyrax 0.12 cannot 
 
 /// The guard table's (and MongoDB guard collection's) name in 0.12.
 pub const LEGACY_GUARD_TABLE: &str = "conduit_projection_state";
+
+/// The prefix of 0.12's Neo4j labels (its guard label `__ConduitGuard`),
+/// reserved for mappings (`crate::adapter::reserved`).
+pub const LEGACY_LABEL_PREFIX: &str = "__Conduit";
+
+/// 0.12's guard label in Neo4j, for tests that name it.
+pub const LEGACY_GUARD_LABEL: &str = "__ConduitGuard";
 
 /// What the tombstone view returns, and the MongoDB tombstone's validator
 /// description: why 0.12 cannot use this database.
@@ -186,13 +193,12 @@ pub fn migrate_file_store(dir: &Path, known_dirs: &mut HashSet<String>) -> io::R
     let markers = new_dir.join(LAYOUT);
     if markers.is_dir() {
         for entry in fs::read_dir(&markers)? {
-            let path = entry?.path();
-            let mut f = File::create(&path)?;
-            f.write_all(LAYOUT_VERSION)?;
-            f.sync_all()?;
+            write_marker(&entry?.path())?;
         }
-        sync_dir(&markers)?;
     }
+    // A kill here: the entries are moved and the markers say `2`, but
+    // `.conduit/` is not parked yet (the kill tests start again here).
+    crash_point("format-marker-written");
 
     drop(old_lock);
     remove_if_exists(&old_lock_path)?;

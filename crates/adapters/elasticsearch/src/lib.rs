@@ -57,6 +57,7 @@ use kulyrax_core::adapter::document::runtime::DocumentRuntimeBuilder;
 use kulyrax_core::adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter};
 use kulyrax_core::event::Event;
 use kulyrax_core::execution::stages::{Stage, timed};
+use kulyrax_core::format::{FormatError, FormatProblem};
 use kulyrax_core::routing::StorageKind;
 use kulyrax_core::runtime::AdapterBuildContext;
 use kulyrax_core::runtime::config::{
@@ -74,6 +75,16 @@ const MAX_ATTEMPTS: u32 = 5;
 /// label convention for the same "this is ours, not the user's mapped data"
 /// signal.
 const GUARD_FIELD: &str = "__kulyrax_guard";
+
+/// The format marker's index (step 5): one per cluster.
+const FORMAT_INDEX: &str = "kulyrax_format";
+/// The marker document versioning the guards.
+const GUARDS_COMPONENT: &str = "guards";
+/// The guards' format version.
+const GUARDS_FORMAT: u32 = 1;
+/// What an Elasticsearch user needs for the marker (named in its refusal).
+const MARKER_GRANT: &str = "the index privileges create_index, write and read on the index \
+     kulyrax_format";
 
 /// Documents per `_mget` request.
 const MGET_CHUNK: usize = 1_000;
@@ -276,6 +287,78 @@ impl ElasticsearchAdapter {
             Some((u, p)) => b.basic_auth(u, Some(p)),
             None => b,
         }
+    }
+
+    /// Step 5's format marker (decision 2026-11-28-format-versions; the
+    /// owner chose one marker per cluster): the document `guards` in the
+    /// index [`FORMAT_INDEX`], written with `_create`, which fails with 409
+    /// when it exists, so concurrent first starts leave one. Then read back
+    /// (a GET by id is real time) and checked. A cluster with guards and no
+    /// marker was written by 0.12.x: format 1.
+    fn ensure_format_marker(&self) -> Result<(), DocumentError> {
+        let store = format!(
+            "Elasticsearch {}",
+            kulyrax_core::redact::redact_url(&self.base_url)
+        );
+        let denied = |status: reqwest::StatusCode, what: &str| -> Option<DocumentError> {
+            matches!(status.as_u16(), 401 | 403).then(|| {
+                FormatError::new(
+                    store.clone(),
+                    FormatProblem::MarkerNotCreated {
+                        grant: MARKER_GRANT.to_string(),
+                        cause: format!("{what} returned {status}"),
+                    },
+                )
+                .into()
+            })
+        };
+        let created = self
+            .with_auth(self.client.put(format!(
+                "{}/{FORMAT_INDEX}/_create/{GUARDS_COMPONENT}",
+                self.base_url
+            )))
+            .json(&json!({ "version": GUARDS_FORMAT }))
+            .send()
+            .map_err(es_err)?;
+        let status = created.status();
+        if !(status.is_success() || status == reqwest::StatusCode::CONFLICT) {
+            return Err(denied(status, "creating the marker").unwrap_or_else(|| {
+                DocumentError::WriteFailed(format!(
+                    "{store}: creating the format marker returned {status}"
+                ))
+            }));
+        }
+        let read = self
+            .with_auth(self.client.get(format!(
+                "{}/{FORMAT_INDEX}/_doc/{GUARDS_COMPONENT}",
+                self.base_url
+            )))
+            .send()
+            .map_err(es_err)?;
+        let status = read.status();
+        if !status.is_success() {
+            return Err(denied(status, "reading the marker").unwrap_or_else(|| {
+                DocumentError::WriteFailed(format!(
+                    "{store}: reading the format marker returned {status}"
+                ))
+            }));
+        }
+        let body: Value = read.json().map_err(es_err)?;
+        let version = body
+            .pointer("/_source/version")
+            .and_then(Value::as_u64)
+            .and_then(|v| u32::try_from(v).ok())
+            .ok_or_else(|| {
+                FormatError::new(
+                    store.clone(),
+                    FormatProblem::Unrecognized(format!(
+                        "{FORMAT_INDEX}/{GUARDS_COMPONENT}: {}",
+                        body.get("_source").unwrap_or(&Value::Null)
+                    )),
+                )
+            })?;
+        FormatError::check(&store, version, GUARDS_FORMAT)?;
+        Ok(())
     }
 
     /// Build `event`'s plan. `Err` is the finished result to return instead:
@@ -525,6 +608,29 @@ impl StorageAdapter for ElasticsearchAdapter {
     }
     fn priority(&self) -> u32 {
         self.priority
+    }
+
+    /// Refuse mappings that name what Kulyrax keeps for itself (the marker
+    /// index, the guard field), then check the cluster's format marker (step
+    /// 5), creating it if absent.
+    fn prepare(&self) -> Result<(), AdapterError> {
+        let reserved: Vec<_> = self
+            .builder
+            .mappings()
+            .iter()
+            .flat_map(|(event, m)| {
+                kulyrax_core::adapter::reserved::in_document_mapping(m)
+                    .into_iter()
+                    .map(move |c| (event.clone(), c))
+            })
+            .collect();
+        if let Some(refusal) = kulyrax_core::adapter::reserved::refusal(
+            &format!("elasticsearch adapter {:?}", self.id),
+            reserved,
+        ) {
+            return Err(AdapterError::WriteFailed(refusal));
+        }
+        self.ensure_format_marker().map_err(AdapterError::from)
     }
 
     /// Load every document the batch's events will read, with `_mget`.

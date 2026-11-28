@@ -17,6 +17,7 @@
 #![deny(missing_docs)]
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use r2d2::{Pool, PooledConnection};
@@ -30,6 +31,7 @@ use kulyrax_core::adapter::keyvalue::runtime::KvRuntimeBuilder;
 use kulyrax_core::adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter};
 use kulyrax_core::event::Event;
 use kulyrax_core::execution::stages::{Stage, timed};
+use kulyrax_core::format::{FormatError, FormatProblem};
 use kulyrax_core::routing::StorageKind;
 use kulyrax_core::runtime::AdapterBuildContext;
 use kulyrax_core::runtime::config::{
@@ -45,6 +47,49 @@ const MAX_ATTEMPTS: u32 = 5;
 
 /// Keys per `WATCH` / `MGET`.
 const KEY_CHUNK: usize = 1_000;
+
+/// The format marker (step 5): a hash, one field per component.
+const FORMAT_KEY: &str = "__kulyrax:format";
+/// The marker field that versions the guards.
+const GUARDS_COMPONENT: &str = "guards";
+/// The guards' format version.
+const GUARDS_FORMAT: u32 = 1;
+/// What a Redis ACL user needs for the marker (named in its refusal).
+const MARKER_GRANT: &str = "the ACL rights to run HSETNX and HGET on the key __kulyrax:format \
+     (for example `~__kulyrax:* +hsetnx +hget`)";
+
+/// `CONFIG GET maxmemory-policy`, or `None` when it cannot be read: managed
+/// Redis services often block `CONFIG`, and an ACL user may lack it.
+fn read_maxmemory_policy(conn: &mut PooledConnection<redis::Client>) -> Option<String> {
+    let reply: Vec<String> = redis::cmd("CONFIG")
+        .arg("GET")
+        .arg("maxmemory-policy")
+        .query(&mut **conn)
+        .ok()?;
+    reply.into_iter().nth(1)
+}
+
+/// The line `prepare` prints about the server's eviction policy, if any.
+/// Kulyrax keeps its guards and its format marker in Redis keys with no TTL;
+/// a policy that may evict any key can drop them, and an evicted guard or
+/// marker silently loses data. Nothing here refuses the start:
+/// - an `allkeys-*` policy: a warning naming it;
+/// - a policy that could not be read: one info line saying what is required;
+/// - anything else (`noeviction`, `volatile-*`): nothing.
+fn eviction_notice(id: &str, store: &str, policy: Option<&str>) -> Option<String> {
+    const REQUIRED: &str =
+        "Kulyrax requires noeviction (or volatile-* with no TTLs on Kulyrax keys)";
+    match policy {
+        None => Some(format!(
+            "redis adapter {id} ({store}): could not read maxmemory-policy; {REQUIRED}"
+        )),
+        Some(p) if p.starts_with("allkeys-") => Some(format!(
+            "WARNING: redis adapter {id} ({store}): maxmemory-policy is {p}, so Redis may \
+             evict Kulyrax's guards and format marker and silently lose data. {REQUIRED}"
+        )),
+        Some(_) => None,
+    }
+}
 
 /// A `type: redis` adapter: the entry's `config:` block, plus the entry's `id`
 /// and `priority`. Build one in code with [`Self::new`] and the `with_*`
@@ -166,6 +211,11 @@ fn redis_err(e: redis::RedisError) -> KvError {
 pub struct RedisAdapter {
     id: String,
     priority: u32,
+    /// The server and database, `host:port/db`, for messages: never the URL,
+    /// which can hold a password.
+    store: String,
+    /// Set once `prepare` has checked the eviction policy.
+    eviction_checked: AtomicBool,
     /// `Err` when the URL did not parse; every `handle()` then fails cleanly.
     pool: Result<RedisPool, String>,
     builder: KvRuntimeBuilder,
@@ -360,16 +410,24 @@ impl RedisAdapter {
         upcasters: Arc<UpcasterRegistry>,
         migration_policy: MigrationPolicy,
     ) -> Self {
-        let pool = redis::Client::open(url)
-            .map_err(|e| format!("invalid redis url: {e}"))
-            .map(|client| {
-                Pool::builder()
-                    .max_size(pool_size.max(1))
-                    .build_unchecked(client)
-            });
+        let client = redis::Client::open(url).map_err(|e| format!("invalid redis url: {e}"));
+        let store = client.as_ref().map_or_else(
+            |_| "(invalid url)".to_string(),
+            |c| {
+                let info = c.get_connection_info();
+                format!("{}/{}", info.addr(), info.redis_settings().db())
+            },
+        );
+        let pool = client.map(|client| {
+            Pool::builder()
+                .max_size(pool_size.max(1))
+                .build_unchecked(client)
+        });
         Self {
             id,
             priority,
+            store,
+            eviction_checked: AtomicBool::new(false),
             pool,
             builder,
             upcasters,
@@ -380,6 +438,56 @@ impl RedisAdapter {
 
     fn failure(&self, error: AdapterError) -> AdapterResult {
         AdapterResult::failure(self.id.clone(), StorageKind::KeyValue, error)
+    }
+
+    /// Step 5's format marker (decision 2026-11-28-format-versions): the hash
+    /// [`FORMAT_KEY`], one field per component. `HSETNX` writes the guards'
+    /// version only if absent, atomically, so concurrent first starts leave
+    /// one value; it is then read back and checked. A database with guards
+    /// and no marker was written by 0.12.x and is format 1.
+    fn ensure_format_marker(
+        &self,
+        conn: &mut PooledConnection<redis::Client>,
+    ) -> Result<(), AdapterError> {
+        let store = format!("Redis {}", self.store);
+        let refused = |e: redis::RedisError| -> AdapterError {
+            if e.code() == Some("NOPERM") {
+                FormatError::new(
+                    store.clone(),
+                    FormatProblem::MarkerNotCreated {
+                        grant: MARKER_GRANT.to_string(),
+                        cause: e.to_string(),
+                    },
+                )
+                .into()
+            } else {
+                AdapterError::WriteFailed(e.to_string())
+            }
+        };
+        let _: i64 = redis::cmd("HSETNX")
+            .arg(FORMAT_KEY)
+            .arg(GUARDS_COMPONENT)
+            .arg(GUARDS_FORMAT)
+            .query(&mut **conn)
+            .map_err(refused)?;
+        let found: Option<String> = redis::cmd("HGET")
+            .arg(FORMAT_KEY)
+            .arg(GUARDS_COMPONENT)
+            .query(&mut **conn)
+            .map_err(refused)?;
+        let Some(found) = found else {
+            return Err(AdapterError::WriteFailed(format!(
+                "{store}: the {FORMAT_KEY} marker was not written"
+            )));
+        };
+        let version = found.parse::<u32>().map_err(|_| {
+            FormatError::new(
+                store.clone(),
+                FormatProblem::Unrecognized(format!("{FORMAT_KEY} {GUARDS_COMPONENT} = {found:?}")),
+            )
+        })?;
+        FormatError::check(&store, version, GUARDS_FORMAT)?;
+        Ok(())
     }
 
     fn connection(&self) -> Result<PooledConnection<redis::Client>, AdapterError> {
@@ -475,19 +583,33 @@ impl StorageAdapter for RedisAdapter {
             .mappings()
             .values()
             .map(|m| m.namespace.clone())
-            .filter(|ns| ns.is_empty() || ns.contains(':') || ns.starts_with("__kulyrax"))
+            .filter(|ns| {
+                ns.is_empty()
+                    || ns.contains(':')
+                    || kulyrax_core::adapter::reserved::kv_namespace(ns).is_some()
+            })
             .collect();
-        if bad.is_empty() {
-            return Ok(());
+        if !bad.is_empty() {
+            bad.sort();
+            bad.dedup();
+            return Err(AdapterError::WriteFailed(format!(
+                "redis adapter {:?}: namespaces must be non-empty, contain no `:` and not start \
+                 with `__kulyrax`: {}",
+                self.id,
+                bad.join(", ")
+            )));
         }
-        bad.sort();
-        bad.dedup();
-        Err(AdapterError::WriteFailed(format!(
-            "redis adapter {:?}: namespaces must be non-empty, contain no `:` and not start \
-             with `__kulyrax`: {}",
-            self.id,
-            bad.join(", ")
-        )))
+        let mut conn = self.connection()?;
+        self.ensure_format_marker(&mut conn)?;
+        // Once per adapter: a run prepares its adapters more than once, and
+        // the line is about the start, not each call.
+        if !self.eviction_checked.swap(true, Ordering::Relaxed) {
+            let policy = read_maxmemory_policy(&mut conn);
+            if let Some(line) = eviction_notice(&self.id, &self.store, policy.as_deref()) {
+                eprintln!("{line}");
+            }
+        }
+        Ok(())
     }
 
     /// Check out one connection for the batch, `WATCH` the guard of every
@@ -697,5 +819,45 @@ mod tests {
         let adapter = build("redis://127.0.0.1:1/0");
         assert!(adapter.is_ok());
         assert_eq!(adapter.map(|a| a.kind()).ok(), Some(StorageKind::KeyValue));
+    }
+}
+
+#[cfg(test)]
+mod eviction_tests {
+    use super::eviction_notice;
+
+    #[test]
+    fn an_unreadable_policy_gives_one_info_line() {
+        assert_eq!(
+            eviction_notice("kv", "127.0.0.1:6379/0", None).as_deref(),
+            Some(
+                "redis adapter kv (127.0.0.1:6379/0): could not read maxmemory-policy; \
+                 Kulyrax requires noeviction (or volatile-* with no TTLs on Kulyrax keys)"
+            )
+        );
+    }
+
+    #[test]
+    fn an_allkeys_policy_is_a_warning_naming_it() {
+        for p in ["allkeys-lru", "allkeys-lfu", "allkeys-random"] {
+            let line = eviction_notice("kv", "h:1/2", Some(p)).expect("a warning");
+            assert!(
+                line.starts_with("WARNING: redis adapter kv (h:1/2): "),
+                "{line}"
+            );
+            assert!(line.contains(&format!("maxmemory-policy is {p}")), "{line}");
+        }
+    }
+
+    #[test]
+    fn a_safe_policy_says_nothing() {
+        for p in [
+            "noeviction",
+            "volatile-lru",
+            "volatile-ttl",
+            "volatile-random",
+        ] {
+            assert_eq!(eviction_notice("kv", "h:1/2", Some(p)), None, "{p}");
+        }
     }
 }

@@ -33,6 +33,27 @@ pub enum GraphError {
         /// Why no upcast reaches it.
         reason: String,
     },
+    /// The store's format marker refuses the start: newer than this version
+    /// reads, not recognised, or absent and not creatable. Raised by
+    /// `prepare`, before any guard is read.
+    Format(crate::format::FormatError),
+}
+
+/// A format refusal stays typed ([`crate::adapter::AdapterError::Format`],
+/// exit 4); any other graph error is a write failure with its message.
+impl From<GraphError> for crate::adapter::AdapterError {
+    fn from(e: GraphError) -> Self {
+        match e {
+            GraphError::Format(f) => crate::adapter::AdapterError::Format(f),
+            other => crate::adapter::AdapterError::WriteFailed(other.to_string()),
+        }
+    }
+}
+
+impl From<crate::format::FormatError> for GraphError {
+    fn from(e: crate::format::FormatError) -> Self {
+        GraphError::Format(e)
+    }
 }
 
 impl fmt::Display for GraphError {
@@ -60,8 +81,16 @@ impl fmt::Display for GraphError {
                 "cannot project event {:?} from v{} to mapping v{}: {}",
                 event_type, from_version, to_version, reason
             ),
+            GraphError::Format(e) => write!(f, "{e}"),
         }
     }
 }
 
-impl std::error::Error for GraphError {}
+impl std::error::Error for GraphError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            GraphError::Format(e) => Some(e),
+            _ => None,
+        }
+    }
+}

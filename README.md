@@ -187,6 +187,8 @@ over convenience throughout.
 - [`docs/mapping-reference.md`](docs/mapping-reference.md) — every mapping field, per
   storage kind, with examples, and the [rules for names](docs/mapping-reference.md#names)
   (namespaces, collections, tables, columns, labels) each backend checks at start-up.
+- [`docs/required-grants.md`](docs/required-grants.md) — what the database user Kulyrax
+  connects as must be allowed to do, per backend, and Redis's eviction policy.
 - [`architecture.md`](architecture.md) — the three-part structure (engine / sources /
   adapters), dependency rules, and open-source vs. product scope.
 - [`docs/producer-contract.md`](docs/producer-contract.md) — the ordering/delivery

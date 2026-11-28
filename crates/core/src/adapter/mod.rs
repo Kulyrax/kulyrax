@@ -12,6 +12,7 @@ pub mod keyvalue;
 #[doc(hidden)]
 pub mod legacy;
 pub(crate) mod loader;
+pub mod reserved;
 /// The SQL storage kind: the trait a SQL backend implements, the mappings, and
 /// the SQLite adapter.
 pub mod sql;
@@ -36,6 +37,10 @@ pub enum AdapterError {
     WriteFailed(String),
     /// No upcaster chain to the mapping's target version, under `MigrationPolicy::Strict`.
     UnsupportedVersion(String),
+    /// The store's on-disk format is refused: newer than this version reads,
+    /// not a Kulyrax format, or its marker could not be created. A safety
+    /// refusal, raised by `prepare` before anything is read or written.
+    Format(crate::format::FormatError),
 }
 
 impl fmt::Display for AdapterError {
@@ -43,11 +48,25 @@ impl fmt::Display for AdapterError {
         match self {
             AdapterError::WriteFailed(msg) => write!(f, "{}", msg),
             AdapterError::UnsupportedVersion(msg) => write!(f, "{}", msg),
+            AdapterError::Format(e) => write!(f, "{e}"),
         }
     }
 }
 
-impl std::error::Error for AdapterError {}
+impl std::error::Error for AdapterError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            AdapterError::Format(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<crate::format::FormatError> for AdapterError {
+    fn from(e: crate::format::FormatError) -> Self {
+        AdapterError::Format(e)
+    }
+}
 
 /// Why an adapter skipped an event without writing anything (Phase 12.1;
 /// extended Phase 13.1). Machine-readable — call sites match on this instead
@@ -537,6 +556,9 @@ pub struct PrepareFailure {
     pub adapter_id: String,
     /// Why it failed.
     pub message: String,
+    /// The failure is a safety refusal (an [`AdapterError::Format`]), not an
+    /// error: the CLI exits 4 for it.
+    pub refused: bool,
 }
 
 impl fmt::Display for PrepareFailure {
@@ -554,6 +576,7 @@ pub fn prepare_adapters(adapters: &[Box<dyn StorageAdapter>]) -> Vec<PrepareFail
             a.prepare().err().map(|e| PrepareFailure {
                 adapter_id: a.id().to_string(),
                 message: e.to_string(),
+                refused: matches!(e, AdapterError::Format(_)),
             })
         })
         .collect()

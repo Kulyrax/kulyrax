@@ -65,8 +65,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: cargo test -p kulyrax-adapter-postgres --test pg_backend --test pg_rename
-        run: cargo test -p kulyrax-adapter-postgres --test pg_backend --test pg_rename
+      - name: cargo test -p kulyrax-adapter-postgres --test pg_backend --test pg_rename --test pg_format
+        run: cargo test -p kulyrax-adapter-postgres --test pg_backend --test pg_rename --test pg_format
         env:
           KULYRAX_PG_URL: postgres://postgres:kulyrax@localhost:5432/kulyrax_ci
       # The F-01 regression; its foreign-key case runs here.
@@ -121,8 +121,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: cargo test -p kulyrax-adapter-redis --test redis_backend
-        run: cargo test -p kulyrax-adapter-redis --test redis_backend
+      - name: cargo test -p kulyrax-adapter-redis --test redis_backend --test redis_format
+        run: cargo test -p kulyrax-adapter-redis --test redis_backend --test redis_format
+        env:
+          KULYRAX_REDIS_URL: redis://localhost:6379
+      # The eviction-policy info line, through the binary.
+      - name: cargo test -p kulyrax-cli --test redis_eviction_notice
+        run: cargo test -p kulyrax-cli --test redis_eviction_notice
         env:
           KULYRAX_REDIS_URL: redis://localhost:6379
 
@@ -150,8 +155,8 @@ jobs:
             [ "$state" = "1" ] && break
             sleep 1
           done
-      - name: cargo test -p kulyrax-adapter-mongodb --test mongo_backend --test mongo_rename
-        run: cargo test -p kulyrax-adapter-mongodb --test mongo_backend --test mongo_rename
+      - name: cargo test -p kulyrax-adapter-mongodb --test mongo_backend --test mongo_rename --test mongo_format
+        run: cargo test -p kulyrax-adapter-mongodb --test mongo_backend --test mongo_rename --test mongo_format
         env:
           KULYRAX_MONGO_URL: mongodb://localhost:27017/?directConnection=true
 
@@ -174,8 +179,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: cargo test -p kulyrax-adapter-neo4j --test neo4j_backend --test neo4j_rename
-        run: cargo test -p kulyrax-adapter-neo4j --test neo4j_backend --test neo4j_rename
+      - name: cargo test -p kulyrax-adapter-neo4j --test neo4j_backend --test neo4j_rename --test neo4j_format
+        run: cargo test -p kulyrax-adapter-neo4j --test neo4j_backend --test neo4j_rename --test neo4j_format
         env:
           KULYRAX_NEO4J_URI: bolt://localhost:7687
           KULYRAX_NEO4J_USER: neo4j
@@ -240,8 +245,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # Serially: on one node, parallel index creation queues behind
       # cluster-state writes until requests time out.
-      - name: cargo test -p kulyrax-adapter-elasticsearch --test es_backend
-        run: cargo test -p kulyrax-adapter-elasticsearch --test es_backend -- --test-threads=1
+      - name: cargo test -p kulyrax-adapter-elasticsearch --test es_backend --test es_format
+        run: cargo test -p kulyrax-adapter-elasticsearch --test es_backend --test es_format -- --test-threads=1
         env:
           KULYRAX_ELASTICSEARCH_URL: http://localhost:9200
 

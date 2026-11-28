@@ -50,6 +50,7 @@ use kulyrax_core::adapter::graph::runtime::{GraphProjection, GraphRuntimeBuilder
 use kulyrax_core::adapter::{AdapterError, AdapterResult, Prepared, SkipReason, StorageAdapter};
 use kulyrax_core::event::Event;
 use kulyrax_core::execution::stages::{Stage, timed};
+use kulyrax_core::format::{FormatError, FormatProblem};
 use kulyrax_core::routing::StorageKind;
 use kulyrax_core::runtime::AdapterBuildContext;
 use kulyrax_core::runtime::config::{
@@ -239,6 +240,85 @@ fn neo_err(e: neo4rs::Error) -> GraphError {
     }
 }
 
+/// The format marker (step 5): one `:__KulyraxFormat` node per component,
+/// unique on `component`, so `MERGE` creates it at most once.
+const FORMAT_CONSTRAINT: &str = "CREATE CONSTRAINT kulyrax_format_component IF NOT EXISTS \
+    FOR (f:__KulyraxFormat) REQUIRE f.component IS UNIQUE";
+const FORMAT_MERGE: &str = "MERGE (f:__KulyraxFormat {component: $component}) \
+    ON CREATE SET f.version = $version RETURN f.version AS version";
+/// The marker node versioning the guards.
+const GUARDS_COMPONENT: &str = "guards";
+/// The guards' format version.
+const GUARDS_FORMAT: i64 = 1;
+/// What a Neo4j user needs for the marker (named in its refusal).
+const MARKER_GRANT: &str = "the rights to create the constraint kulyrax_format_component and \
+     to create and read :__KulyraxFormat nodes (Neo4j Enterprise: CREATE CONSTRAINT, and MERGE \
+     and MATCH on that label)";
+/// Attempts at the `MERGE` when concurrent first starts collide.
+const MARKER_ATTEMPTS: u32 = 5;
+
+/// Step 5's format marker (decision 2026-11-28-format-versions): written only
+/// if absent, read back, and checked, before the guard constraint and any
+/// 0.12 migration. A database with guards and no marker was written by
+/// 0.12.x: format 1.
+async fn ensure_format_marker(graph: &Graph, store: &str) -> Result<(), GraphError> {
+    let refused = |e: neo4rs::Error| -> GraphError {
+        let forbidden = matches!(&e, neo4rs::Error::Neo4j(ne)
+            if ne.code() == "Neo.ClientError.Security.Forbidden");
+        if forbidden {
+            FormatError::new(
+                store,
+                FormatProblem::MarkerNotCreated {
+                    grant: MARKER_GRANT.to_string(),
+                    cause: e.to_string(),
+                },
+            )
+            .into()
+        } else {
+            neo_err(e)
+        }
+    };
+    graph
+        .run(Query::new(FORMAT_CONSTRAINT.to_string()))
+        .await
+        .map_err(refused)?;
+    // Two first starts can both try to create the node; the constraint lets
+    // one in and fails the other, which then finds it.
+    let mut attempt = 0;
+    let row = loop {
+        attempt += 1;
+        let query = Query::new(FORMAT_MERGE.to_string())
+            .param("component", GUARDS_COMPONENT)
+            .param("version", GUARDS_FORMAT);
+        let result = async { graph.execute(query).await?.next().await }.await;
+        match result {
+            Ok(row) => break row,
+            Err(neo4rs::Error::Neo4j(ne))
+                if attempt < MARKER_ATTEMPTS
+                    && (matches!(ne.kind(), Neo4jErrorKind::Transient)
+                        || ne.code() == "Neo.ClientError.Schema.ConstraintValidationFailed") => {}
+            Err(e) => return Err(refused(e)),
+        }
+    };
+    let row = row.ok_or_else(|| {
+        GraphError::WriteFailed(format!("{store}: the format marker was not written"))
+    })?;
+    let version = row
+        .get::<i64>("version")
+        .ok()
+        .and_then(|v| u32::try_from(v).ok())
+        .ok_or_else(|| {
+            FormatError::new(
+                store,
+                FormatProblem::Unrecognized(format!(
+                    ":__KulyraxFormat {GUARDS_COMPONENT} has a version that is not a number"
+                )),
+            )
+        })?;
+    FormatError::check(store, version, GUARDS_FORMAT as u32)?;
+    Ok(())
+}
+
 fn de_err(e: neo4rs::DeError) -> GraphError {
     GraphError::WriteFailed(format!("corrupt guard row: {e}"))
 }
@@ -271,6 +351,8 @@ fn lane_fields(guard: &GraphGuard, facet: &str) -> (u64, String, bool, bool) {
 pub struct Neo4jAdapter {
     id: String,
     priority: u32,
+    /// The server and database for messages, the URI redacted.
+    store: String,
     /// `Err` when connecting failed; every `handle()` then fails cleanly.
     /// `neo4rs` has no lazy connect, so unlike the other networked backends
     /// this connects when the adapter is built.
@@ -303,6 +385,11 @@ impl Neo4jAdapter {
         upcasters: Arc<UpcasterRegistry>,
         migration_policy: MigrationPolicy,
     ) -> Self {
+        let store = format!(
+            "Neo4j {} database {}",
+            kulyrax_core::redact::redact_url(uri),
+            database.as_deref().unwrap_or("(default)")
+        );
         let conn = (|| -> Result<(Runtime, Graph), String> {
             let rt = Runtime::new()
                 .map_err(|e| format!("failed to start an internal tokio runtime: {e}"))?;
@@ -321,6 +408,7 @@ impl Neo4jAdapter {
         Self {
             id,
             priority,
+            store,
             conn,
             builder,
             upcasters,
@@ -341,10 +429,15 @@ impl Neo4jAdapter {
         AdapterResult::failure(self.id.clone(), StorageKind::Graph, error)
     }
 
-    /// Create the guard uniqueness constraint (idempotent: `IF NOT EXISTS`),
-    /// then move any 0.12 guards onto it.
+    /// Check the format marker, create the guard uniqueness constraint
+    /// (idempotent: `IF NOT EXISTS`), then move any 0.12 guards onto it.
     fn ensure_constraint(&self, rt: &Runtime, graph: &Graph) -> Result<(), GraphError> {
         rt.block_on(async {
+            ensure_format_marker(graph, &self.store).await?;
+            // A kill here: the marker is written, the guard constraint and
+            // the 0.12 relabelling have not run (the kill tests start again
+            // here).
+            kulyrax_core::crash::crash_point("format-marker-written");
             graph
                 .run(Query::new(GUARD_CONSTRAINT.to_string()))
                 .await
@@ -397,13 +490,29 @@ impl StorageAdapter for Neo4jAdapter {
                 bad.join(", ")
             )));
         }
+        let reserved: Vec<_> = self
+            .builder
+            .mappings()
+            .iter()
+            .flat_map(|(event, m)| {
+                kulyrax_core::adapter::reserved::in_graph_mapping(m)
+                    .into_iter()
+                    .map(move |c| (event.clone(), c))
+            })
+            .collect();
+        if let Some(refusal) = kulyrax_core::adapter::reserved::refusal(
+            &format!("neo4j adapter {:?}", self.id),
+            reserved,
+        ) {
+            return Err(AdapterError::WriteFailed(refusal));
+        }
         let (rt, graph) = self
             .conn
             .as_ref()
             .map_err(|e| AdapterError::WriteFailed(e.clone()))?;
         self.prepared
             .prepare(|| timed(Stage::Schema, || self.ensure_constraint(rt, graph)))
-            .map_err(|e| AdapterError::WriteFailed(e.to_string()))
+            .map_err(AdapterError::from)
     }
 
     fn begin_batch(&self, _events: &[&Event]) -> Result<(), AdapterError> {

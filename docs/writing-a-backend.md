@@ -143,6 +143,30 @@ larger record, nested is simpler. If it can only CAS a top-level column or
 property, flat is not optional — it's what makes the atomicity contract
 above achievable at all.
 
+## The format marker
+
+Whatever you persist, record its version once per store, so that a later
+version of your backend can tell its own data from yours and refuse what it
+cannot read ([stability §5](stability.md#5-persisted-formats)). The built-in
+backends keep one marker each, checked in `StorageAdapter::prepare` before
+any guard is read:
+
+- **SQL:** `SqlTxn::ensure_format_marker` is a required method. `ensure_schema`
+  runs it before `ensure_guard_table`. Create `kulyrax_format (component,
+  version)` unqualified (so beside the guard table), insert `('guards',
+  GUARDS_FORMAT)` only if absent with your dialect's atomic form (`ON CONFLICT
+  DO NOTHING`, `INSERT IGNORE`, `INSERT OR IGNORE`), read it back, and pass it
+  to `exec::check_guards_format`.
+- **Other kinds** have no trait method: do the same in your adapter's
+  `prepare`, with your store's atomic insert-if-absent. Return a
+  `kulyrax_core::format::FormatError` through your kind's `Format` error
+  variant (`DocumentError::Format`, `GraphError::Format`) or directly as
+  `AdapterError::Format`, so the CLI exits `4` for it.
+
+A store with your guards and no marker is one your backend wrote before it had
+markers: read it as format 1. A permission error while creating the marker is
+`FormatProblem::MarkerNotCreated`, naming the grant.
+
 ## Registering your backend
 
 Once you have a `StorageAdapter` implementation (built directly, or via one

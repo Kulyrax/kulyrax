@@ -9,5 +9,10 @@ use crate::adapter::loader::load_mapping_dir;
 pub fn load_graph_mappings<P: AsRef<Path>>(
     dir: P,
 ) -> Result<HashMap<String, GraphMapping>, crate::pipeline::LoadError> {
-    load_mapping_dir(dir.as_ref(), "graph", |m: &GraphMapping| m.event())
+    load_mapping_dir(
+        dir.as_ref(),
+        "graph",
+        |m: &GraphMapping| m.event(),
+        crate::adapter::reserved::in_graph_mapping,
+    )
 }

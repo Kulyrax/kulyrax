@@ -68,6 +68,12 @@ struct Backend {
     tombstone: bool,
     /// Drops what the test created on a shared server.
     cleanup: Option<Box<dyn Fn()>>,
+    /// The store's format version as stored (step 5), read from the server
+    /// or, for file stores, under the project directory.
+    marker: Box<dyn Fn(&Path) -> String>,
+    /// What [`Self::marker`] must read after this version has opened the
+    /// store: `2` for file stores (their layout numbering), `1` elsewhere.
+    format: &'static str,
 }
 
 impl Drop for Backend {
@@ -274,13 +280,38 @@ fn old_fails(old: &Path, b: &Backend, p: &Path) {
     );
 }
 
+/// Step 5: the store and the source checkpoint, written by 0.12.1 without a
+/// format version, carry this version's after the upgrade.
+fn versioned(b: &Backend, p: &Path) {
+    assert_eq!(
+        (b.marker)(p),
+        b.format,
+        "{}: the store's format marker after the upgrade",
+        b.name
+    );
+    let checkpoint = std::fs::read_to_string(p.join("state").join("events.json")).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&checkpoint).unwrap();
+    assert_eq!(
+        value["format"], 1,
+        "{}: the checkpoint\n{checkpoint}",
+        b.name
+    );
+}
+
 fn upgrade(b: Backend) {
     let Some(old) = old_bin() else {
         eprintln!("SKIP: KULYRAX_V0121_BIN not set");
         return;
     };
     let dir = with_0_12_1(&old, &b);
+    let checkpoint = std::fs::read_to_string(dir.path().join("state").join("events.json")).unwrap();
+    assert!(
+        !checkpoint.contains("\"format\""),
+        "{}: 0.12.1 wrote no checkpoint format\n{checkpoint}",
+        b.name
+    );
     upgraded(&b, dir.path());
+    versioned(&b, dir.path());
     if b.tombstone {
         old_fails(&old, &b, dir.path());
     }
@@ -315,6 +346,7 @@ fn killed_at(b: Backend, point: &str) {
         b.name,
         text(&out)
     );
+    versioned(&b, dir.path());
     if b.tombstone {
         old_fails(&old, &b, dir.path());
     }
@@ -337,6 +369,19 @@ fn file_store(kind: Kind) -> Backend {
         target: if kind == Kind::Graph { "User" } else { "users" }.to_string(),
         tombstone: true,
         cleanup: None,
+        marker: Box::new(move |p: &Path| {
+            let kind = match kind {
+                Kind::Document => "document",
+                Kind::KeyValue => "kv",
+                _ => "graph",
+            };
+            let path = p.join("store").join(".kulyrax").join("layout").join(kind);
+            std::fs::read_to_string(path)
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        }),
+        format: "2",
     }
 }
 
@@ -356,6 +401,19 @@ fn sqlite(dir_for_db: &Path) -> Backend {
         target: "users".into(),
         tombstone: true,
         cleanup: None,
+        marker: Box::new(move |_: &Path| {
+            rusqlite::Connection::open(&db)
+                .and_then(|c| {
+                    c.query_row(
+                        "SELECT version FROM kulyrax_format WHERE component = 'guards'",
+                        [],
+                        |r| r.get::<_, i64>(0),
+                    )
+                })
+                .map(|v| v.to_string())
+                .unwrap_or_else(|e| format!("unreadable: {e}"))
+        }),
+        format: "1",
     }
 }
 
@@ -368,6 +426,7 @@ fn postgres() -> Option<Backend> {
     ))
     .unwrap();
     let sep = if base.contains('?') { '&' } else { '?' };
+    let (read_base, read_schema) = (base.clone(), schema.clone());
     Some(Backend {
         name: "postgres",
         kind: Kind::Sql,
@@ -381,6 +440,20 @@ fn postgres() -> Option<Backend> {
                 let _ = c.batch_execute(&format!("DROP SCHEMA IF EXISTS {schema} CASCADE"));
             }
         })),
+        marker: Box::new(move |_: &Path| {
+            ::postgres::Client::connect(&read_base, ::postgres::NoTls)
+                .and_then(|mut c| {
+                    c.query_one(
+                        &format!(
+                            "SELECT version FROM {read_schema}.kulyrax_format WHERE component = 'guards'"
+                        ),
+                        &[],
+                    )
+                })
+                .map(|r| r.get::<_, i32>(0).to_string())
+                .unwrap_or_else(|e| format!("unreadable: {e}"))
+        }),
+        format: "1",
     })
 }
 
@@ -399,6 +472,7 @@ fn mysql() -> Option<Backend> {
     .unwrap();
     let (server, _) = base.rsplit_once('/').unwrap();
     let server = server.to_string();
+    let (read_base, read_db) = (base.clone(), db.clone());
     Some(Backend {
         name: "mysql",
         kind: Kind::Sql,
@@ -410,6 +484,21 @@ fn mysql() -> Option<Backend> {
                 let _ = conn.query_drop(format!("DROP DATABASE IF EXISTS {db}"));
             }
         })),
+        marker: Box::new(move |_: &Path| {
+            let version: Result<Option<i64>, ::mysql::Error> =
+                ::mysql::Pool::new(read_base.as_str())
+                    .and_then(|p| p.get_conn())
+                    .and_then(|mut c| {
+                        c.query_first(format!(
+                    "SELECT version FROM {read_db}.kulyrax_format WHERE component = 'guards'"
+                ))
+                    });
+            match version {
+                Ok(Some(v)) => v.to_string(),
+                other => format!("unreadable: {other:?}"),
+            }
+        }),
+        format: "1",
     })
 }
 
@@ -417,6 +506,7 @@ fn mongodb() -> Option<Backend> {
     let url = env("KULYRAX_MONGO_URL")?;
     let db = unique("kx_upgrade_");
     let drop_db = db.clone();
+    let (read_url, read_db) = (url.clone(), db.clone());
     Some(Backend {
         name: "mongodb",
         kind: Kind::Document,
@@ -430,6 +520,21 @@ fn mongodb() -> Option<Backend> {
                 let _ = client.database(&drop_db).drop().run();
             }
         })),
+        marker: Box::new(move |_: &Path| {
+            let found = mongodb::sync::Client::with_uri_str(&read_url).and_then(|c| {
+                c.database(&read_db)
+                    .collection::<mongodb::bson::Document>("kulyrax_format")
+                    .find_one(mongodb::bson::doc! { "_id": "guards" })
+                    .run()
+            });
+            match found {
+                Ok(Some(d)) => d
+                    .get("version")
+                    .map_or("no version".to_string(), |v| v.to_string()),
+                other => format!("unreadable: {other:?}"),
+            }
+        }),
+        format: "1",
     })
 }
 
@@ -451,6 +556,24 @@ fn neo4j() -> Option<Backend> {
         cleanup: Some(Box::new(move || {
             let _ = &lease;
         })),
+        marker: Box::new(move |_: &Path| {
+            let read = || -> Result<String, Box<dyn std::error::Error>> {
+                let rt = tokio::runtime::Runtime::new()?;
+                rt.block_on(async {
+                    let graph = neo4rs::Graph::new(&uri, user.clone(), password.clone()).await?;
+                    let mut rows = graph
+                        .execute(neo4rs::Query::new(
+                            "MATCH (f:__KulyraxFormat {component: 'guards'}) RETURN f.version AS v"
+                                .to_string(),
+                        ))
+                        .await?;
+                    let row = rows.next().await?.ok_or("no marker node")?;
+                    Ok(row.get::<i64>("v")?.to_string())
+                })
+            };
+            read().unwrap_or_else(|e| format!("unreadable: {e}"))
+        }),
+        format: "1",
     })
 }
 
@@ -482,6 +605,21 @@ fn redis() -> Option<Backend> {
                 }
             }
         })),
+        // One marker per Redis database: it may predate this test, so the
+        // test checks its value, not who wrote it.
+        marker: Box::new(move |_: &Path| {
+            redis::Client::open(url.as_str())
+                .and_then(|c| c.get_connection())
+                .and_then(|mut c| {
+                    redis::cmd("HGET")
+                        .arg("__kulyrax:format")
+                        .arg("guards")
+                        .query::<Option<String>>(&mut c)
+                })
+                .map(|v| v.unwrap_or_else(|| "absent".to_string()))
+                .unwrap_or_else(|e| format!("unreadable: {e}"))
+        }),
+        format: "1",
     })
 }
 
@@ -506,6 +644,19 @@ fn elasticsearch() -> Option<Backend> {
                 .delete(format!("{server}/{index}"))
                 .send();
         })),
+        // One marker per cluster: it may predate this test, so the test
+        // checks its value, not who wrote it.
+        marker: Box::new(move |_: &Path| {
+            let body = reqwest::blocking::Client::new()
+                .get(format!("{url}/kulyrax_format/_doc/guards"))
+                .send()
+                .and_then(|r| r.text());
+            match body.map(|b| serde_json::from_str::<serde_json::Value>(&b)) {
+                Ok(Ok(v)) => v["_source"]["version"].to_string(),
+                other => format!("unreadable: {other:?}"),
+            }
+        }),
+        format: "1",
     })
 }
 
@@ -565,6 +716,7 @@ fn file_store_migration_killed_at_each_step() {
     for point in [
         "legacy-move:1",
         "legacy-move:2",
+        "format-marker-written:1",
         "legacy-park:1",
         "legacy-tombstone:1",
     ] {
@@ -576,35 +728,46 @@ fn file_store_migration_killed_at_each_step() {
 
 #[test]
 fn sqlite_migration_killed_before_commit() {
-    let db = tempfile::tempdir().unwrap();
-    killed_at(sqlite(db.path()), "guard-table-renamed:1");
+    for point in ["format-marker-written:1", "guard-table-renamed:1"] {
+        let db = tempfile::tempdir().unwrap();
+        killed_at(sqlite(db.path()), point);
+    }
 }
 
 #[test]
 fn postgres_migration_killed_before_commit() {
-    postgres().map_or_else(
-        || skip("postgres"),
-        |b| killed_at(b, "guard-table-renamed:1"),
-    );
+    for point in ["format-marker-written:1", "guard-table-renamed:1"] {
+        postgres().map_or_else(|| skip("postgres"), |b| killed_at(b, point));
+    }
 }
 
 #[test]
 fn mysql_migration_killed_at_each_step() {
-    for point in ["guard-tombstone-created:1", "guard-table-renamed:1"] {
+    for point in [
+        "format-marker-written:1",
+        "guard-tombstone-created:1",
+        "guard-table-renamed:1",
+    ] {
         mysql().map_or_else(|| skip("mysql"), |b| killed_at(b, point));
     }
 }
 
 #[test]
 fn mongodb_migration_killed_at_each_step() {
-    for point in ["guard-tombstone-created:1", "guard-table-renamed:1"] {
+    for point in [
+        "format-marker-written:1",
+        "guard-tombstone-created:1",
+        "guard-table-renamed:1",
+    ] {
         mongodb().map_or_else(|| skip("mongodb"), |b| killed_at(b, point));
     }
 }
 
 #[test]
 fn neo4j_migration_killed_between_batches() {
-    neo4j().map_or_else(|| skip("neo4j"), |b| killed_at(b, "guard-relabel-batch:1"));
+    for point in ["format-marker-written:1", "guard-relabel-batch:1"] {
+        neo4j().map_or_else(|| skip("neo4j"), |b| killed_at(b, point));
+    }
 }
 
 /// 0.12.1 killed after writing a batch log: the log names `.conduit/` paths.

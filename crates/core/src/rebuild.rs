@@ -89,15 +89,20 @@ impl From<SqlError> for RebuildError {
     fn from(e: SqlError) -> Self {
         match e {
             SqlError::RebuildRefused(m) => RebuildError::Refused(m),
+            SqlError::Format(f) => RebuildError::Refused(f.to_string()),
             other => RebuildError::Failed(other.to_string()),
         }
     }
 }
 
-/// The adapter could not be reached (a poisoned lock, no connection).
+/// The adapter could not be reached (a poisoned lock, no connection), or its
+/// store's format refused the start, which stays a refusal.
 impl From<AdapterError> for RebuildError {
     fn from(e: AdapterError) -> Self {
-        RebuildError::Failed(e.to_string())
+        match e {
+            AdapterError::Format(f) => RebuildError::Refused(f.to_string()),
+            other => RebuildError::Failed(other.to_string()),
+        }
     }
 }
 
