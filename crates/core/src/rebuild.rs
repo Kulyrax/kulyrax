@@ -101,6 +101,7 @@ impl From<AdapterError> for RebuildError {
     fn from(e: AdapterError) -> Self {
         match e {
             AdapterError::Format(f) => RebuildError::Refused(f.to_string()),
+            AdapterError::Locked(msg) => RebuildError::Refused(msg),
             other => RebuildError::Failed(other.to_string()),
         }
     }

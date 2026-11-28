@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # A format version in every persisted format (step 5, E1 + E2)
@@ -71,9 +71,11 @@ that each migrates from 0.12.1.
 - [x] `stability.md` §5: the rules, every format and where its version is,
   what is not versioned. rc.1 notes: a "Versioned formats" section and the
   exit-4 row. `writing-a-backend.md`: the marker.
-- [ ] Gates: fmt, clippy `-D warnings`, workspace tests, examples, every Docker
-  backend suite.
-- [ ] PR merged with the 12 required checks green.
+- [x] Gates: fmt, clippy `-D warnings`, workspace tests, examples, every Docker
+  backend suite (one unexplained cli failure, not reproduced in 38 runs; see
+  Verification).
+- [x] PR #37 merged with every check green (all 18, the 12 required among
+  them) on `c42361c`; merge commit `cec22cb`.
 
 ## Constraints and assumptions
 
@@ -194,4 +196,7 @@ that each migrates from 0.12.1.
 
 ## Outcome
 
-In progress.
+Completed: merged in #37 (`cec22cb`). Open for the owner:
+- SQL least privilege (above);
+- the buf job is still not a required check (D9);
+- the one unexplained failure.

@@ -62,7 +62,11 @@ Filled in here; these were not in the asked mapping:
   designed. The `--once` rule ("dead-lettered is 3") is the owner's.
 - **A held file-store lock stays 1.** It surfaces as an adapter prepare failure
   (`AdapterPrepare`), and the approved mapping named the source lock only.
-  Reported to the owner as a possible follow-up.
+  Reported to the owner as a possible follow-up. **Resolved (E2b, 2026-11-28):**
+  the owner, on the D8 report: "A held file-store lock exits 4, per D7; a CLI
+  test proving it." It is now 4: `AdapterError::Locked` marks
+  `PrepareFailure::refused` (the typed refusal step 5 added for formats).
+  Test: `exit_codes.rs`, `exit_4_when_a_safety_check_refuses`.
 
 ## Trade-offs accepted
 
@@ -73,5 +77,7 @@ Filled in here; these were not in the asked mapping:
 
 ## Revisit if
 
-- A held file-store lock should be 4: give `PrepareFailure` a typed refusal.
-- Step 5 adds the newer-format refusal: map it to 4 here, with a CLI test.
+- ~~A held file-store lock should be 4: give `PrepareFailure` a typed refusal.~~
+  Done in E2b (above).
+- ~~Step 5 adds the newer-format refusal: map it to 4 here, with a CLI test.~~
+  Done in step 5 (decision `2026-11-28-format-versions`, #37).

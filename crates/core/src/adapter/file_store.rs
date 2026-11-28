@@ -77,10 +77,16 @@ const IO_THREADS: usize = 8;
 const PARALLEL_MIN: usize = 64;
 
 fn io_err(e: io::Error) -> AdapterError {
-    match FormatError::from_io(&e) {
-        Some(format) => AdapterError::Format(format),
-        None => AdapterError::WriteFailed(e.to_string()),
+    if let Some(format) = FormatError::from_io(&e) {
+        return AdapterError::Format(format);
     }
+    if let Some(held) = e
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<LockHeld>())
+    {
+        return AdapterError::Locked(held.0.clone());
+    }
+    AdapterError::WriteFailed(e.to_string())
 }
 
 fn other(msg: String) -> io::Error {
@@ -776,16 +782,30 @@ pub(crate) fn take_lock(dir: &Path, lock_path: &Path, create: bool) -> io::Resul
         Ok(()) => Ok(lock),
         Err(fs::TryLockError::WouldBlock) => Err(io::Error::new(
             io::ErrorKind::WouldBlock,
-            format!(
+            LockHeld(format!(
                 "file store {} is in use by another process (lock {} is held); \
                  only one Kulyrax process may write to a file store",
                 dir.display(),
                 lock_path.display()
-            ),
+            )),
         )),
         Err(fs::TryLockError::Error(e)) => Err(e),
     }
 }
+
+/// Another process holds a store's lock: carried through [`io::Error`] by
+/// [`take_lock`] and turned into [`AdapterError::Locked`] by `io_err`, a
+/// safety refusal (exit 4), not a failure.
+#[derive(Debug)]
+struct LockHeld(String);
+
+impl std::fmt::Display for LockHeld {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for LockHeld {}
 
 /// Replay every batch log under the root, oldest first, then fsync what they
 /// touched and delete them. Returns the next free log sequence number.

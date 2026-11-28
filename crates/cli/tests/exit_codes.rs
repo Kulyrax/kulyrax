@@ -202,6 +202,35 @@ fn exit_4_when_a_safety_check_refuses() {
     assert_code(held, 4);
     drop(lock);
 
+    // A file store's lock is held by another process (here, this test): only
+    // one process may write to a file store. (D7 left this at 1; the owner
+    // made it 4, decision 2026-11-26-exit-codes.)
+    let p = project("users", &[GOOD]);
+    let config = std::fs::read_to_string(p.path().join("config.yaml")).expect("read");
+    let doc =
+        "  - type: file\n    id: doc\n    priority: 20\n    config:\n      root: store\nsources:";
+    write(
+        p.path().join("config.yaml"),
+        &config.replacen("sources:", doc, 1),
+    );
+    let lock_path = p.path().join("store/.kulyrax/lock");
+    std::fs::create_dir_all(lock_path.parent().expect("parent")).expect("mkdir");
+    let store_lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .expect("lock file");
+    store_lock.try_lock().expect("take the store's lock");
+    let held = kulyrax(p.path(), RUN_ONCE);
+    assert!(
+        held.1.contains("is in use by another process"),
+        "{}",
+        held.1
+    );
+    assert_code(held, 4);
+    drop(store_lock);
+
     // A rebuild whose table a view depends on: the swap would break it. (A
     // mapped table named like a shadow, the other case D7 tested here, is now
     // refused when the mappings load: exit 2, below.)

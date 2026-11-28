@@ -16,7 +16,6 @@ use kulyrax_core::rebuild::RebuildError;
 use kulyrax_core::replay::ReplayLoadError;
 use kulyrax_core::runtime::config::ConfigError;
 use kulyrax_core::runtime::dependency_graph::DependencyOrderError;
-use kulyrax_core::runtime::error::RuntimeError;
 use kulyrax_core::source::SourceError;
 use kulyrax_core::upcast::UpcastError;
 use kulyrax_core::yaml::YamlError;
@@ -36,7 +35,6 @@ fn every_public_error_is_send_sync_static() {
     is_error::<ReplayLoadError>();
     is_error::<ConfigError>();
     is_error::<DependencyOrderError>();
-    is_error::<RuntimeError>();
     is_error::<SourceError>();
     is_error::<UpcastError>();
     is_error::<YamlError>();

@@ -10,8 +10,6 @@ pub mod config;
 pub mod dependency_graph;
 pub mod dry_run;
 pub mod engine;
-/// The runtime error type.
-pub mod error;
 pub(crate) mod execute;
 pub(crate) mod factory;
 pub mod registry;
@@ -29,8 +27,6 @@ pub use dependency_graph::{
 pub use dry_run::{DryRunAdapter, DryRunOutcome, DryRunReport, PlannedWrite};
 #[doc(hidden)]
 pub use engine::KulyraxRuntime;
-#[doc(hidden)]
-pub use error::RuntimeError;
 #[doc(hidden)]
 pub use factory::{
     AdapterBuildFailure, build_adapters_from_config, build_adapters_reporting_failures,

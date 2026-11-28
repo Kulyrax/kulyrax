@@ -166,10 +166,10 @@ Commands: `init [DIR]`, `run`, `sources`, `ingest`, `reload`, `explain`,
 | Code | Meaning | When |
 |---|---|---|
 | `0` | Success | Everything the command was asked to do was done. |
-| `1` | Internal or unexpected error | I/O failures, a database that failed, an adapter that could not be prepared (a server unreachable, a held file-store lock), `reload` that no running process answered. |
+| `1` | Internal or unexpected error | I/O failures, a database that failed, an adapter that could not be prepared (a server unreachable), `reload` that no running process answered. |
 | `2` | Invalid input | Bad arguments (clap). `config.yaml`, a mapping or the routing file does not parse, has an unknown key or fails validation. A mapping file that targets a name Kulyrax keeps for itself ([mapping reference, Names](mapping-reference.md#names-kulyrax-keeps-for-itself)). A bad `--event` / `--events` file. An adapter or source factory refusing its config (an unknown `type:`, a bad `config:` block). A `rebuild` of an adapter that is not in the config, has no SQL mapping, or cannot rebuild. A `reload` refused because the new config is invalid. |
 | `3` | Events failed or were dead-lettered | `run --event`, `run --once`, `replay` or `rebuild` with an event that failed. A `--once` run that dead-lettered any event. A halt after the retry budget. `dry-run` with an adapter that would fail. A continuous `run` or `ingest` ends with 3 only for failures it did not dead-letter. |
-| `4` | Refused by a safety check | A source's lock is held by another process. A `rebuild` refused before it starts (a table the swap would break; a mapped table named like a shadow when the mappings were built in code, since a mapping file naming one is refused at load, exit 2) or at the swap (another writer touched the tables). `init` would overwrite a file. A store or checkpoint in a format this version does not read, or a format marker that could not be created (§5). Nothing was changed. |
+| `4` | Refused by a safety check | A source's lock, or a file store's lock, is held by another process. A `rebuild` refused before it starts (a table the swap would break; a mapped table named like a shadow when the mappings were built in code, since a mapping file naming one is refused at load, exit 2) or at the swap (another writer touched the tables). `init` would overwrite a file. A store or checkpoint in a format this version does not read, or a format marker that could not be created (§5). Nothing was changed. |
 
 ---
 
