@@ -117,6 +117,8 @@ that each migrates from 0.12.1.
 | MongoDB marker, first run | `cargo test -p kulyrax-adapter-mongodb -- --test-threads=1` against `kx-mongo` | `mongo_format` 4 pass (new, beside the guards, idempotent; 0.12 stamped, guards kept; `2` newer and `"two"` unrecognised refused with only `kulyrax_format` in the database; 8 concurrent first starts, one document). `mongo_rename` 3 fail, as expected: their exact collection lists now include `kulyrax_format`. Lists updated |
 | MongoDB, after | the same | 30 pass, 0 fail, 7 binaries |
 | MongoDB permission refusal: **not tested** | `docker exec kx-mongo mongosh … getCmdLineOpts` | `{ net: { bindIp: '*' }, replication: { replSet: 'rs0' } }`: no authorization, so `Unauthorized` (13) cannot be produced locally (CI's container is the same image setup). The mapping is code-reviewed only |
+| Neo4j marker | `cargo test -p kulyrax-adapter-neo4j -- --test-threads=1` against `kx-neo4j-7688` (this branch's container), then `neo4j_format` alone with `--nocapture` | 29 pass, 0 fail, 7 binaries, on the first run. `neo4j_format`'s 4 ran (no SKIP): one marker and both constraints; 0.12 guards stamped; `2` newer and `'two'` unrecognised refused with no guard constraint created; 8 concurrent first starts, one node |
+| Neo4j permission refusal: **not tested** | `CALL dbms.components()` | `Neo4j Kernel 5.26.32, community`: no role-based access control, so `Security.Forbidden` cannot be produced. The mapping is code-reviewed only |
 | `FormatError` in the D6 error test | `cargo test -p kulyrax-core --test error_traits` | 7 pass: `Send + Sync + 'static`, and `AdapterError::Format`'s `source()` is the `FormatError` |
 
 ## Risks and open questions
