@@ -99,6 +99,7 @@ fn layout(builder: &DocumentRuntimeBuilder) -> Layout {
             .map(|c| ("collection", c.clone()))
             .collect(),
         upgrade: Box::new(move |root| upgrade(root, &collections)),
+        older: Box::new(|_| Ok(None)),
     }
 }
 

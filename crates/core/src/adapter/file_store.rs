@@ -39,7 +39,7 @@ use crate::kulyrax_dir::{self, DIR, LAYOUT, LOCK, WAL};
 pub(crate) const LAYOUT_VERSION: &[u8] = b"2
 ";
 /// [`LAYOUT_VERSION`] as a number.
-const STORE_FORMAT: u32 = 2;
+pub(crate) const STORE_FORMAT: u32 = 2;
 
 /// Batch log layout: magic, body length (u64 LE), CRC-32 of the body (u32 LE),
 /// then the body: per entry, a tag byte (1 write, 0 remove), the path length
@@ -103,8 +103,8 @@ fn other(msg: String) -> io::Error {
 #[derive(Debug, Default)]
 struct Pending {
     files: BTreeMap<String, Option<String>>,
-    /// The parent directory of every path in `files`, so directory listings
-    /// can see directories that exist only in memory so far.
+    /// The parent directory of every path in `files`, created before the
+    /// files are written ([`apply`]).
     dirs: BTreeSet<String>,
 }
 
@@ -125,20 +125,6 @@ impl Pending {
 
     fn is_empty(&self) -> bool {
         self.files.is_empty()
-    }
-
-    /// The names of `dir`'s child directories that have pending files.
-    fn child_dirs(&self, dir: &str, out: &mut BTreeSet<String>) {
-        let prefix = format!("{dir}/");
-        for d in self.dirs.range(prefix.clone()..) {
-            let Some(rest) = d.strip_prefix(&prefix) else {
-                break;
-            };
-            let name = rest.split('/').next().unwrap_or(rest);
-            if !name.is_empty() {
-                out.insert(name.to_string());
-            }
-        }
     }
 }
 
@@ -901,6 +887,12 @@ pub struct Layout {
     /// Runs on the store root while the store's lock is held.
     #[allow(clippy::type_complexity)]
     pub upgrade: Box<dyn Fn(&Path) -> io::Result<Vec<String>> + Send + Sync>,
+    /// For a store of an older format of this kind (its marker lower than
+    /// [`kind_format`], or none): `Some(why)` if it cannot move up, after
+    /// recovery, with the lock held. Kinds whose format never changed accept
+    /// every store.
+    #[allow(clippy::type_complexity)]
+    pub older: Box<dyn Fn(&Path) -> io::Result<Option<String>> + Send + Sync>,
 }
 
 /// The durable write path shared by the file-backed adapters. See the module
@@ -964,21 +956,52 @@ pub(crate) fn check_store_format(dir: &Path) -> io::Result<()> {
                 }
             }
         };
-        FormatError::check(&path.display().to_string(), found, STORE_FORMAT)
+        let kind = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        FormatError::check(&path.display().to_string(), found, kind_format(&kind))
             .map_err(FormatError::into_io)?;
-        if bytes != LAYOUT_VERSION {
+        // Only the shared `.kulyrax/` layout's spellings are normalised here
+        // (empty, `1`, `2` without its newline: all format 2). A kind's own
+        // later formats (graph 3) are stamped by `check_layout`, after
+        // recovery, once the kind has said the store may move up.
+        if found == STORE_FORMAT && bytes != LAYOUT_VERSION {
             restamp.push(path);
         }
     }
     for path in restamp {
-        write_marker(&path)?;
+        write_marker(&path, STORE_FORMAT)?;
     }
     Ok(())
 }
 
-/// Write a layout marker holding [`LAYOUT_VERSION`]: temp file, fsync,
-/// rename, directory fsync, so a crash never leaves a partly written marker.
-pub(crate) fn write_marker(marker: &Path) -> io::Result<()> {
+/// The newest format of an adapter kind's store. 2 is the shared `.kulyrax/`
+/// layout; the graph store is 3, where an edge's key holds its endpoints'
+/// labels (decision 2026-11-28-edge-labels).
+pub(crate) fn kind_format(kind: &str) -> u32 {
+    match kind {
+        "graph" => 3,
+        _ => STORE_FORMAT,
+    }
+}
+
+/// A marker's version as written by this module: the integer it holds.
+fn marker_version(marker: &Path) -> io::Result<u32> {
+    let bytes = fs::read(marker)?;
+    let text = String::from_utf8_lossy(&bytes);
+    text.trim().parse().map_err(|_| {
+        FormatError::new(
+            marker.display().to_string(),
+            FormatProblem::Unrecognized(format!("layout marker {:?}", text.trim())),
+        )
+        .into_io()
+    })
+}
+
+/// Write a layout marker holding `version`: temp file, fsync, rename,
+/// directory fsync, so a crash never leaves a partly written marker.
+pub(crate) fn write_marker(marker: &Path, version: u32) -> io::Result<()> {
     let Some(dir) = marker.parent() else {
         return Err(other(format!("{} has no parent", marker.display())));
     };
@@ -987,7 +1010,7 @@ pub(crate) fn write_marker(marker: &Path) -> io::Result<()> {
     tmp_name.push(format!(".{}.tmp", std::process::id()));
     let tmp = dir.join(tmp_name);
     let mut f = File::create(&tmp)?;
-    f.write_all(LAYOUT_VERSION)?;
+    f.write_all(format!("{version}\n").as_bytes())?;
     f.sync_all()?;
     drop(f);
     fs::rename(&tmp, marker)?;
@@ -1025,8 +1048,15 @@ impl FileStore {
         };
         root.claim(layout.kind, &layout.claims)?;
         let marker = self.dir.join(DIR).join(LAYOUT).join(layout.kind);
+        let format = kind_format(layout.kind);
         if marker.exists() {
-            // Accepted and re-stamped by `check_store_format`.
+            // `check_store_format` refused anything newer and normalised the
+            // shared layout's spellings. A store of this kind's older format
+            // moves up only if the kind says it can.
+            if marker_version(&marker)? < format {
+                self.check_older(layout)?;
+                write_marker(&marker, format)?;
+            }
             return Ok(());
         }
         let refused = (layout.upgrade)(&self.dir)?;
@@ -1057,7 +1087,23 @@ impl FileStore {
                 ),
             ));
         }
-        write_marker(&marker)
+        // A store with no marker was written before markers existed: of this
+        // kind's oldest format, so it moves up only if the kind says it can.
+        self.check_older(layout)?;
+        write_marker(&marker, format)
+    }
+
+    /// The layout's verdict on a store of an older format of its kind: a
+    /// refusal is a format refusal (exit 4), naming the store.
+    fn check_older(&self, layout: &Layout) -> io::Result<()> {
+        match (layout.older)(&self.dir)? {
+            None => Ok(()),
+            Some(why) => Err(FormatError::new(
+                format!("{} file store {}", layout.kind, self.dir.display()),
+                FormatProblem::Unrecognized(why),
+            )
+            .into_io()),
+        }
     }
 
     fn state(&self) -> Result<std::sync::MutexGuard<'_, StoreState>, AdapterError> {
@@ -1311,30 +1357,6 @@ impl FileTxn<'_> {
     pub fn remove(&mut self, path: &str) {
         self.local.set(path, None);
     }
-
-    /// The names of `dir`'s child directories, on disk or pending.
-    pub fn child_dirs(&self, dir: &str) -> io::Result<BTreeSet<String>> {
-        let mut out = BTreeSet::new();
-        match fs::read_dir(self.root.join(dir)) {
-            Ok(entries) => {
-                for e in entries {
-                    let e = e?;
-                    if e.file_type()?.is_dir()
-                        && let Ok(name) = e.file_name().into_string()
-                    {
-                        out.insert(name);
-                    }
-                }
-            }
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e),
-        }
-        if let Some(b) = self.batch {
-            b.child_dirs(dir, &mut out);
-        }
-        self.local.child_dirs(dir, &mut out);
-        Ok(out)
-    }
 }
 
 #[cfg(test)]
@@ -1483,6 +1505,7 @@ mod tests {
             claims: Vec::new(),
             names: Vec::new(),
             upgrade: Box::new(|_| Ok(Vec::new())),
+            older: Box::new(|_| Ok(None)),
         }
     }
 
@@ -1573,11 +1596,24 @@ mod tests {
     fn a_refused_store_restamps_nothing() {
         let dir = store_with_marker(b"");
         let layout = dir.path().join(DIR).join(LAYOUT);
-        fs::write(layout.join("graph"), b"3\n").expect("write");
+        // Newer than the graph store's own format (3).
+        fs::write(layout.join("graph"), b"4\n").expect("write");
         let store = FileStore::with_layout(dir.path().to_path_buf(), kv_layout());
         assert!(matches!(store.prepare(), Err(AdapterError::Format(_))));
         assert_eq!(fs::read(layout.join("kv")).expect("marker"), b"");
-        assert_eq!(fs::read(layout.join("graph")).expect("marker"), b"3\n");
+        assert_eq!(fs::read(layout.join("graph")).expect("marker"), b"4\n");
+    }
+
+    /// Each kind has its own newest format: a `kv` marker of 3 is newer than
+    /// the key-value store reads, a `graph` marker of 3 is the graph store's.
+    #[test]
+    fn formats_are_per_kind() {
+        assert_eq!(kind_format("kv"), 2);
+        assert_eq!(kind_format("document"), 2);
+        assert_eq!(kind_format("graph"), 3);
+        let dir = store_with_marker(b"3\n");
+        let store = FileStore::with_layout(dir.path().to_path_buf(), kv_layout());
+        assert!(matches!(store.prepare(), Err(AdapterError::Format(_))));
     }
 
     #[test]
@@ -1620,17 +1656,6 @@ mod tests {
             fs::read(marker(dir.path())).expect("marker"),
             LAYOUT_VERSION
         );
-    }
-
-    #[test]
-    fn child_dirs_sees_pending_directories() {
-        let p = pending(&[
-            ("g/nodes/User/1.json", Some("{}")),
-            ("g/nodes/Org/2.json", None),
-        ]);
-        let mut out = BTreeSet::new();
-        p.child_dirs("g/nodes", &mut out);
-        assert_eq!(out.into_iter().collect::<Vec<_>>(), ["Org", "User"]);
     }
 
     #[test]

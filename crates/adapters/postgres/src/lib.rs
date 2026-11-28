@@ -264,9 +264,19 @@ impl PostgresAdapter {
         {
             return Ok(c);
         }
+        // The table the writes reach: `to_regclass` resolves `table` as an
+        // unquoted name in a statement does (through the `search_path`, or
+        // exactly for `schema.table`). Looked up by `table_name` alone, a
+        // same-named table in another schema could lend its types, and the
+        // batched `unnest($n::<type>[])` path then cast values into the real
+        // columns silently (G0); a qualified name found nothing.
         let rows = client
             .query(
-                "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = $1",
+                "SELECT c.column_name, c.data_type
+                 FROM information_schema.columns c
+                 JOIN pg_class t ON t.relname = c.table_name
+                 JOIN pg_namespace n ON n.oid = t.relnamespace AND n.nspname = c.table_schema
+                 WHERE t.oid = to_regclass($1)",
                 &[&table],
             )
             .map_err(|e| SqlError::ExecutionFailed(e.to_string()))?;

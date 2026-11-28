@@ -134,18 +134,24 @@ pub fn in_document_mapping(
     found
 }
 
-/// Every reserved label a graph mapping's node records use.
+/// Every reserved label a graph mapping uses: its nodes' labels and its
+/// edges' endpoint labels (an edge creates a placeholder with that label).
 pub fn in_graph_mapping(m: &crate::adapter::graph::mapping::GraphMapping) -> Vec<Collision> {
     use crate::adapter::graph::mapping::GraphMapping;
-    m.records()
-        .into_iter()
-        .filter_map(|r| match r {
-            GraphMapping::Node(n) => {
-                graph_label(&n.label).map(|why| ("label", n.label.clone(), why))
+    let mut found = Vec::new();
+    for r in m.records() {
+        let labels: Vec<(&'static str, &String)> = match r {
+            GraphMapping::Node(n) => vec![("label", &n.label)],
+            GraphMapping::Edge(e) => vec![("from_label", &e.from_label), ("to_label", &e.to_label)],
+            _ => Vec::new(),
+        };
+        for (key, label) in labels {
+            if let Some(why) = graph_label(label) {
+                found.push((key, label.clone(), why));
             }
-            _ => None,
-        })
-        .collect()
+        }
+    }
+    found
 }
 
 /// `prepare`'s refusal for mappings built in code (the loader refuses mapping

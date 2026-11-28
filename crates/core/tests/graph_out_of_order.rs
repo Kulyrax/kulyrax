@@ -28,7 +28,7 @@ fn mappings() -> HashMap<String, GraphMapping> {
     m.insert(
         "UserRated".to_string(),
         kulyrax_core::yaml::from_str::<GraphMapping>(
-            "kind: edge\nevent: UserRated\nedge_type: RATED\nversion: 1\nfrom: payload.from\nto: payload.to\non_existing: replace\nproperties:\n  score: payload.score\n",
+            "kind: edge\nevent: UserRated\nedge_type: RATED\nfrom_label: User\nto_label: User\nversion: 1\nfrom: payload.from\nto: payload.to\non_existing: replace\nproperties:\n  score: payload.score\n",
         )
         .unwrap(),
     );

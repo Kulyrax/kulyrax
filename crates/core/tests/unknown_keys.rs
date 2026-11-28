@@ -139,9 +139,9 @@ fn graph_node_and_edge_mappings() {
 
     let err = mapping_error(
         "graph",
-        "kind: edge\nevent: E\nedge_type: T\nversion: 1\nfrom: payload.a\nto: payload.b\ndiscriminater: payload.c\n",
+        "kind: edge\nevent: E\nedge_type: T\nfrom_label: L\nto_label: L\nversion: 1\nfrom: payload.a\nto: payload.b\ndiscriminater: payload.c\n",
     );
-    assert_names(&err, "discriminater", "m.yaml", 7);
+    assert_names(&err, "discriminater", "m.yaml", 9);
 }
 
 #[test]

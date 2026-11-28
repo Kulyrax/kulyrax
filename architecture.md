@@ -99,7 +99,7 @@ All projections are declared explicitly:
 * SQL mappings define tables, columns, and keys
 * Document mappings define collection-level structure
 * Key-value mappings define a namespace, key path, and value template
-* Graph mappings define a node (`label` + `key`) or an edge (`edge_type` + `from`/`to`)
+* Graph mappings define a node (`label` + `key`) or an edge (`edge_type` + `from_label`/`from` + `to_label`/`to`)
 
 There is:
 
@@ -299,7 +299,7 @@ A flat namespace → key → value store: `{root}/{namespace}/{key}.json` (file)
 
 Backends: file, Neo4j.
 
-A directed property graph. Nodes and edges are *separately keyed records*, each an independent `decide()` lane: a node keyed by `node_id`, an edge by the canonical `[edge_type, from, to(, discriminator)]`. `operation: delete` on a node is a `DETACH DELETE` — it removes the node and every incident edge in one adapter operation (the file backend tracks a per-node incident index for this; Neo4j's own graph structure makes a separate index unnecessary). Nodes are entities (facets apply); edges are not.
+A directed property graph. Nodes and edges are *separately keyed records*, each an independent `decide()` lane: a node keyed by `node_id`, an edge by the canonical `[edge_type, from_label, from, to_label, to(, discriminator)]`. `operation: delete` on a node is a `DETACH DELETE` — it removes the node and every incident edge in one adapter operation (the file backend tracks an incident index per `(label, node_id)` for this, so a node of another label with the same id is never touched; Neo4j's own graph structure makes a separate index unnecessary). Nodes are entities (facets apply); edges are not.
 
 ---
 

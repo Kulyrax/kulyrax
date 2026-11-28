@@ -28,7 +28,7 @@ fn mappings() -> HashMap<String, GraphMapping> {
     m.insert(
         "UserFollowed".to_string(),
         kulyrax_core::yaml::from_str::<GraphMapping>(
-            "kind: edge\nevent: UserFollowed\nedge_type: FOLLOWS\nversion: 1\nfrom: payload.follower\nto: payload.followee\nproperties:\n  since: payload.ts\n",
+            "kind: edge\nevent: UserFollowed\nedge_type: FOLLOWS\nfrom_label: User\nto_label: User\nversion: 1\nfrom: payload.follower\nto: payload.followee\nproperties:\n  since: payload.ts\n",
         )
         .unwrap(),
     );
@@ -57,12 +57,14 @@ fn edge_written_even_when_endpoints_never_projected() -> Result<(), Box<dyn std:
     let edges_dir = dir.path().join("edges").join("FOLLOWS");
     assert_eq!(std::fs::read_dir(&edges_dir)?.count(), 1);
 
-    // Both endpoints have an incident index even though no node exists.
+    // Both endpoints have an incident index, under their mapped label, even
+    // though no node exists: the labelled placeholder a later node joins.
     for endpoint in ["ghost1", "ghost2"] {
         assert!(
             dir.path()
                 .join(".kulyrax")
                 .join("incident")
+                .join("User")
                 .join(format!("{endpoint}.json"))
                 .exists()
         );

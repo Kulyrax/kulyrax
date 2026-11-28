@@ -226,6 +226,19 @@ what changed.
 - **The Postgres outbox source needs Postgres 13 or later.**
 - **No published benchmarks** yet.
 
+### Known issues in earlier releases
+
+Three bugs could write wrong data without an error. They are fixed in
+1.0.0-rc.1, whose notes say how to check your data and repair it:
+[Data correctness: check your data](RELEASES/v1.0.0-rc.1.md#data-correctness-check-your-data).
+
+- **Postgres, v0.12.1 and v0.12.2:** with a table of the same name in
+  another schema, values could be cast to that table's column types.
+- **Neo4j, v0.9.0 to v0.12.2:** an edge could attach to another label's node
+  with the same id, or miss its nodes when it arrived before them.
+- **File graph store, v0.9.0 to v0.12.2:** deleting a node could delete the
+  edges of another label's node with the same id.
+
 Security problems: see [`SECURITY.md`](SECURITY.md). What the database user
 needs: [`docs/required-grants.md`](docs/required-grants.md).
 

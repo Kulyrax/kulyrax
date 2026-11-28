@@ -96,6 +96,7 @@ fn layout(builder: &KvRuntimeBuilder) -> Layout {
         claims,
         names,
         upgrade: Box::new(move |root| upgrade(root, &namespaces)),
+        older: Box::new(|_| Ok(None)),
     }
 }
 

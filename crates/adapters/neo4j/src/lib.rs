@@ -43,7 +43,7 @@ use tokio::runtime::Runtime;
 
 use kulyrax_core::adapter::graph::adapter::GraphError;
 use kulyrax_core::adapter::graph::exec::{
-    self, GraphBackend, GraphFacetGuard, GraphGuard, GraphOutcome,
+    self, EdgeRef, GraphBackend, GraphFacetGuard, GraphGuard, GraphOutcome,
 };
 use kulyrax_core::adapter::graph::mapping::GraphMapping;
 use kulyrax_core::adapter::graph::runtime::{GraphProjection, GraphRuntimeBuilder};
@@ -249,7 +249,7 @@ const FORMAT_MERGE: &str = "MERGE (f:__KulyraxFormat {component: $component}) \
 /// The marker node versioning the guards.
 const GUARDS_COMPONENT: &str = "guards";
 /// The guards' format version.
-const GUARDS_FORMAT: i64 = 1;
+const GUARDS_FORMAT: i64 = 2;
 /// What a Neo4j user needs for the marker (named in its refusal).
 const MARKER_GRANT: &str = "the rights to create the constraint kulyrax_format_component and \
      to create and read :__KulyraxFormat nodes (Neo4j Enterprise: CREATE CONSTRAINT, and MERGE \
@@ -282,6 +282,26 @@ async fn ensure_format_marker(graph: &Graph, store: &str) -> Result<(), GraphErr
         .run(Query::new(FORMAT_CONSTRAINT.to_string()))
         .await
         .map_err(refused)?;
+    // Format 1 keyed edge guards without their endpoints' labels, which were
+    // never stored (decision 2026-11-28-edge-labels). A database with no
+    // edge guards is format 2 as it is; one with any is format 1 and cannot
+    // move up. 0.12's guards still carry their old label here.
+    let edge_guards = {
+        let q = Query::new(format!(
+            "MATCH (g) WHERE (g:__KulyraxGuard OR g:`{}`) AND g.kind = 'edge' \
+             RETURN count(g) > 0 AS any",
+            kulyrax_core::adapter::legacy::LEGACY_GUARD_LABEL
+        ));
+        let row = graph
+            .execute(q)
+            .await
+            .map_err(refused)?
+            .next()
+            .await
+            .map_err(refused)?;
+        row.and_then(|r| r.get::<bool>("any").ok()).unwrap_or(false)
+    };
+    let initial = if edge_guards { 1 } else { GUARDS_FORMAT };
     // Two first starts can both try to create the node; the constraint lets
     // one in and fails the other, which then finds it.
     let mut attempt = 0;
@@ -289,7 +309,7 @@ async fn ensure_format_marker(graph: &Graph, store: &str) -> Result<(), GraphErr
         attempt += 1;
         let query = Query::new(FORMAT_MERGE.to_string())
             .param("component", GUARDS_COMPONENT)
-            .param("version", GUARDS_FORMAT);
+            .param("version", initial);
         let result = async { graph.execute(query).await?.next().await }.await;
         match result {
             Ok(row) => break row,
@@ -316,6 +336,32 @@ async fn ensure_format_marker(graph: &Graph, store: &str) -> Result<(), GraphErr
             )
         })?;
     FormatError::check(store, version, GUARDS_FORMAT as u32)?;
+    if version < GUARDS_FORMAT as u32 {
+        if edge_guards {
+            return Err(FormatError::new(
+                store,
+                FormatProblem::Unrecognized(
+                    "it holds edges keyed by an earlier version, without their endpoints' \
+                     labels, which were never stored. Clear the database and replay the full \
+                     history into it"
+                        .to_string(),
+                ),
+            )
+            .into());
+        }
+        graph
+            .run(
+                Query::new(
+                    "MATCH (f:__KulyraxFormat {component: $component}) WHERE f.version < $version \
+                     SET f.version = $version"
+                        .to_string(),
+                )
+                .param("component", GUARDS_COMPONENT)
+                .param("version", GUARDS_FORMAT),
+            )
+            .await
+            .map_err(refused)?;
+    }
     Ok(())
 }
 
@@ -469,15 +515,18 @@ impl StorageAdapter for Neo4jAdapter {
             .values()
             .flat_map(GraphMapping::records)
         {
-            let name = match record {
-                GraphMapping::Node(n) => &n.label,
-                GraphMapping::Edge(e) => &e.edge_type,
+            let names = match record {
+                GraphMapping::Node(n) => vec![&n.label],
+                // The endpoint labels are written into the edge's `MERGE`s.
+                GraphMapping::Edge(e) => vec![&e.edge_type, &e.from_label, &e.to_label],
                 // A subgraph's records are checked one by one; a record kind
                 // this version does not know names no label or edge type.
                 _ => continue,
             };
-            if name.is_empty() || name.contains('`') {
-                bad.push(format!("{name:?}"));
+            for name in names {
+                if name.is_empty() || name.contains('`') {
+                    bad.push(format!("{name:?}"));
+                }
             }
         }
         if !bad.is_empty() {
@@ -837,12 +886,13 @@ impl GraphBackend for Neo4jBackend<'_> {
         self.read_guard("edge", edge_type, key)
     }
 
-    fn node_is_tombstoned(&mut self, node_id: &str) -> Result<bool, GraphError> {
+    fn node_is_tombstoned(&mut self, label: &str, node_id: &str) -> Result<bool, GraphError> {
         let q = Query::new(
-            "MATCH (g:__KulyraxGuard {kind: 'node', entity_key: $id, facet: '', deleted: true}) \
-             RETURN count(g) > 0 AS tombstoned"
+            "MATCH (g:__KulyraxGuard {kind: 'node', target: $label, entity_key: $id, facet: '', \
+             deleted: true}) RETURN count(g) > 0 AS tombstoned"
                 .to_string(),
         )
+        .param("label", label)
         .param("id", node_id);
         let rows = self.query_rows(q)?;
         match rows.first() {
@@ -888,27 +938,30 @@ impl GraphBackend for Neo4jBackend<'_> {
         )
     }
 
+    /// The endpoints are `MERGE`d with their labels: an endpoint not projected
+    /// yet becomes a labelled placeholder, which the node's own
+    /// `MERGE (n:<Label> {id})` then fills in, and another label's node with
+    /// the same id is never touched (decision 2026-11-28-edge-labels).
     fn write_edge(
         &mut self,
-        edge_type: &str,
-        from: &str,
-        to: &str,
-        key: &str,
+        edge: &EdgeRef<'_>,
         properties: Option<&Value>,
         guard: &GraphGuard,
     ) -> Result<(), GraphError> {
         let (seq, eid, deleted, permanent) = lane_fields(guard, "");
+        let (edge_type, from_label, to_label) = (edge.edge_type, edge.from_label, edge.to_label);
         let mut extra_params = vec![
-            ("edge_from", BoltType::from(from)),
-            ("edge_to", BoltType::from(to)),
-            ("edge_key", BoltType::from(key)),
+            ("edge_from", BoltType::from(edge.from)),
+            ("edge_to", BoltType::from(edge.to)),
+            ("edge_key", BoltType::from(edge.key)),
         ];
         let write_extra = match properties {
             None => String::new(),
             Some(p) => {
                 extra_params.push(("properties", json_to_bolt(p)));
                 format!(
-                    "MERGE (a {{id: $edge_from}}) MERGE (b {{id: $edge_to}}) \
+                    "MERGE (a:`{from_label}` {{id: $edge_from}}) \
+                     MERGE (b:`{to_label}` {{id: $edge_to}}) \
                      MERGE (a)-[r:`{edge_type}` {{key: $edge_key}}]->(b) \
                      SET r = $properties, r.key = $edge_key"
                 )
@@ -917,7 +970,7 @@ impl GraphBackend for Neo4jBackend<'_> {
         self.cas_write(
             "edge",
             edge_type,
-            key,
+            edge.key,
             "",
             seq,
             &eid,
@@ -1022,14 +1075,9 @@ impl GraphBackend for Neo4jBackend<'_> {
         self.run(q)
     }
 
-    fn delete_edge(
-        &mut self,
-        edge_type: &str,
-        _from: &str,
-        _to: &str,
-        key: &str,
-        guard: &GraphGuard,
-    ) -> Result<(), GraphError> {
+    fn delete_edge(&mut self, edge: &EdgeRef<'_>, guard: &GraphGuard) -> Result<(), GraphError> {
+        let (edge_type, key) = (edge.edge_type, edge.key);
+        // The key holds both endpoints' labels and ids: it names one edge.
         let write_extra = format!("MATCH ()-[r:`{edge_type}` {{key: $edge_key}}]-() DELETE r");
         self.cas_write(
             "edge",

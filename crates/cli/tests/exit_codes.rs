@@ -144,6 +144,41 @@ fn exit_2_on_invalid_input() {
     assert_code(kulyrax(p.path(), &args), 2);
 }
 
+/// An edge mapping must name both endpoints' labels (decision
+/// 2026-11-28-edge-labels): one without `from_label` or `to_label`, or with
+/// an empty one, is refused when the mappings load, naming the file.
+#[test]
+fn exit_2_when_an_edge_mapping_lacks_a_label() {
+    let edge = "kind: edge\nevent: U\nedge_type: KNOWS\nfrom_label: User\nto_label: User\nversion: 1\nfrom: payload.id\nto: payload.name\n";
+    let without = |key: &str| {
+        edge.lines()
+            .filter(|l| !l.starts_with(key))
+            .map(|l| format!("{l}\n"))
+            .collect::<String>()
+    };
+    for (mapping, says) in [
+        (without("from_label"), "from_label"),
+        (without("to_label"), "to_label"),
+        (
+            edge.replace("from_label: User", "from_label: \"\""),
+            "empty from_label",
+        ),
+    ] {
+        let p = project("users", &[GOOD]);
+        write(p.path().join("mappings/graph/edge.yaml"), &mapping);
+        let got = kulyrax(p.path(), RUN_ONCE);
+        assert!(got.1.contains(says), "{says}\n{}", got.1);
+        // A missing key fails parsing, which names the file; an empty one
+        // fails validation, which names the event.
+        assert!(
+            got.1.contains("edge.yaml") || got.1.contains("event \"U\""),
+            "names the file or the event\n{}",
+            got.1
+        );
+        assert_code(got, 2);
+    }
+}
+
 #[test]
 fn exit_3_when_events_fail_or_are_dead_lettered() {
     let p = project("users", &[GOOD, BAD]);
@@ -297,6 +332,11 @@ fn exit_2_when_a_mapping_names_what_kulyrax_keeps() {
             "graph",
             "kind: node\nevent: U\nlabel: __KulyraxFormat\nkey: payload.id\nversion: 1\nproperties:\n  n: payload.name\n",
             "`label: __KulyraxFormat`",
+        ),
+        (
+            "graph",
+            "kind: edge\nevent: U\nedge_type: KNOWS\nfrom_label: User\nto_label: __KulyraxGuard\nversion: 1\nfrom: payload.id\nto: payload.name\n",
+            "`to_label: __KulyraxGuard`",
         ),
     ];
     // 0.12's guard table, now its tombstone (spelled only in `legacy`).

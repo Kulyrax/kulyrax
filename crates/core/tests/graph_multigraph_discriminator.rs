@@ -30,7 +30,7 @@ fn mappings() -> HashMap<String, GraphMapping> {
     m.insert(
         "UserRated".to_string(),
         kulyrax_core::yaml::from_str::<GraphMapping>(
-            "kind: edge\nevent: UserRated\nedge_type: RATED\nversion: 1\nfrom: payload.from\nto: payload.to\ndiscriminator: payload.rating_id\non_existing: replace\nproperties:\n  score: payload.score\n",
+            "kind: edge\nevent: UserRated\nedge_type: RATED\nfrom_label: User\nto_label: User\nversion: 1\nfrom: payload.from\nto: payload.to\ndiscriminator: payload.rating_id\non_existing: replace\nproperties:\n  score: payload.score\n",
         )
         .unwrap(),
     );
@@ -80,7 +80,11 @@ fn discriminator_distinguishes_parallel_edges() -> Result<(), Box<dyn std::error
 
     // u1's incident index lists both parallel edges.
     let idx: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
-        dir.path().join(".kulyrax").join("incident").join("u1.json"),
+        dir.path()
+            .join(".kulyrax")
+            .join("incident")
+            .join("User")
+            .join("u1.json"),
     )?)?;
     assert_eq!(idx["edges"].as_array().unwrap().len(), 2);
 

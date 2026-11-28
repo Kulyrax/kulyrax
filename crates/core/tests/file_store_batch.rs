@@ -119,7 +119,7 @@ fn graph_store(root: &Path) -> Box<dyn StorageAdapter> {
     m.insert("UserDeleted".into(), yaml("kind: node\nevent: UserDeleted\nlabel: User\nversion: 1\nkey: payload.id\noperation: delete\n"));
     m.insert("UserPurged".into(), yaml("kind: node\nevent: UserPurged\nlabel: User\nversion: 1\nkey: payload.id\noperation: delete\npermanent: true\n"));
     m.insert("UserEmailChanged".into(), yaml("kind: node\nevent: UserEmailChanged\nlabel: User\nversion: 1\nkey: payload.id\nfacet: contact\nproperties:\n  email: payload.email\n"));
-    m.insert("UserFollowed".into(), yaml("kind: edge\nevent: UserFollowed\nedge_type: FOLLOWS\nversion: 1\nfrom: payload.id\nto: payload.other\non_existing: replace\nproperties:\n  to: payload.other\n"));
+    m.insert("UserFollowed".into(), yaml("kind: edge\nevent: UserFollowed\nedge_type: FOLLOWS\nfrom_label: User\nto_label: User\nversion: 1\nfrom: payload.id\nto: payload.other\non_existing: replace\nproperties:\n  to: payload.other\n"));
     Box::new(GraphStore::new(
         "graph".into(),
         root.to_path_buf(),

@@ -165,7 +165,7 @@ UserFollowed: [graph]
     );
     write(
         &g.join("followed.yaml"),
-        "kind: edge\nevent: UserFollowed\nedge_type: FOLLOWS\nversion: 1\nfrom: payload.id\nto: payload.other\non_existing: replace\nproperties:\n  to: payload.other\n",
+        "kind: edge\nevent: UserFollowed\nedge_type: FOLLOWS\nfrom_label: User\nto_label: User\nversion: 1\nfrom: payload.id\nto: payload.other\non_existing: replace\nproperties:\n  to: payload.other\n",
     );
 
     for (i, chunk) in events().chunks(PER_FILE).enumerate() {

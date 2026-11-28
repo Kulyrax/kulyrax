@@ -260,14 +260,16 @@ fn plan_graph_writes(
                 } => (format!("node {label}"), node_id, properties),
                 ResolvedRecord::Edge {
                     edge_type,
+                    from_label,
                     from,
+                    to_label,
                     to,
                     discriminator,
                     properties,
                 } => {
                     let key = match discriminator {
-                        Some(d) => format!("{from} -> {to} ({d})"),
-                        None => format!("{from} -> {to}"),
+                        Some(d) => format!("{from_label}:{from} -> {to_label}:{to} ({d})"),
+                        None => format!("{from_label}:{from} -> {to_label}:{to}"),
                     };
                     (format!("edge {edge_type}"), key, properties)
                 }
