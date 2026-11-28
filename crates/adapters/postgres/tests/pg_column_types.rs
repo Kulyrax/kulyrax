@@ -1,10 +1,10 @@
-//! G0 (the owner's deferred item, found in B2): the Postgres adapter looks up a
-//! mapped table's column types with
+//! G0 (the owner's deferred item, found in B2): the Postgres adapter looked up
+//! a mapped table's column types with
 //! `SELECT … FROM information_schema.columns WHERE table_name = $1`: by table
 //! name only, in every schema the user can see. With the same table name in
-//! two schemas, the types of the wrong table can be used.
-//!
-//! These tests reproduce it. They are expected to FAIL until it is fixed.
+//! two schemas, the batched path cast values to the wrong table's types
+//! (v0.12.1 and v0.12.2). It now resolves the table with `to_regclass`, as
+//! Postgres itself would: through `search_path`, or `schema.table` as written.
 //!
 //! **Gated on `KULYRAX_PG_URL`.** Each test makes schemas of its own.
 
