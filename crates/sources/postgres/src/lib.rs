@@ -34,9 +34,10 @@ use serde::{Deserialize, Serialize};
 
 use kulyrax_core::event::Event;
 use kulyrax_core::execution::{AdapterOutcome, ExecutionReport};
+use kulyrax_core::format::{FormatError, FormatProblem};
 use kulyrax_core::runtime::SourceBuildContext;
 use kulyrax_core::runtime::config::{CustomSourceConfig, expand_env};
-use kulyrax_core::source::checkpoint::{read_checkpoint, write_checkpoint};
+use kulyrax_core::source::checkpoint::{checkpoint_path, read_checkpoint, write_checkpoint};
 use kulyrax_core::source::{EventSource, SourceError, SourcePosition, SourcedEvent, lock_source};
 
 #[doc(hidden)]
@@ -256,6 +257,42 @@ struct State {
     late_skipped: u64,
 }
 
+/// The outbox state's format version (step 5), kept in the state's own
+/// `format` field: its shape is this source's, not the checkpoint's. A state
+/// without one was written by 0.12.x and is format 1.
+const STATE_FORMAT: u32 = 1;
+
+/// The state as the checkpoint keeps it, with its `format`.
+fn encode_state(state: &State) -> Result<String, SourceError> {
+    let mut value =
+        serde_json::to_value(state).map_err(|e| SourceError::Checkpoint(e.to_string()))?;
+    if let Some(fields) = value.as_object_mut() {
+        fields.insert("format".to_string(), STATE_FORMAT.into());
+    }
+    serde_json::to_string(&value).map_err(|e| SourceError::Checkpoint(e.to_string()))
+}
+
+/// Read a state, refusing one in a format this version does not read before
+/// any field is taken from it. `store` names it in errors.
+fn decode_state(store: &str, body: &str) -> Result<State, SourceError> {
+    let value: serde_json::Value =
+        serde_json::from_str(body).map_err(|e| SourceError::Checkpoint(format!("{store}: {e}")))?;
+    let found = match value.get("format") {
+        None => 1,
+        Some(v) => v
+            .as_u64()
+            .and_then(|v| u32::try_from(v).ok())
+            .ok_or_else(|| {
+                FormatError::new(
+                    store,
+                    FormatProblem::Unrecognized(format!("outbox state format {v}")),
+                )
+            })?,
+    };
+    FormatError::check(store, found, STATE_FORMAT)?;
+    serde_json::from_value(value).map_err(|e| SourceError::Checkpoint(format!("{store}: {e}")))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct Watched {
     seq: i64,
@@ -336,9 +373,13 @@ impl PostgresOutboxSource {
         config: OutboxConfig,
     ) -> Result<Self, SourceError> {
         let committed = match read_checkpoint(&state_dir, &id)? {
-            Some(cp) => serde_json::from_str(cp.position.as_str()).map_err(|e| {
-                SourceError::Checkpoint(format!("postgres_outbox source {id:?}: {e}"))
-            })?,
+            Some(cp) => decode_state(
+                &format!(
+                    "postgres_outbox source {id:?} state in {}",
+                    checkpoint_path(&state_dir, &id).display()
+                ),
+                cp.position.as_str(),
+            )?,
             None => State::default(),
         };
         let committed_position = committed
@@ -757,8 +798,7 @@ impl EventSource for PostgresOutboxSource {
         let mut state = state.clone();
         state.late_rows = self.committed.late_rows;
         state.late_skipped = self.committed.late_skipped;
-        let body =
-            serde_json::to_string(&state).map_err(|e| SourceError::Checkpoint(e.to_string()))?;
+        let body = encode_state(&state)?;
         write_checkpoint(&self.state_dir, &self.id, &SourcePosition(body))?;
         self.committed = state;
         self.committed_position = Some(position);
@@ -815,5 +855,49 @@ impl EventSource for PostgresOutboxSource {
                 self.committed.late_skipped.to_string(),
             ),
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The body Kulyrax 0.12.1 kept in the checkpoint: the same `State`
+    /// fields, no `format`.
+    const STATE_0_12_1: &str = r#"{"after":41,"watch":[{"seq":39,"skipped_at_ms":1764000000000}],"late_seq":2,"late_rows":3,"late_skipped":1}"#;
+
+    #[test]
+    fn a_state_round_trips_with_its_format() {
+        let state = decode_state("s", STATE_0_12_1).expect("0.12.1 state reads");
+        assert_eq!(state.after, Some(41));
+        assert_eq!(state.watch.len(), 1);
+        assert_eq!(state.late_seq, 2);
+        let body = encode_state(&state).expect("encode");
+        let value: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(value["format"], STATE_FORMAT, "{body}");
+        assert_eq!(decode_state("s", &body).expect("decode"), state);
+    }
+
+    #[test]
+    fn a_newer_or_unknown_state_is_refused() {
+        let newer = r#"{"format":2,"after":41,"watch":[],"late_seq":0,"late_rows":0,"late_skipped":0,"cursor":"x"}"#;
+        match decode_state("outbox", newer) {
+            Err(SourceError::Format(e)) => assert_eq!(
+                e.problem,
+                FormatProblem::Newer {
+                    found: 2,
+                    supported: STATE_FORMAT
+                }
+            ),
+            other => panic!("not refused: {other:?}"),
+        }
+        let unknown = r#"{"format":"two","after":41}"#;
+        assert!(matches!(
+            decode_state("outbox", unknown),
+            Err(SourceError::Format(FormatError {
+                problem: FormatProblem::Unrecognized(_),
+                ..
+            }))
+        ));
     }
 }

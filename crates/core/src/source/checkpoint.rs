@@ -9,11 +9,24 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::{SourceError, SourcePosition};
+use crate::format::{FormatError, FormatProblem};
+
+/// The checkpoint file's format version (step 5). A checkpoint without a
+/// `format` field was written by 0.12.x and is format 1.
+pub const CHECKPOINT_FORMAT: u32 = 1;
+
+fn format_1() -> u32 {
+    1
+}
 
 /// A source's committed position, as kept in its state directory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Checkpoint {
+    /// The file's format version ([`CHECKPOINT_FORMAT`] when written by this
+    /// version; 1 when absent).
+    #[serde(default = "format_1")]
+    pub format: u32,
     /// The position committed past.
     pub position: SourcePosition,
     /// ISO-8601-ish wall time the commit was written (observability only).
@@ -26,17 +39,39 @@ pub fn checkpoint_path(state_dir: &Path, source_id: &str) -> PathBuf {
 }
 
 /// Read a source's committed position, or `Ok(None)` if it has never committed.
+///
+/// The format version is checked before the rest is read: a newer
+/// checkpoint is refused ([`SourceError::Format`]), never read with the
+/// fields this version knows, which could resume from the wrong place.
 pub fn read_checkpoint(
     state_dir: &Path,
     source_id: &str,
 ) -> Result<Option<Checkpoint>, SourceError> {
-    match std::fs::read_to_string(checkpoint_path(state_dir, source_id)) {
-        Ok(s) => serde_json::from_str(&s)
-            .map(Some)
-            .map_err(|e| SourceError::Checkpoint(e.to_string())),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(SourceError::Io(e)),
-    }
+    let path = checkpoint_path(state_dir, source_id);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(SourceError::Io(e)),
+    };
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| SourceError::Checkpoint(e.to_string()))?;
+    let store = path.display().to_string();
+    let found = match value.get("format") {
+        None => 1,
+        Some(v) => v
+            .as_u64()
+            .and_then(|v| u32::try_from(v).ok())
+            .ok_or_else(|| {
+                FormatError::new(
+                    store.clone(),
+                    FormatProblem::Unrecognized(format!("checkpoint format {v}")),
+                )
+            })?,
+    };
+    FormatError::check(&store, found, CHECKPOINT_FORMAT)?;
+    serde_json::from_value(value)
+        .map(Some)
+        .map_err(|e| SourceError::Checkpoint(e.to_string()))
 }
 
 /// Write a source's checkpoint durably: temp file, fsync, rename, fsync the
@@ -51,6 +86,7 @@ pub fn write_checkpoint(
 ) -> Result<(), SourceError> {
     std::fs::create_dir_all(state_dir)?;
     let cp = Checkpoint {
+        format: CHECKPOINT_FORMAT,
         position: position.clone(),
         committed_at: now_string(),
     };

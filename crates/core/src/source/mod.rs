@@ -75,6 +75,10 @@ pub enum SourceError {
     /// The source's entry is invalid: an unknown `type:`, a bad `config:` block,
     /// a missing `state_dir`. Caught at start-up.
     InvalidConfig(String),
+    /// The source's persisted state (its checkpoint) is in a format this
+    /// version does not read: newer, or not a Kulyrax format. A safety
+    /// refusal, raised before anything is read from the source.
+    Format(crate::format::FormatError),
 }
 
 impl std::fmt::Display for SourceError {
@@ -87,6 +91,7 @@ impl std::fmt::Display for SourceError {
                 write!(f, "source unavailable: {}", s)
             }
             SourceError::InvalidConfig(s) => write!(f, "invalid source config: {s}"),
+            SourceError::Format(e) => write!(f, "{e}"),
             SourceError::Prepare(failures) => {
                 write!(f, "adapters failed to prepare:")?;
                 for failure in failures {
@@ -102,8 +107,15 @@ impl std::error::Error for SourceError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             SourceError::Io(e) => Some(e),
+            SourceError::Format(e) => Some(e),
             _ => None,
         }
+    }
+}
+
+impl From<crate::format::FormatError> for SourceError {
+    fn from(e: crate::format::FormatError) -> Self {
+        SourceError::Format(e)
     }
 }
 

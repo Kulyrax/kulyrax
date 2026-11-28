@@ -309,7 +309,7 @@ mod exit {
 
     fn source(e: &SourceError) -> i32 {
         match e {
-            SourceError::Locked(_) => REFUSED,
+            SourceError::Locked(_) | SourceError::Format(_) => REFUSED,
             SourceError::InvalidConfig(_) => INVALID,
             SourceError::Prepare(failures) => prepare(failures),
             _ => INTERNAL,

@@ -222,6 +222,24 @@ fn exit_4_when_a_safety_check_refuses() {
     assert_code(kulyrax(p.path(), &["init", "."]), 4);
 }
 
+/// A source checkpoint a newer Kulyrax wrote: the start is refused before
+/// any event is read, and the checkpoint is kept.
+#[test]
+fn exit_4_when_a_checkpoint_is_newer() {
+    let p = project("users", &[GOOD]);
+    let cp = p.path().join("state/in.json");
+    let newer = r#"{"format": 2, "position": "000.json#0", "committed_at": "0"}"#;
+    write(cp.clone(), newer);
+    let got = kulyrax(p.path(), RUN_ONCE);
+    assert!(got.1.contains("written by a newer Kulyrax"), "{}", got.1);
+    assert_code(got, 4);
+    assert_eq!(std::fs::read_to_string(&cp).expect("kept"), newer);
+    let rows: i64 = rusqlite::Connection::open(p.path().join("app.db"))
+        .and_then(|c| c.query_row("SELECT count(*) FROM users", [], |r| r.get(0)))
+        .expect("count");
+    assert_eq!(rows, 0, "nothing was projected");
+}
+
 /// A file store whose batch log a newer Kulyrax wrote (magic `KLXWAL02`), or
 /// that is not a Kulyrax batch log at all: the start is refused and the log
 /// is kept. Before step 5 the newest such log was deleted as torn.
