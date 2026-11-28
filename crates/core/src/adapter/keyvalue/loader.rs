@@ -9,5 +9,15 @@ use crate::adapter::loader::load_mapping_dir;
 pub fn load_keyvalue_mappings<P: AsRef<Path>>(
     dir: P,
 ) -> Result<HashMap<String, KvMapping>, crate::pipeline::LoadError> {
-    load_mapping_dir(dir.as_ref(), "key-value", |m: &KvMapping| m.event.as_str())
+    load_mapping_dir(
+        dir.as_ref(),
+        "key-value",
+        |m: &KvMapping| m.event.as_str(),
+        |m: &KvMapping| {
+            crate::adapter::reserved::kv_namespace(&m.namespace)
+                .map(|why| ("namespace", m.namespace.clone(), why))
+                .into_iter()
+                .collect()
+        },
+    )
 }

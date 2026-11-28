@@ -167,9 +167,9 @@ Commands: `init [DIR]`, `run`, `sources`, `ingest`, `reload`, `explain`,
 |---|---|---|
 | `0` | Success | Everything the command was asked to do was done. |
 | `1` | Internal or unexpected error | I/O failures, a database that failed, an adapter that could not be prepared (a server unreachable, a held file-store lock), `reload` that no running process answered. |
-| `2` | Invalid input | Bad arguments (clap). `config.yaml`, a mapping or the routing file does not parse, has an unknown key or fails validation. A bad `--event` / `--events` file. An adapter or source factory refusing its config (an unknown `type:`, a bad `config:` block). A `rebuild` of an adapter that is not in the config, has no SQL mapping, or cannot rebuild. A `reload` refused because the new config is invalid. |
+| `2` | Invalid input | Bad arguments (clap). `config.yaml`, a mapping or the routing file does not parse, has an unknown key or fails validation. A mapping file that targets a name Kulyrax keeps for itself ([mapping reference, Names](mapping-reference.md#names-kulyrax-keeps-for-itself)). A bad `--event` / `--events` file. An adapter or source factory refusing its config (an unknown `type:`, a bad `config:` block). A `rebuild` of an adapter that is not in the config, has no SQL mapping, or cannot rebuild. A `reload` refused because the new config is invalid. |
 | `3` | Events failed or were dead-lettered | `run --event`, `run --once`, `replay` or `rebuild` with an event that failed. A `--once` run that dead-lettered any event. A halt after the retry budget. `dry-run` with an adapter that would fail. A continuous `run` or `ingest` ends with 3 only for failures it did not dead-letter. |
-| `4` | Refused by a safety check | A source's lock is held by another process. A `rebuild` refused before it starts (a table the swap would break, a mapped table named like a shadow) or at the swap (another writer touched the tables). `init` would overwrite a file. A newer on-disk format (step 5). Nothing was changed. |
+| `4` | Refused by a safety check | A source's lock is held by another process. A `rebuild` refused before it starts (a table the swap would break; a mapped table named like a shadow when the mappings were built in code, since a mapping file naming one is refused at load, exit 2) or at the swap (another writer touched the tables). `init` would overwrite a file. A store or checkpoint in a format this version does not read, or a format marker that could not be created (§5). Nothing was changed. |
 
 ---
 
@@ -186,29 +186,43 @@ rules (no field renumbered or retyped; new fields only); `buf breaking` in CI
 
 ## 5. Persisted formats
 
-None of these carries a format version today except the batch log's magic
-(`KLXWAL01`). Step 5 adds one to each.
+Every format Kulyrax writes and reads back records its version (step 5,
+decision [`2026-11-28-format-versions`](ledger/decisions/2026-11-28-format-versions.md)).
+The rules, frozen at 1.0:
 
-| Format | Where | Shape | Proposal |
-|---|---|---|---|
-| SQL guard table | SQLite, Postgres, MySQL: `kulyrax_projection_state` (renamed in step 2) | `target_table`, `entity_key` (JSON array text, e.g. `["u1"]`), `facet`, `last_sequence`, `last_event_id`, `deleted`, `permanent`, `processed_at`; PK `(target_table, entity_key, facet)`; MySQL key columns `utf8mb4_bin` | FREEZE |
-| Rebuild shadow suffix | SQL | `<table>__kulyrax_rebuild` | FREEZE |
-| MongoDB guards | collection `kulyrax_projection_state`, unique index `(target, entity_key)` | `ProjectionGuard` BSON + `target`, `entity_key` | FREEZE (renamed in step 2) |
-| Neo4j guards | label `__KulyraxGuard`, uniqueness constraint `kulyrax_guard_key` | `kind`, `target`, `entity_key`, `facet`, `last_sequence`, `last_event_id`, `deleted`, `permanent` | FREEZE (renamed in step 2) |
-| Redis | values `<ns>:<key>`, guards `__kulyrax:guard:<ns>:<key>` (JSON `KvGuard`) | already Kulyrax-named | FREEZE |
-| Elasticsearch | guard inside each document, field `__kulyrax_guard` | already Kulyrax-named | FREEZE |
-| File document store | `<root>/<collection>/<id>.json`; guard `.kulyrax/entities/<collection>/<id>.done` | JSON | FREEZE |
-| File key-value store | `<root>/<ns>/<key>.json`; guard `.kulyrax/kv/<ns>/<key>.guard.json` | JSON | FREEZE |
-| File graph store | `nodes/<label>/<id>.json`, `edges/<type>/<hex key>.json`; guards `.kulyrax/guard/{nodes,edges}/…`; `.kulyrax/incident/<id>.json` | JSON | FREEZE |
-| Batch log | `.kulyrax/wal/<seq>.log` (+ `.log.tmp`) | `KLXWAL01`, body length u64 LE, CRC-32, entries (tag, path, content) | **CHANGE** (step 5: version byte) |
-| File-store lock | `.kulyrax/lock` | empty file, OS lock | FREEZE |
-| Layout marker | `.kulyrax/layout/<kind>` (`kv`, `document`, `graph`) | text, the layout version (`2`) | **CHANGE** (step 5): versioned format |
-| Shared `.kulyrax/` | store root and config folder | entries owned by `kulyrax_core::kulyrax_dir`: stores `wal`, `lock`, `layout`, `kv`, `entities`, `guard`, `incident`; reserved `control`, `state` | FREEZE |
-| Source checkpoint | `<state_dir>/<id>.json` | `{position, committed_at}`; positions: directory `<file>#<index:012>`, stdin zero-padded line, outbox `<after:020>.<late:010>`, each ordered only by its own source ([producer contract §9](producer-contract.md#9-positions)) | FREEZE after step 5 adds a version |
-| Outbox state | inside the checkpoint's `position` string | JSON `{after, watch[{seq, skipped_at_ms}], late_seq, late_rows, late_skipped}` | **CHANGE** (step 5): version it; consider storing it beside `position` instead of inside it |
-| Source lock | `<state_dir>/<id>.lock` | OS lock | FREEZE |
-| DLQ | `<dlq_dir>/<source>.<position>.json` | `{event, report}` | FREEZE (filename and body) |
-| Reload control | `<config dir>/.kulyrax/control/reload-request`, `reload-result` | text, `<token>\n<applied\|rejected\|not-picked-up>\n<message>` | **UNSTABLE**: protocol between two Kulyrax processes of the same version |
+- **Where the version is.** One marker per store (a file-store root, a SQL
+  schema or database, a MongoDB database, a Redis database, an Elasticsearch
+  cluster, a Neo4j database), or a field inside a file that stands alone (a
+  source checkpoint, the outbox state, a batch log).
+- **No version means format 1.** Kulyrax 0.12.x wrote none. Such a store or
+  file is read as format 1 and stamped on its next write; nothing else is
+  migrated.
+- **Newer is refused.** A version above the one this build reads refuses
+  the start before anything is read, replayed or written. The error names the
+  store or file and both versions, and the CLI exits `4` (§3). Content that is
+  not a Kulyrax format is refused the same way, and left as it is.
+- **The marker is created insert-if-absent**, atomically per backend:
+  concurrent first starts leave one marker with one version. If it cannot be
+  created, the start is refused (exit `4`), naming the store and the right it
+  needs ([required grants](required-grants.md)).
+
+| Format | Where | Shape | Version kept in | Version |
+|---|---|---|---|---|
+| SQL guard table | SQLite, Postgres, MySQL: `kulyrax_projection_state` | `target_table`, `entity_key` (JSON array text, e.g. `["u1"]`), `facet`, `last_sequence`, `last_event_id`, `deleted`, `permanent`, `processed_at`; PK `(target_table, entity_key, facet)`; MySQL key columns `utf8mb4_bin` | table `kulyrax_format (component, version)`, row `guards`, in the guard table's schema or database | 1 |
+| Rebuild shadow suffix | SQL | `<table>__kulyrax_rebuild` | not versioned: transient, dropped or swapped | — |
+| MongoDB guards | collection `kulyrax_projection_state`, unique index `(target, entity_key)` | `ProjectionGuard` BSON + `target`, `entity_key` | collection `kulyrax_format`, document `{_id: "guards", version}` | 1 |
+| Neo4j guards | label `__KulyraxGuard`, uniqueness constraint `kulyrax_guard_key` | `kind`, `target`, `entity_key`, `facet`, `last_sequence`, `last_event_id`, `deleted`, `permanent` | node `(:__KulyraxFormat {component: 'guards', version})`, unique on `component` (constraint `kulyrax_format_component`) | 1 |
+| Redis | values `<ns>:<key>`, guards `__kulyrax:guard:<ns>:<key>` (JSON `KvGuard`) | JSON | hash `__kulyrax:format`, field `guards`, one per Redis database | 1 |
+| Elasticsearch | guard inside each document, field `__kulyrax_guard` | JSON | index `kulyrax_format`, document `guards` `{version}`, one per cluster | 1 |
+| File document, key-value and graph stores | `<root>/<collection>/<id>.json`, `<root>/<ns>/<key>.json`, `nodes/<label>/<id>.json`, `edges/<type>/<hex key>.json`; guards `.kulyrax/{entities,kv,guard}/…`; `.kulyrax/incident/<id>.json` | JSON | the layout marker `.kulyrax/layout/<kind>` (`kv`, `document`, `graph`): text, the version. Every marker on a root is checked before its batch logs are replayed. `1` (unreleased builds) and an empty marker (an older build killed mid-write) read as `2` and are re-stamped atomically on open | 2 |
+| Batch log | `.kulyrax/wal/<seq>.log` (+ `.log.tmp`) | magic `KLXWAL<nn>`, body length u64 LE, CRC-32, entries (tag, path, content) | the magic's two digits. A complete magic that is not this version's is refused, never deleted as torn | 1 (`KLXWAL01`) |
+| File-store lock | `.kulyrax/lock` | empty file, OS lock | not versioned: no content | — |
+| Shared `.kulyrax/` | store root and config folder | entries owned by `kulyrax_core::kulyrax_dir`: stores `wal`, `lock`, `layout`, `kv`, `entities`, `guard`, `incident`; reserved `control`, `state` | — | — |
+| Source checkpoint | `<state_dir>/<id>.json` | `{format, position, committed_at}`; positions: directory `<file>#<index:012>`, stdin zero-padded line, outbox: its state (below), each ordered only by its own source ([producer contract §9](producer-contract.md#9-positions)) | field `format` | 1 |
+| Outbox state | inside the checkpoint's `position` string | JSON `{format, after, watch[{seq, skipped_at_ms}], late_seq, late_rows, late_skipped}` | its own field `format` (its shape is the outbox source's) | 1 |
+| Source lock | `<state_dir>/<id>.lock` | OS lock | not versioned: no content | — |
+| DLQ | `<dlq_dir>/<event id stem>~<position stem>.json` (stems as in [mapping-reference, Names](mapping-reference.md#names); `~2`, `~3`, … when the name is taken; a hash when too long) | `{event, report}` | not versioned: Kulyrax writes it and never reads it back | — |
+| Reload control | `<config dir>/.kulyrax/control/reload-request`, `reload-result` | text, `<token>\n<applied\|rejected\|not-picked-up>\n<message>` | not versioned: **UNSTABLE**, a protocol between two Kulyrax processes of the same version | — |
 
 ---
 

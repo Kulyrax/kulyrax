@@ -210,3 +210,28 @@ fn a_user_without_config_still_starts() -> R {
         })
     })
 }
+
+/// A namespace that could reach Kulyrax's keys (`__kulyrax` + `:format` is
+/// the marker) is refused at `prepare`, before any connection: no server
+/// needed. The prefix comes from core's reserved list.
+#[test]
+fn prepare_refuses_a_namespace_reaching_kulyrax_keys() {
+    use kulyrax_core::adapter::keyvalue::mapping::KvMapping;
+    for ns in ["__kulyrax", "__kulyraxformat"] {
+        let m: KvMapping = kulyrax_core::yaml::from_str(&format!(
+            "event: U\nnamespace: {ns}\nkey: payload.id\nversion: 1\nvalue:\n  v: payload.v\n"
+        ))
+        .expect("mapping");
+        let a = RedisAdapter::new(
+            "kv".into(),
+            "redis://127.0.0.1:1/0",
+            1,
+            10,
+            KvRuntimeBuilder::new(HashMap::from([("U".to_string(), m)])),
+            Arc::new(UpcasterRegistry::new()),
+            MigrationPolicy::default(),
+        );
+        let err = a.prepare().expect_err("refused").to_string();
+        assert!(err.contains("__kulyrax"), "{err}");
+    }
+}

@@ -192,3 +192,31 @@ fn concurrent_first_starts_leave_one_marker() -> R {
     assert_eq!(Db::connect(&uri)?.markers()?, one_marker());
     Ok(())
 }
+
+/// Mappings built in code (not loaded from files) that use Kulyrax's labels
+/// are refused at `prepare`, before the connection is used: no server needed.
+#[test]
+fn prepare_refuses_a_mapping_on_kulyrax_labels() {
+    for label in ["__KulyraxGuard", "__KulyraxFormat", "__ConduitGuard"] {
+        let m: GraphMapping = kulyrax_core::yaml::from_str(&format!(
+            "kind: node\nevent: U\nlabel: {label}\nkey: payload.id\nversion: 1\nproperties:\n  v: payload.v\n"
+        ))
+        .expect("mapping");
+        let a = Neo4jAdapter::new(
+            "neo4j".into(),
+            "bolt://127.0.0.1:1",
+            "neo4j",
+            "x",
+            None,
+            10,
+            GraphRuntimeBuilder::new(HashMap::from([("U".to_string(), m)])),
+            Arc::new(UpcasterRegistry::new()),
+            MigrationPolicy::default(),
+        );
+        let err = a.prepare().expect_err("refused").to_string();
+        assert!(
+            err.contains("Kulyrax keeps for itself") && err.contains(label),
+            "{err}"
+        );
+    }
+}

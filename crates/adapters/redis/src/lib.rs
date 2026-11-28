@@ -583,7 +583,11 @@ impl StorageAdapter for RedisAdapter {
             .mappings()
             .values()
             .map(|m| m.namespace.clone())
-            .filter(|ns| ns.is_empty() || ns.contains(':') || ns.starts_with("__kulyrax"))
+            .filter(|ns| {
+                ns.is_empty()
+                    || ns.contains(':')
+                    || kulyrax_core::adapter::reserved::kv_namespace(ns).is_some()
+            })
             .collect();
         if !bad.is_empty() {
             bad.sort();

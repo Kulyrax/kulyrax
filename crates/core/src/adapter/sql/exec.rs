@@ -474,6 +474,7 @@ pub fn check_identifiers(builder: &SqlRuntimeBuilder) -> Result<(), SqlError> {
             && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
     }
     let mut bad = Vec::new();
+    let mut reserved = Vec::new();
     for (event, m) in builder.mappings() {
         let table_ok = match m.table.split_once('.') {
             Some((schema, table)) => plain(schema) && plain(table),
@@ -482,11 +483,23 @@ pub fn check_identifiers(builder: &SqlRuntimeBuilder) -> Result<(), SqlError> {
         if !table_ok {
             bad.push(format!("{event}: table {:?}", m.table));
         }
+        // Not the shadow suffix: a rebuild's own mappings target the shadows
+        // (see `reserved::sql_own_table`).
+        if let Some(why) = crate::adapter::reserved::sql_own_table(&m.table) {
+            reserved.push(format!("{event}: table {:?} ({why})", m.table));
+        }
         for column in m.columns.keys().chain(m.primary_key.iter()) {
             if !plain(column) {
                 bad.push(format!("{event}: column {column:?}"));
             }
         }
+    }
+    if !reserved.is_empty() {
+        reserved.sort();
+        return Err(SqlError::BuildFailed(format!(
+            "SQL mappings name tables Kulyrax keeps for itself: {}",
+            reserved.join(", ")
+        )));
     }
     if bad.is_empty() {
         return Ok(());
@@ -511,6 +524,10 @@ pub fn check_identifiers(builder: &SqlRuntimeBuilder) -> Result<(), SqlError> {
 pub fn ensure_schema<T: SqlTxn>(mut txn: T) -> Result<(), SqlError> {
     timed(Stage::Schema, || {
         txn.ensure_format_marker()?;
+        // A kill here: the marker is written (committed on MySQL, whose DDL
+        // commits; rolled back on SQLite and Postgres) and the 0.12 rename in
+        // `ensure_guard_table` has not run. The kill tests start again here.
+        crate::crash::crash_point("format-marker-written");
         txn.ensure_guard_table()?;
         txn.commit()
     })

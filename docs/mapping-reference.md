@@ -265,6 +265,24 @@ adapter is prepared, before anything is written; a name outside it stops the
 start-up with an error naming it. Values from events (keys, ids) are a separate
 matter, covered at the end.
 
+### Names Kulyrax keeps for itself
+
+A mapping may not target what Kulyrax keeps its own data in. Such a mapping
+file is refused when the mappings load, before any adapter starts: the error
+names the file, the key and the name, and the CLI exits `2`. A mapping built
+in code (not loaded from a file) is refused by the adapter's `prepare`.
+
+| Mapping kind | Key | Reserved |
+|---|---|---|
+| SQL | `table` | `kulyrax_projection_state` (guards), `kulyrax_format` (format marker), `conduit_projection_state` (the 0.12 tombstone), `kulyrax_tombstone_tmp` (the tombstone's temporary name), and any name ending in `__kulyrax_rebuild` (rebuild shadows). Compared without case, since Postgres folds unquoted names and MySQL compares them without case. A schema-qualified table is judged by its table part. |
+| Document | `collection` | `kulyrax_projection_state`, `kulyrax_format`, `conduit_projection_state`, `kulyrax_tombstone_tmp`: MongoDB's guards, format marker, 0.12 tombstone and its temporary name, and Elasticsearch's format-marker index. One list for every document backend, compared without case. |
+| Document | a top-level field of `document` | any name starting with `__kulyrax`: Elasticsearch keeps each document's guard in `__kulyrax_guard`. |
+| Key-value | `namespace` | any name starting with `__kulyrax`: Redis keeps guards under `__kulyrax:guard:` and its format marker at `__kulyrax:format`. |
+| Graph | a node's `label` | any label starting with `__Kulyrax` or `__Conduit` (Neo4j's guard and format-marker labels, and 0.12's). Labels are case-sensitive, so these are too. |
+
+File stores need no entry: their names may not contain `.`, so none can be
+`.kulyrax` or `.conduit`.
+
 ### File stores (`file`, `keyvalue`, `graph`)
 
 A key-value `namespace`, a document `collection`, a graph `label` or
@@ -288,9 +306,10 @@ with a digit. A table may be `schema.table`, each part a plain identifier.
 
 ### Redis
 
-A `namespace` must be non-empty, contain no `:`, and not start with `__kulyrax`.
-Values live at `<namespace>:<key>` and guards under `__kulyrax:guard:`, so such
-a namespace could meet another namespace's keys or the guards.
+A `namespace` must be non-empty, contain no `:`, and not start with `__kulyrax`
+(above). Values live at `<namespace>:<key>`, guards under `__kulyrax:guard:` and
+the format marker at `__kulyrax:format`, so such a namespace could meet another
+namespace's keys, the guards or the marker.
 
 ### Neo4j
 
@@ -299,7 +318,8 @@ written into Cypher between backticks.
 
 ### MongoDB and Elasticsearch
 
-No extra rule on collection or index names; they reach the driver as data.
+No rule on collection or index names beyond the reserved ones (above); they
+reach the driver as data.
 
 ### Values from events
 

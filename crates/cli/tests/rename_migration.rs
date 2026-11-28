@@ -716,6 +716,7 @@ fn file_store_migration_killed_at_each_step() {
     for point in [
         "legacy-move:1",
         "legacy-move:2",
+        "format-marker-written:1",
         "legacy-park:1",
         "legacy-tombstone:1",
     ] {
@@ -727,35 +728,46 @@ fn file_store_migration_killed_at_each_step() {
 
 #[test]
 fn sqlite_migration_killed_before_commit() {
-    let db = tempfile::tempdir().unwrap();
-    killed_at(sqlite(db.path()), "guard-table-renamed:1");
+    for point in ["format-marker-written:1", "guard-table-renamed:1"] {
+        let db = tempfile::tempdir().unwrap();
+        killed_at(sqlite(db.path()), point);
+    }
 }
 
 #[test]
 fn postgres_migration_killed_before_commit() {
-    postgres().map_or_else(
-        || skip("postgres"),
-        |b| killed_at(b, "guard-table-renamed:1"),
-    );
+    for point in ["format-marker-written:1", "guard-table-renamed:1"] {
+        postgres().map_or_else(|| skip("postgres"), |b| killed_at(b, point));
+    }
 }
 
 #[test]
 fn mysql_migration_killed_at_each_step() {
-    for point in ["guard-tombstone-created:1", "guard-table-renamed:1"] {
+    for point in [
+        "format-marker-written:1",
+        "guard-tombstone-created:1",
+        "guard-table-renamed:1",
+    ] {
         mysql().map_or_else(|| skip("mysql"), |b| killed_at(b, point));
     }
 }
 
 #[test]
 fn mongodb_migration_killed_at_each_step() {
-    for point in ["guard-tombstone-created:1", "guard-table-renamed:1"] {
+    for point in [
+        "format-marker-written:1",
+        "guard-tombstone-created:1",
+        "guard-table-renamed:1",
+    ] {
         mongodb().map_or_else(|| skip("mongodb"), |b| killed_at(b, point));
     }
 }
 
 #[test]
 fn neo4j_migration_killed_between_batches() {
-    neo4j().map_or_else(|| skip("neo4j"), |b| killed_at(b, "guard-relabel-batch:1"));
+    for point in ["format-marker-written:1", "guard-relabel-batch:1"] {
+        neo4j().map_or_else(|| skip("neo4j"), |b| killed_at(b, point));
+    }
 }
 
 /// 0.12.1 killed after writing a batch log: the log names `.conduit/` paths.

@@ -190,3 +190,32 @@ fn concurrent_first_starts_leave_one_marker() -> R {
     client.database(&db).drop().run()?;
     Ok(())
 }
+
+/// Mappings built in code (not loaded from files) that target Kulyrax's own
+/// collections, or its fields, are refused at `prepare`, before any
+/// connection: no server needed.
+#[test]
+fn prepare_refuses_a_mapping_on_kulyrax_collections() {
+    for (collection, field) in [
+        ("kulyrax_format", "v"),
+        ("conduit_projection_state", "v"),
+        ("users", "__kulyrax_guard"),
+    ] {
+        let m: DocumentMapping = kulyrax_core::yaml::from_str(&format!(
+            "event: U\ncollection: {collection}\nversion: 1\nid: payload.id\ndocument:\n  {field}: payload.v\n"
+        ))
+        .expect("mapping");
+        let a = MongoDbAdapter::new(
+            "mongo".into(),
+            "mongodb://127.0.0.1:1/?serverSelectionTimeoutMS=100",
+            "app".into(),
+            1,
+            10,
+            DocumentRuntimeBuilder::new(HashMap::from([("U".to_string(), m)])),
+            Arc::new(UpcasterRegistry::new()),
+            MigrationPolicy::default(),
+        );
+        let err = a.prepare().expect_err("refused").to_string();
+        assert!(err.contains("Kulyrax keeps for itself"), "{err}");
+    }
+}

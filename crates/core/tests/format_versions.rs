@@ -280,3 +280,46 @@ mod sqlite_marker {
         );
     }
 }
+
+/// Mappings built in code (not loaded from files) that target Kulyrax's own
+/// tables are refused by the SQLite adapter's `prepare`, before the database
+/// is opened.
+#[test]
+fn sqlite_prepare_refuses_a_mapping_on_kulyrax_tables() {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use kulyrax_core::adapter::StorageAdapter;
+    use kulyrax_core::adapter::sql::mapping::SqlMapping;
+    use kulyrax_core::adapter::sql::runtime::SqlRuntimeBuilder;
+    use kulyrax_core::adapter::sql::sqlite::SqliteAdapter;
+    use kulyrax_core::runtime::config::MigrationPolicy;
+    use kulyrax_core::upcast::UpcasterRegistry;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("app.db");
+    for table in [
+        "kulyrax_format",
+        "Kulyrax_Projection_State",
+        "conduit_projection_state",
+    ] {
+        let m: SqlMapping = kulyrax_core::yaml::from_str(&format!(
+            "event: U\ntable: {table}\nprimary_key: id\nversion: 1\ncolumns:\n  id: payload.id\n"
+        ))
+        .expect("mapping");
+        let a = SqliteAdapter::new(
+            "sql".into(),
+            db.to_string_lossy().to_string(),
+            10,
+            SqlRuntimeBuilder::new(HashMap::from([("U".to_string(), m)])),
+            Arc::new(UpcasterRegistry::new()),
+            MigrationPolicy::default(),
+        );
+        let err = a.prepare().expect_err("refused").to_string();
+        assert!(
+            err.contains("Kulyrax keeps for itself") && err.contains(table),
+            "{err}"
+        );
+    }
+    assert!(!db.exists(), "refused before the database was opened");
+}

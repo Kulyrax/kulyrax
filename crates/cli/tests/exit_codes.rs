@@ -202,8 +202,13 @@ fn exit_4_when_a_safety_check_refuses() {
     assert_code(held, 4);
     drop(lock);
 
-    // A rebuild whose mapped table is named like a shadow table.
-    let p = project("users__kulyrax_rebuild", &[GOOD]);
+    // A rebuild whose table a view depends on: the swap would break it. (A
+    // mapped table named like a shadow, the other case D7 tested here, is now
+    // refused when the mappings load: exit 2, below.)
+    let p = project("users", &[GOOD]);
+    rusqlite::Connection::open(p.path().join("app.db"))
+        .and_then(|c| c.execute_batch("CREATE VIEW users_named AS SELECT name FROM users"))
+        .expect("create the view");
     let args = [
         "rebuild",
         "--config",
@@ -220,6 +225,68 @@ fn exit_4_when_a_safety_check_refuses() {
     // `init` would overwrite a file.
     let p = project("users", &[GOOD]);
     assert_code(kulyrax(p.path(), &["init", "."]), 4);
+}
+
+/// A mapping that targets one of Kulyrax's own objects is refused when the
+/// mappings load, naming the file, the key and the name: SQL tables (without
+/// case, rebuild shadows by suffix), document collections and fields,
+/// key-value namespaces, graph labels.
+#[test]
+fn exit_2_when_a_mapping_names_what_kulyrax_keeps() {
+    let cases: &[(&str, &str, &str)] = &[
+        (
+            "sql",
+            "event: U\ntable: Kulyrax_Format\nprimary_key: id\nversion: 1\ncolumns:\n  id: payload.id\n",
+            "`table: Kulyrax_Format`",
+        ),
+        (
+            "sql",
+            "event: U\ntable: kulyrax_projection_state\nprimary_key: id\nversion: 1\ncolumns:\n  id: payload.id\n",
+            "`table: kulyrax_projection_state`",
+        ),
+        (
+            "sql",
+            "event: U\ntable: conduit_projection_state\nprimary_key: id\nversion: 1\ncolumns:\n  id: payload.id\n",
+            "`table: conduit_projection_state`",
+        ),
+        (
+            "sql",
+            "event: U\ntable: users__kulyrax_rebuild\nprimary_key: id\nversion: 1\ncolumns:\n  id: payload.id\n",
+            "`table: users__kulyrax_rebuild`",
+        ),
+        (
+            "document",
+            "event: U\ncollection: kulyrax_format\nid: payload.id\nversion: 1\ndocument:\n  n: payload.name\n",
+            "`collection: kulyrax_format`",
+        ),
+        (
+            "document",
+            "event: U\ncollection: users\nid: payload.id\nversion: 1\ndocument:\n  __kulyrax_guard: payload.name\n",
+            "`document field: __kulyrax_guard`",
+        ),
+        (
+            "keyvalue",
+            "event: U\nnamespace: __kulyrax\nkey: payload.id\nversion: 1\nvalue:\n  n: payload.name\n",
+            "`namespace: __kulyrax`",
+        ),
+        (
+            "graph",
+            "kind: node\nevent: U\nlabel: __KulyraxFormat\nkey: payload.id\nversion: 1\nproperties:\n  n: payload.name\n",
+            "`label: __KulyraxFormat`",
+        ),
+    ];
+    for (kind, mapping, says) in cases {
+        let p = project("users", &[GOOD]);
+        std::fs::remove_file(p.path().join("mappings/sql/u.yaml")).expect("remove");
+        write(
+            p.path().join(format!("mappings/{kind}/reserved.yaml")),
+            mapping,
+        );
+        let got = kulyrax(p.path(), RUN_ONCE);
+        assert!(got.1.contains(says), "{kind}: {says}\n{}", got.1);
+        assert!(got.1.contains("reserved.yaml"), "names the file\n{}", got.1);
+        assert_code(got, 2);
+    }
 }
 
 /// A source checkpoint a newer Kulyrax wrote: the start is refused before

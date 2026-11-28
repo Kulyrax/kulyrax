@@ -8,8 +8,13 @@
 //!
 //! **Gated on `KULYRAX_ELASTICSEARCH_URL`.** The marker is one per cluster,
 //! so this binary owns the `kulyrax_format` index while it runs: each test
-//! deletes it before and after, one test at a time. Cargo runs a crate's test
-//! binaries one after another, and the other suites' tests do not use it.
+//! deletes it before and after, one test at a time, and one test sets it to a
+//! newer version. **Do not run it alongside another suite that starts an
+//! Elasticsearch adapter on the same cluster** (`kulyrax-ingest`,
+//! `kulyrax-cli`): their `prepare` reads the marker and would be refused
+//! meanwhile (seen once, when both ran at once locally). Cargo runs one
+//! crate's binaries one after another, and in CI each job has its own
+//! cluster.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -143,6 +148,13 @@ fn concurrent_first_starts_leave_one_marker() -> R {
         });
         assert!(results.iter().all(Result::is_ok), "{results:?}");
         assert_eq!(marker(url)?, Some(json!({ "version": 1 })));
+        // `_count` is a search: it sees a document only after a refresh
+        // (every 1 s by default, later under load), unlike the GET by id
+        // above. Refresh first, or a loaded cluster counts 0.
+        let refreshed = http()
+            .post(format!("{url}/kulyrax_format/_refresh"))
+            .send()?;
+        assert!(refreshed.status().is_success(), "{}", refreshed.status());
         let count: Value = http()
             .get(format!("{url}/kulyrax_format/_count"))
             .send()?
@@ -150,4 +162,30 @@ fn concurrent_first_starts_leave_one_marker() -> R {
         assert_eq!(count["count"], 1, "{count}");
         Ok(())
     })
+}
+
+/// Mappings built in code (not loaded from files) that target the marker
+/// index, or the guard field, are refused at `prepare`, before any request:
+/// no server needed.
+#[test]
+fn prepare_refuses_a_mapping_on_kulyrax_names() {
+    use kulyrax_core::adapter::document::mapping::DocumentMapping;
+    for (index, field) in [("kulyrax_format", "v"), ("users", "__kulyrax_guard")] {
+        let m: DocumentMapping = kulyrax_core::yaml::from_str(&format!(
+            "event: U\ncollection: {index}\nversion: 1\nid: payload.id\ndocument:\n  {field}: payload.v\n"
+        ))
+        .expect("mapping");
+        let a = ElasticsearchAdapter::new(
+            "es".into(),
+            "http://127.0.0.1:1",
+            None,
+            100,
+            10,
+            DocumentRuntimeBuilder::new(HashMap::from([("U".to_string(), m)])),
+            Arc::new(UpcasterRegistry::new()),
+            MigrationPolicy::default(),
+        );
+        let err = a.prepare().expect_err("refused").to_string();
+        assert!(err.contains("Kulyrax keeps for itself"), "{err}");
+    }
 }

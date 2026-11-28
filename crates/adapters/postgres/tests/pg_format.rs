@@ -261,3 +261,33 @@ fn a_user_without_create_names_the_grant() -> R {
         &format!("DROP SCHEMA {s} CASCADE; DROP OWNED BY {role}; DROP ROLE {role}"),
     )
 }
+
+/// Mappings built in code (not loaded from files) that target Kulyrax's own
+/// tables are refused at `prepare`, before any connection: no server needed.
+#[test]
+fn prepare_refuses_a_mapping_on_kulyrax_tables() {
+    for table in [
+        "kulyrax_format",
+        "KULYRAX_PROJECTION_STATE",
+        "app.conduit_projection_state",
+    ] {
+        let m: SqlMapping = kulyrax_core::yaml::from_str(&format!(
+            "event: U\ntable: {table}\nprimary_key: id\nversion: 1\ncolumns:\n  id: payload.id\n"
+        ))
+        .expect("mapping");
+        let a = PostgresAdapter::new(
+            "pg".into(),
+            "postgres://app@127.0.0.1:1/app",
+            1,
+            10,
+            SqlRuntimeBuilder::new(HashMap::from([("U".to_string(), m)])),
+            Arc::new(UpcasterRegistry::new()),
+            MigrationPolicy::default(),
+        );
+        let err = a.prepare().expect_err("refused").to_string();
+        assert!(
+            err.contains("Kulyrax keeps for itself") && err.contains(table),
+            "{err}"
+        );
+    }
+}

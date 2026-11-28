@@ -240,10 +240,12 @@ impl StorageAdapter for MySqlAdapter {
     /// event's: MySQL DDL commits the open transaction implicitly (see
     /// `exec::ensure_schema`).
     fn prepare(&self) -> Result<(), AdapterError> {
+        // Before the pool, which connected when the adapter was built: a
+        // mapping that cannot be used is refused even without a server.
+        exec::check_identifiers(&self.builder).map_err(AdapterError::from)?;
         let pool = self.pool()?;
         self.prepared
             .prepare(|| {
-                exec::check_identifiers(&self.builder)?;
                 let mut conn = pool.get_conn().map_err(my_err)?;
                 let (log_bin, format): (i64, String) = conn
                     .query_first("SELECT @@log_bin, @@SESSION.binlog_format")

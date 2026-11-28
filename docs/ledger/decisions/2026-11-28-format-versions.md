@@ -157,6 +157,60 @@ How the changes are applied:
   This supersedes "Elasticsearch: `_meta.kulyrax_format` in each target
   index's mapping" in the list below, and its trade-off ("a newer binary's
   index is refused only when a mapping targets it").
+- **Reserved names: the gap is closed, not recorded.** The owner,
+  2026-11-28 (quoted from the message):
+  > Reserved names: don't leave it as a recorded gap. In E1 (same PR), refuse
+  > at validation (exit 2, naming the mapping file, key and the reserved name)
+  > any mapping target that collides with Kulyrax's own objects, per backend:
+  > SQL tables: kulyrax_projection_state, kulyrax_format,
+  > conduit_projection_state (the tombstone), and anything ending in
+  > __kulyrax_rebuild (rebuild shadows). Compare case-insensitively (Postgres
+  > folding, MySQL collation). MongoDB collections: kulyrax_projection_state,
+  > kulyrax_format, conduit_projection_state. Neo4j labels: anything starting
+  > with __Kulyrax or __Conduit. Redis: the existing __kulyrax prefix rule
+  > (check it covers __kulyrax:format). Elasticsearch: indices are
+  > user-named; nothing to reserve, but confirm _meta.kulyrax_format can't be
+  > clobbered by a mapping field. File stores: already covered by the
+  > layout/reserved-entry rules; confirm. One list of reserved names in core,
+  > used by every backend's check. A test per backend. Add the rule to
+  > docs/mapping-reference.md "Names". Update the decision record: the gap is
+  > closed, not just recorded.
+
+  How it was applied (`kulyrax_core::adapter::reserved`, the one list):
+  - **Where it is checked.**
+    - When mapping files load (the loader knows the file): a refusal names the
+      file, the key and the name, and exits 2.
+    - Mappings built in code skip the loader, so each backend's own
+      `prepare` check uses the same list (SQL `check_identifiers`, MongoDB,
+      Elasticsearch, Neo4j, Redis).
+  - **Two names added beyond the owner's lists**, both Kulyrax's own:
+    - `kulyrax_tombstone_tmp`, the tombstone's temporary name in MySQL and
+      MongoDB, for SQL and document targets;
+    - for Elasticsearch, `kulyrax_format`: the marker is no longer
+      `_meta.kulyrax_format` (the owner chose a cluster index, above), so a
+      mapping index of that name would collide with the marker index.
+  - **Elasticsearch's guard field.** A mapped field cannot clobber the guard:
+    the adapter writes `__kulyrax_guard` after the content fields. But a
+    mapped field of that name would be dropped without a word, so top-level
+    document fields starting with `__kulyrax` are reserved too.
+  - **Document collections: one list.** A document mapping does not know
+    whether it feeds MongoDB, Elasticsearch or a file store, so one list
+    serves all three.
+  - **Redis: confirmed covered.** The `__kulyrax` prefix covers
+    `__kulyrax:format`. Redis's `prepare` rule now takes the prefix from the
+    core list.
+  - **File stores: confirmed covered.** Names may hold only letters, digits,
+    `_` and `-` (`check_config_name`), so `.kulyrax` and `.conduit` cannot be
+    named, and `Root::claim` keeps adapters apart.
+  - **The shadow suffix only at load.** `prepare` checks only the exact
+    tables. A rebuild projects through mappings that Kulyrax points at the
+    shadows, so a `prepare`-time suffix check broke `rebuild` (the D7 exit-3
+    and exit-4 tests caught it). For mappings built in code, the rebuild
+    preflight still refuses a shadow-named table (exit 4).
+  - **This amends decision `2026-11-26-exit-codes` for one case.** D7 listed
+    "a mapped table named like a shadow" under exit 4. A mapping file naming
+    one is now refused at load (exit 2). D7's exit-4 CLI test now uses the
+    preflight's other refusal, a view depending on the table.
 - **Change 4, the grants.** Postgres and MySQL check the create right even
   for `CREATE TABLE IF NOT EXISTS` on a table that exists (probed). So the
   guard table has always needed CREATE on its schema or database at every

@@ -434,6 +434,10 @@ impl Neo4jAdapter {
     fn ensure_constraint(&self, rt: &Runtime, graph: &Graph) -> Result<(), GraphError> {
         rt.block_on(async {
             ensure_format_marker(graph, &self.store).await?;
+            // A kill here: the marker is written, the guard constraint and
+            // the 0.12 relabelling have not run (the kill tests start again
+            // here).
+            kulyrax_core::crash::crash_point("format-marker-written");
             graph
                 .run(Query::new(GUARD_CONSTRAINT.to_string()))
                 .await
@@ -485,6 +489,22 @@ impl StorageAdapter for Neo4jAdapter {
                 self.id,
                 bad.join(", ")
             )));
+        }
+        let reserved: Vec<_> = self
+            .builder
+            .mappings()
+            .iter()
+            .flat_map(|(event, m)| {
+                kulyrax_core::adapter::reserved::in_graph_mapping(m)
+                    .into_iter()
+                    .map(move |c| (event.clone(), c))
+            })
+            .collect();
+        if let Some(refusal) = kulyrax_core::adapter::reserved::refusal(
+            &format!("neo4j adapter {:?}", self.id),
+            reserved,
+        ) {
+            return Err(AdapterError::WriteFailed(refusal));
         }
         let (rt, graph) = self
             .conn

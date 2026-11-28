@@ -678,6 +678,22 @@ impl StorageAdapter for MongoDbAdapter {
     }
 
     fn prepare(&self) -> Result<(), AdapterError> {
+        let reserved: Vec<_> = self
+            .builder
+            .mappings()
+            .iter()
+            .flat_map(|(event, m)| {
+                kulyrax_core::adapter::reserved::in_document_mapping(m)
+                    .into_iter()
+                    .map(move |c| (event.clone(), c))
+            })
+            .collect();
+        if let Some(refusal) = kulyrax_core::adapter::reserved::refusal(
+            &format!("mongodb adapter {:?}", self.id),
+            reserved,
+        ) {
+            return Err(AdapterError::WriteFailed(refusal));
+        }
         let client = self
             .client
             .as_ref()
@@ -687,6 +703,9 @@ impl StorageAdapter for MongoDbAdapter {
                 timed(Stage::Schema, || {
                     let db = client.database(&self.database);
                     ensure_format_marker(&db)?;
+                    // A kill here: the marker is written, the 0.12 rename
+                    // has not run (the kill tests start again here).
+                    kulyrax_core::crash::crash_point("format-marker-written");
                     legacy::migrate_guard_collection(client, &db)?;
                     self.ensure_guard_index(&db)
                 })

@@ -24,26 +24,53 @@ that each migrates from 0.12.1.
 - [x] **Change 1:** a batch log with a foreign magic is refused (exit 4),
   never deleted, whatever its position. Its own commit, with a unit test and a
   CLI test. Docker suites and the workspace run follow at the PR's gates.
-- [ ] Each format in the inventory records its version as decided.
-- [ ] A newer version is refused before anything is read, replayed or written.
-  The error names the file or store and both versions, and the CLI exits 4
-  (a CLI test).
-- [ ] An unversioned (0.12.x) file or store is read as format 1 and stamped.
-- [ ] **Change 5:** the layout marker's content is read. A store holding `1`
-  and a store holding `2` are each tested; new and migrated stores write `2`.
-  An empty marker is read as current and re-stamped atomically on open (the
-  owner's addition), tested.
-- [ ] **Change 2:** the SQL `kulyrax_format` table is in the guard table's
-  schema; tested with a non-default Postgres schema.
-- [ ] **Change 3:** every marker is created insert-if-absent, atomically per
-  backend. Concurrent first starts leave one marker with one version (a test
-  per backend).
-- [ ] **Change 4:** a marker that cannot be created refuses the start (exit 4),
-  naming the store and the grant. The grants per backend are in the user docs.
-- [ ] E2 tests: future version refused, round-trip, and migration from 0.12.1
-  (the `upgrade from 0.12.1` CI job), for each format and backend.
-- [ ] `stability.md`: the formats, their versions, and what is out of scope.
-  rc.1 notes: the change.
+- [x] Each format in the inventory records its version as decided:
+  - checkpoint, outbox state, batch log, file-store layout marker;
+  - SQL (`kulyrax_format`), MongoDB, Redis, Elasticsearch (per cluster, the
+    owner's choice), Neo4j.
+- [x] A newer version is refused before anything is read, replayed or written.
+  The error names the file or store and both versions. The CLI exits 4: tested
+  for a batch log and a checkpoint through the binary; the networked backends
+  through `AdapterError::Format`, which the same mapping turns into 4.
+- [x] An unversioned (0.12.x) file or store is read as format 1 and stamped:
+  unit and backend tests, and the upgrade job with the real 0.12.1 binary.
+- [x] **Change 5:** the layout marker's content is read. Stores holding `1`
+  and `2` are each tested; new and migrated stores write `2`. An empty marker
+  is read as current and re-stamped atomically on open (the owner's
+  addition), tested.
+- [x] **Change 2:** the SQL `kulyrax_format` table is in the guard table's
+  schema; tested in a non-default Postgres schema, and with another store's
+  marker on the `search_path`.
+- [x] **Change 3:** every marker is created insert-if-absent, atomically per
+  backend. Concurrent first starts leave one marker with one version: a test
+  per backend (file store, SQLite, Postgres, MySQL, MongoDB, Redis,
+  Elasticsearch, Neo4j).
+- [x] **Change 4:** a marker that cannot be created refuses the start (exit
+  4), naming the store and the grant. The grants per backend are in
+  `docs/required-grants.md` (linked from the README), with the Redis
+  eviction rule.
+  - Tested: SQLite (read-only file), Postgres (role without CREATE), MySQL
+    (user without CREATE), Redis (ACL user without HSETNX).
+  - **Not tested**, as the test servers allow everything: MongoDB (no
+    authorization), Neo4j (Community), Elasticsearch (security off). Those
+    mappings are code-reviewed only.
+- [x] **Redis additions:** an `allkeys-*` policy prints a warning; an
+  unreadable policy prints one info line per adapter start (through the
+  binary). Neither refuses the start.
+- [x] **Reserved names** (the owner's addition): one list in core
+  (`adapter::reserved`).
+  - Mapping files are checked at load: exit 2, naming the file, key and
+    name. A CLI test covers 8 cases across SQL, document, key-value and graph.
+  - Each backend's `prepare` checks mappings built in code: a test per
+    backend (SQLite, Postgres, MySQL, MongoDB, Elasticsearch, Neo4j, Redis).
+  - The rule is in `mapping-reference.md` "Names", `stability.md` §3, and
+    the rc.1 notes.
+- [x] E2 tests: future version refused, round-trip, and migration from 0.12.1
+  (the `upgrade from 0.12.1` test asserts every backend's marker and the
+  checkpoint's `format`).
+- [x] `stability.md` §5: the rules, every format and where its version is,
+  what is not versioned. rc.1 notes: a "Versioned formats" section and the
+  exit-4 row. `writing-a-backend.md`: the marker.
 - [ ] Gates: fmt, clippy `-D warnings`, workspace tests, examples, every Docker
   backend suite.
 - [ ] PR merged with the 12 required checks green.
@@ -124,6 +151,19 @@ that each migrates from 0.12.1.
 | Elasticsearch, after | the same with `--no-fail-fast` | 19 pass, 0 fail, 6 binaries: one marker on a new cluster, idempotent; `2` newer and `"two"` unrecognised refused, marker kept; 8 concurrent first starts, one document (`_count` = 1) |
 | Elasticsearch permission refusal: **not tested** | `curl http://127.0.0.1:9200/` | 200 without credentials: security disabled, so 401/403 cannot be produced. The mapping is code-reviewed only |
 | E2: migrated from 0.12.1 | `cargo test -p kulyrax-cli --test rename_migration -- --test-threads=1 --nocapture`, `KULYRAX_V0121_BIN` = the `v0.12.1` build (`--version`: 0.12.1), every backend URL set (Neo4j 7688) | 15 pass, 0 fail, no SKIP line, on the first run. Each upgrade and each killed-mid-migration restart now asserts: 0.12.1 wrote a checkpoint with no `format`; after this version ran, the checkpoint has `format: 1` and the store's marker reads `2` (file stores) or `1` (SQLite, Postgres, MySQL, MongoDB, Neo4j, Redis, Elasticsearch). For Redis and Elasticsearch the marker is per database / cluster and may predate the test, so its value is checked, not who wrote it |
+| Process slip on `71fd0a8` | the commit's own command | `cargo fmt --check` failed on the new MySQL reader (rustfmt needed a second pass there), which stopped the `&&` chain before clippy, but a `;` let the commit and push run anyway. So `71fd0a8` went out unformatted and without clippy. Fixed in `ec44116` after fmt (clean twice) and workspace clippy `-D warnings` (clean). Gate-then-commit commands now run under `set -e` |
+| Full gates, first run | `e1-gates.sh` (scratchpad): fmt; workspace clippy `-D warnings`; clippy `unstable-pb` on client and ingest; `RUSTDOCFLAGS=-D warnings cargo doc --workspace --no-deps`; `cargo test --workspace`; `cargo build` of the 6 example manifests | all ok, workspace tests 646 pass, 0 fail, 166 binaries, except rustdoc: 2 errors of mine (an unresolved `AdapterError::Format` link in `sql/adapter.rs`; a public doc linking the private `SqliteTxn::begin_schema`). Fixed; rustdoc then clean. A build warning, `unused import: RoutingConfig` in `examples/embedded/src/main.rs`, predates this branch (`3f9930b`, D4): noted, not changed |
+| Kulyrax's own object names | `grep` for `conduit_`/`kulyrax_` names and `pub const … &str` in `legacy.rs`, the adapters and `exec.rs`; `check_identifiers`, `file_names.rs`, `validation.rs` for existing name checks | own objects: `kulyrax_projection_state`, `kulyrax_format`, `conduit_projection_state`, `kulyrax_tombstone_tmp` (MySQL and MongoDB migration), `*__kulyrax_rebuild`, `__kulyrax_guard` (ES field), `__Kulyrax*`/`__Conduit*` labels, `__kulyrax:*` Redis keys. No check refused any of them as a mapping target, except Redis's `__kulyrax` namespace prefix |
+| Reserved names, CLI | `cargo test -p kulyrax-cli --test exit_codes` | first build: `Access is denied` replacing `kulyrax.exe`, because two test processes left by the stopped Docker run held it (killed, then rebuilt). First run: 6 pass, 2 fail. D7's exit-3 and exit-4 tests run `rebuild`, whose own mappings target `users__kulyrax_rebuild`; the new `prepare`-time suffix check refused them. Fixed: `prepare` checks only the exact names (`sql_own_table`), mapping files the suffix too. D7's exit-4 rebuild case now uses a dependent view. Then 8 pass, including `exit_2_when_a_mapping_names_what_kulyrax_keeps` (8 cases: file named, key and name in the message, exit 2) |
+| Reserved names, `prepare` per backend | `cargo test` of `format_versions` (SQLite) and each adapter's `*_format` test, filter `prepare_refuses`, no servers | first run: 6 pass; MySQL failed, because its `prepare` read the pool (connected when the adapter was built) before `check_identifiers`. Reordered: the name check first. Then 7 pass, one per backend |
+| Full gates + Docker suites (with reserved names) | background run `beavsjdph`: `e1-gates.sh`, then `docker-suites.sh` (Neo4j 7688, real 0.12.1 binary) | gates all ok, workspace 658 pass, 0 fail; postgres 42, mysql 36, redis 28, mongodb 31, elasticsearch 20, neo4j 30, source-postgres 18, ingest 17 pass. **cli: 40 pass, 1 fail: `rename_migration::mongodb_migration_killed_at_each_step`.** Unexplained: the suite script printed only the failing test's name, not its panic text (fixed afterwards: it now keeps each package's full log) |
+| That failure, rerun | the test alone ×3; then all of `rename_migration` ×5 with every backend (logs `rm-run-{1..5}.log`, scratchpad) | 3 pass; 5 × 15 pass. Not reproduced. The owner chose to investigate before committing |
+| Hypothesis: a kill between the format-marker write and the 0.12 rename breaks the migration | new crash point `format-marker-written` (SQL `ensure_schema`, MongoDB and Neo4j `prepare`, the file stores' migration after their markers), added to every kill test: kill there, restart, assert the run's counts (every guard lane survives: both older redeliveries stale), the marker and the checkpoint | `rename_migration` 15 pass; each new point was hit (each kill test asserts the "crash point … reached" text). The hypothesis does not hold: no bug at that point |
+| MongoDB upgrade tests under load | `mongo-under-load.sh` (scratchpad): the built `rename_migration` binary, filter `mongodb` (both MongoDB tests), 30 times, while the full `docker-suites.sh` ran alongside; every run's log kept (`mongo-load-20261128-184708/`) | 30 of 30 pass. The original failure (run `beavsjdph`) is **not reproduced and stays unexplained**: no message was captured, and the hypothesis tested (a kill between marker and rename) does not hold |
+| A failure the load run found | the load suite's `kulyrax-adapter-elasticsearch.log` | `es_format::concurrent_first_starts_leave_one_marker`: `_count` 0. The real-time `GET` by id just before it passed; `_count` is a search and sees the document only after a refresh, which came late under load. A test bug: the test now refreshes before counting. Then `es_format` 20 of 20 under load (`es-load-20261128-190141/`) |
+| A failure that run found | its `kulyrax-ingest.log` | `grpc_dlq_count_reflects_a_real_cross_backend_failure`: the ES adapter was refused, "written by a newer Kulyrax (format 2…)". Cause: `es_format`'s newer-marker test, running at the same time against the same cluster, sets the cluster's one marker to 2. The product behaved correctly. Test isolation: `es_format` must not run alongside another suite that starts an ES adapter on the same cluster (documented in it). In CI each job has its own cluster and runs its binaries one after another. Locally only the parallel load harness overlaps them |
+| CI did not run the new Docker tests | `.github/workflows/ci.yml` | each backend job names its test files, so `pg_format`, `redis_format`, `mongo_format`, `neo4j_format`, `es_format` and `redis_eviction_notice` would not run (MySQL runs its whole crate). Added to their jobs; job names (the required checks) unchanged |
+| Before the commit | fmt; workspace clippy `-D warnings`; rustdoc `-D warnings`; `cargo test -p kulyrax-core -p kulyrax-cli` | clean; 425 pass, 0 fail, 107 binaries |
 | `FormatError` in the D6 error test | `cargo test -p kulyrax-core --test error_traits` | 7 pass: `Send + Sync + 'static`, and `AdapterError::Format`'s `source()` is the `FormatError` |
 
 ## Risks and open questions
@@ -132,7 +172,16 @@ that each migrates from 0.12.1.
   - Core: typed error, checkpoint, outbox state, file stores, exit 4 (~0.75 day).
   - Six networked backends plus SQLite, with tests (~1 day).
   - Upgrade-job cases and docs (~0.25 day).
-- Elasticsearch has no `prepare` today. Its per-index marker check needs one.
+- Elasticsearch had no `prepare`; it has one now, for the marker. Like Redis it
+  does not refuse `handle` before `prepare` (the runtime always prepares),
+  unlike the SQL, MongoDB and Neo4j adapters. Code that embeds the adapter and
+  never calls `prepare` skips the check (in the rc.1 notes).
+- Closed (the owner, 2026-11-28): a mapping naming one of Kulyrax's own
+  objects is now refused (criterion below).
+- `docs/required-grants.md`: each line is read from the code, except one,
+  which is inferred from MongoDB's documentation and not tested (no auth on
+  the test servers): that the built-in `readWrite` role covers the one-time
+  rename of a 0.12 guard collection (`renameCollectionSameDB`).
 - **For the owner: SQL least privilege.** Postgres and MySQL check the CREATE
   right even for `CREATE TABLE IF NOT EXISTS` on an existing table. So the
   guard table has always needed CREATE on its schema (Postgres) or database

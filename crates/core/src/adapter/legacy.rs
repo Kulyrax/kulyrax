@@ -189,6 +189,9 @@ pub fn migrate_file_store(dir: &Path, known_dirs: &mut HashSet<String>) -> io::R
             write_marker(&entry?.path())?;
         }
     }
+    // A kill here: the entries are moved and the markers say `2`, but
+    // `.conduit/` is not parked yet (the kill tests start again here).
+    crash_point("format-marker-written");
 
     drop(old_lock);
     remove_if_exists(&old_lock_path)?;

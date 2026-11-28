@@ -610,8 +610,26 @@ impl StorageAdapter for ElasticsearchAdapter {
         self.priority
     }
 
-    /// Check the cluster's format marker (step 5), creating it if absent.
+    /// Refuse mappings that name what Kulyrax keeps for itself (the marker
+    /// index, the guard field), then check the cluster's format marker (step
+    /// 5), creating it if absent.
     fn prepare(&self) -> Result<(), AdapterError> {
+        let reserved: Vec<_> = self
+            .builder
+            .mappings()
+            .iter()
+            .flat_map(|(event, m)| {
+                kulyrax_core::adapter::reserved::in_document_mapping(m)
+                    .into_iter()
+                    .map(move |c| (event.clone(), c))
+            })
+            .collect();
+        if let Some(refusal) = kulyrax_core::adapter::reserved::refusal(
+            &format!("elasticsearch adapter {:?}", self.id),
+            reserved,
+        ) {
+            return Err(AdapterError::WriteFailed(refusal));
+        }
         self.ensure_format_marker().map_err(AdapterError::from)
     }
 

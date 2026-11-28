@@ -12,6 +12,7 @@ pub mod keyvalue;
 #[doc(hidden)]
 pub mod legacy;
 pub(crate) mod loader;
+pub mod reserved;
 /// The SQL storage kind: the trait a SQL backend implements, the mappings, and
 /// the SQLite adapter.
 pub mod sql;

@@ -14,10 +14,15 @@ use crate::pipeline::LoadError;
 ///
 /// Files are read in sorted path order, so a duplicate event is always reported
 /// against the same pair of files.
+///
+/// `reserved` lists a mapping's targets that collide with Kulyrax's own
+/// objects ([`crate::adapter::reserved`]), as `(key, name, why)`; any one
+/// refuses the file.
 pub(crate) fn load_mapping_dir<M: serde::de::DeserializeOwned>(
     dir: &Path,
     kind: &str,
     event_of: impl Fn(&M) -> &str,
+    reserved: impl Fn(&M) -> Vec<(&'static str, String, String)>,
 ) -> Result<HashMap<String, M>, LoadError> {
     let mut files = Vec::new();
     collect_mapping_files(dir, kind, &mut files)?;
@@ -38,6 +43,13 @@ pub(crate) fn load_mapping_dir<M: serde::de::DeserializeOwned>(
                     source,
                 }
             })?;
+
+        if let Some((key, name, why)) = reserved(&mapping).into_iter().next() {
+            return Err(LoadError::Invalid(format!(
+                "Invalid {kind} mapping {path:?}: `{key}: {name}` is reserved: {why}. \
+                 Give the {key} another name"
+            )));
+        }
 
         let event = event_of(&mapping).to_string();
         if let Some(first) = sources.get(&event) {
@@ -104,7 +116,12 @@ mod tests {
     }
 
     fn load(root: &Path) -> Result<HashMap<String, TestMapping>, LoadError> {
-        load_mapping_dir(root, "SQL", |m: &TestMapping| m.event.as_str())
+        load_mapping_dir(
+            root,
+            "SQL",
+            |m: &TestMapping| m.event.as_str(),
+            |_| Vec::new(),
+        )
     }
 
     #[test]
