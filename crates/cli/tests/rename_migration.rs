@@ -485,15 +485,14 @@ fn mysql() -> Option<Backend> {
             }
         })),
         marker: Box::new(move |_: &Path| {
-            let version: Result<Option<i64>, ::mysql::Error> = ::mysql::Pool::new(
-                read_base.as_str(),
-            )
-            .and_then(|p| p.get_conn())
-            .and_then(|mut c| {
-                c.query_first(format!(
+            let version: Result<Option<i64>, ::mysql::Error> =
+                ::mysql::Pool::new(read_base.as_str())
+                    .and_then(|p| p.get_conn())
+                    .and_then(|mut c| {
+                        c.query_first(format!(
                     "SELECT version FROM {read_db}.kulyrax_format WHERE component = 'guards'"
                 ))
-            });
+                    });
             match version {
                 Ok(Some(v)) => v.to_string(),
                 other => format!("unreadable: {other:?}"),
