@@ -79,6 +79,7 @@ impl From<AdapterError> for AdapterFailure {
             AdapterError::Format(e) => AdapterFailure::WriteFailed {
                 message: e.to_string(),
             },
+            AdapterError::Locked(msg) => AdapterFailure::WriteFailed { message: msg },
         }
     }
 }
@@ -94,6 +95,9 @@ impl From<&AdapterError> for AdapterFailure {
             },
             AdapterError::Format(e) => AdapterFailure::WriteFailed {
                 message: e.to_string(),
+            },
+            AdapterError::Locked(msg) => AdapterFailure::WriteFailed {
+                message: msg.clone(),
             },
         }
     }

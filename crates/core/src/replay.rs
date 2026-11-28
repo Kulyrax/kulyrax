@@ -78,7 +78,10 @@ impl From<std::io::Error> for ReplayLoadError {
 /// Directory entries are parsed with [`serde_json::from_reader`] (no full-file string allocation).
 /// Event files are read once; NDJSON reuses the same bytes via an in-memory cursor (no second open).
 pub fn events_from_path(path: impl AsRef<Path>) -> Result<EventsFromPath, ReplayLoadError> {
-    let path = path.as_ref();
+    open_state(path.as_ref()).map(|state| EventsFromPath { state })
+}
+
+fn open_state(path: &Path) -> Result<State, ReplayLoadError> {
     if path.is_dir() {
         let mut paths: Vec<PathBuf> = fs::read_dir(path)?
             .filter_map(|e| e.ok())
@@ -91,20 +94,20 @@ pub fn events_from_path(path: impl AsRef<Path>) -> Result<EventsFromPath, Replay
             })
             .collect();
         paths.sort();
-        Ok(EventsFromPath::Directory { paths, index: 0 })
+        Ok(State::Directory { paths, index: 0 })
     } else {
         let raw = fs::read_to_string(path)?;
         let trimmed = raw.trim();
         if trimmed.is_empty() {
-            return Ok(EventsFromPath::Empty);
+            return Ok(State::Empty);
         }
         if let Ok(event) = serde_json::from_str::<Event>(trimmed) {
-            Ok(EventsFromPath::Single {
+            Ok(State::Single {
                 done: false,
                 event: Some(event),
             })
         } else {
-            Ok(EventsFromPath::Ndjson {
+            Ok(State::Ndjson {
                 reader: BufReader::new(Cursor::new(raw.into_bytes())),
                 line: String::new(),
             })
@@ -112,32 +115,24 @@ pub fn events_from_path(path: impl AsRef<Path>) -> Result<EventsFromPath, Replay
     }
 }
 
-/// The events at a path, in replay order ([`events_from_path`]): iterate it.
-/// The variants are the iterator's state, not an interface; build one with
-/// [`events_from_path`].
-#[non_exhaustive]
-pub enum EventsFromPath {
-    /// A directory of event files, read in file-name order.
-    Directory {
-        /// The files, sorted.
-        paths: Vec<PathBuf>,
-        /// The next file to read.
-        index: usize,
-    },
-    /// An NDJSON file: one event per line.
+/// The events at a path, in replay order: iterate it. Build one with
+/// [`events_from_path`]. Its state is private.
+pub struct EventsFromPath {
+    state: State,
+}
+
+/// Where an [`EventsFromPath`] is in its input.
+enum State {
+    /// A directory of event files, read in file-name order: the files,
+    /// sorted, and the next one to read.
+    Directory { paths: Vec<PathBuf>, index: usize },
+    /// An NDJSON file, one event per line: its content and the line buffer.
     Ndjson {
-        /// The file's content.
         reader: BufReader<Cursor<Vec<u8>>>,
-        /// The line buffer.
         line: String,
     },
-    /// A file holding one JSON event.
-    Single {
-        /// Whether the event was returned.
-        done: bool,
-        /// The event.
-        event: Option<Event>,
-    },
+    /// A file holding one JSON event, and whether it was returned.
+    Single { done: bool, event: Option<Event> },
     /// No events.
     Empty,
 }
@@ -146,16 +141,16 @@ impl Iterator for EventsFromPath {
     type Item = Result<Event, ReplayLoadError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            EventsFromPath::Empty => None,
-            EventsFromPath::Single { done, event } => {
+        match &mut self.state {
+            State::Empty => None,
+            State::Single { done, event } => {
                 if *done {
                     return None;
                 }
                 *done = true;
                 event.take().map(Ok)
             }
-            EventsFromPath::Directory { paths, index } => {
+            State::Directory { paths, index } => {
                 if *index >= paths.len() {
                     return None;
                 }
@@ -172,7 +167,7 @@ impl Iterator for EventsFromPath {
                     Err(e) => Some(Err(e.into())),
                 }
             }
-            EventsFromPath::Ndjson { reader, line } => loop {
+            State::Ndjson { reader, line } => loop {
                 line.clear();
                 match reader.read_line(line) {
                     Ok(0) => return None,

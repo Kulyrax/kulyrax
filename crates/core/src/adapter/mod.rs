@@ -41,6 +41,10 @@ pub enum AdapterError {
     /// not a Kulyrax format, or its marker could not be created. A safety
     /// refusal, raised by `prepare` before anything is read or written.
     Format(crate::format::FormatError),
+    /// Another process holds the store's lock (a file store's
+    /// `.kulyrax/lock`): only one Kulyrax process may write to it. A safety
+    /// refusal, raised by `prepare`; the message names the store and the lock.
+    Locked(String),
 }
 
 impl fmt::Display for AdapterError {
@@ -49,6 +53,7 @@ impl fmt::Display for AdapterError {
             AdapterError::WriteFailed(msg) => write!(f, "{}", msg),
             AdapterError::UnsupportedVersion(msg) => write!(f, "{}", msg),
             AdapterError::Format(e) => write!(f, "{e}"),
+            AdapterError::Locked(msg) => write!(f, "{msg}"),
         }
     }
 }
@@ -556,8 +561,8 @@ pub struct PrepareFailure {
     pub adapter_id: String,
     /// Why it failed.
     pub message: String,
-    /// The failure is a safety refusal (an [`AdapterError::Format`]), not an
-    /// error: the CLI exits 4 for it.
+    /// The failure is a safety refusal (an [`AdapterError::Format`] or
+    /// [`AdapterError::Locked`]), not an error: the CLI exits 4 for it.
     pub refused: bool,
 }
 
@@ -576,7 +581,7 @@ pub fn prepare_adapters(adapters: &[Box<dyn StorageAdapter>]) -> Vec<PrepareFail
             a.prepare().err().map(|e| PrepareFailure {
                 adapter_id: a.id().to_string(),
                 message: e.to_string(),
-                refused: matches!(e, AdapterError::Format(_)),
+                refused: matches!(e, AdapterError::Format(_) | AdapterError::Locked(_)),
             })
         })
         .collect()
