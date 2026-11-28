@@ -246,11 +246,6 @@ fn exit_2_when_a_mapping_names_what_kulyrax_keeps() {
         ),
         (
             "sql",
-            "event: U\ntable: conduit_projection_state\nprimary_key: id\nversion: 1\ncolumns:\n  id: payload.id\n",
-            "`table: conduit_projection_state`",
-        ),
-        (
-            "sql",
             "event: U\ntable: users__kulyrax_rebuild\nprimary_key: id\nversion: 1\ncolumns:\n  id: payload.id\n",
             "`table: users__kulyrax_rebuild`",
         ),
@@ -275,15 +270,28 @@ fn exit_2_when_a_mapping_names_what_kulyrax_keeps() {
             "`label: __KulyraxFormat`",
         ),
     ];
-    for (kind, mapping, says) in cases {
+    // 0.12's guard table, now its tombstone (spelled only in `legacy`).
+    let legacy = kulyrax_core::adapter::legacy::LEGACY_GUARD_TABLE;
+    let legacy_case = (
+        "sql",
+        format!(
+            "event: U\ntable: {legacy}\nprimary_key: id\nversion: 1\ncolumns:\n  id: payload.id\n"
+        ),
+        format!("`table: {legacy}`"),
+    );
+    let all = cases
+        .iter()
+        .map(|(k, m, s)| (*k, m.to_string(), s.to_string()))
+        .chain(std::iter::once(legacy_case));
+    for (kind, mapping, says) in all {
         let p = project("users", &[GOOD]);
         std::fs::remove_file(p.path().join("mappings/sql/u.yaml")).expect("remove");
         write(
             p.path().join(format!("mappings/{kind}/reserved.yaml")),
-            mapping,
+            &mapping,
         );
         let got = kulyrax(p.path(), RUN_ONCE);
-        assert!(got.1.contains(says), "{kind}: {says}\n{}", got.1);
+        assert!(got.1.contains(says.as_str()), "{kind}: {says}\n{}", got.1);
         assert!(got.1.contains("reserved.yaml"), "names the file\n{}", got.1);
         assert_code(got, 2);
     }

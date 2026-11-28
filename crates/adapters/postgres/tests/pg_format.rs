@@ -266,10 +266,12 @@ fn a_user_without_create_names_the_grant() -> R {
 /// tables are refused at `prepare`, before any connection: no server needed.
 #[test]
 fn prepare_refuses_a_mapping_on_kulyrax_tables() {
+    // 0.12's guard table (now its tombstone), schema-qualified.
+    let legacy = format!("app.{}", kulyrax_core::adapter::legacy::LEGACY_GUARD_TABLE);
     for table in [
         "kulyrax_format",
         "KULYRAX_PROJECTION_STATE",
-        "app.conduit_projection_state",
+        legacy.as_str(),
     ] {
         let m: SqlMapping = kulyrax_core::yaml::from_str(&format!(
             "event: U\ntable: {table}\nprimary_key: id\nversion: 1\ncolumns:\n  id: payload.id\n"

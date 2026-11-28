@@ -197,7 +197,12 @@ fn concurrent_first_starts_leave_one_marker() -> R {
 /// are refused at `prepare`, before the connection is used: no server needed.
 #[test]
 fn prepare_refuses_a_mapping_on_kulyrax_labels() {
-    for label in ["__KulyraxGuard", "__KulyraxFormat", "__ConduitGuard"] {
+    for label in [
+        "__KulyraxGuard",
+        "__KulyraxFormat",
+        // 0.12's guard label.
+        kulyrax_core::adapter::legacy::LEGACY_GUARD_LABEL,
+    ] {
         let m: GraphMapping = kulyrax_core::yaml::from_str(&format!(
             "kind: node\nevent: U\nlabel: {label}\nkey: payload.id\nversion: 1\nproperties:\n  v: payload.v\n"
         ))

@@ -301,7 +301,8 @@ fn sqlite_prepare_refuses_a_mapping_on_kulyrax_tables() {
     for table in [
         "kulyrax_format",
         "Kulyrax_Projection_State",
-        "conduit_projection_state",
+        // 0.12's guard table, now its tombstone.
+        kulyrax_core::adapter::legacy::LEGACY_GUARD_TABLE,
     ] {
         let m: SqlMapping = kulyrax_core::yaml::from_str(&format!(
             "event: U\ntable: {table}\nprimary_key: id\nversion: 1\ncolumns:\n  id: payload.id\n"

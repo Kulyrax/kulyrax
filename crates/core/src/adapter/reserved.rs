@@ -10,9 +10,11 @@
 //!
 //! File stores need nothing here: their names may hold only letters, digits,
 //! `_` and `-` (`file_names::check_config_name`), so no mapping can name
-//! `.kulyrax/` or `.conduit`.
+//! `.kulyrax/` or 0.12's directory (`legacy::LEGACY_DIR`).
+//!
+//! 0.12's names come from `legacy`, the one place they are spelled.
 
-use crate::adapter::legacy::LEGACY_GUARD_TABLE;
+use crate::adapter::legacy::{LEGACY_GUARD_TABLE, LEGACY_LABEL_PREFIX};
 use crate::adapter::sql::exec::{FORMAT_TABLE, GUARD_TABLE};
 use crate::rebuild::SHADOW_SUFFIX;
 
@@ -38,9 +40,10 @@ pub const DOCUMENT_COLLECTIONS: &[&str] =
 /// that name without a word.
 pub const DOCUMENT_FIELD_PREFIX: &str = "__kulyrax";
 /// Graph labels Kulyrax owns: Neo4j's guard (`__KulyraxGuard`) and format
-/// marker (`__KulyraxFormat`) labels, and 0.12's `__ConduitGuard`. Labels are
-/// case-sensitive, so the prefixes are too.
-pub const GRAPH_LABEL_PREFIXES: &[&str] = &["__Kulyrax", "__Conduit"];
+/// marker (`__KulyraxFormat`) labels, and 0.12's guard label
+/// (`legacy::LEGACY_LABEL_PREFIX`). Labels are case-sensitive, so the
+/// prefixes are too.
+pub const GRAPH_LABEL_PREFIXES: &[&str] = &["__Kulyrax", LEGACY_LABEL_PREFIX];
 /// Key-value namespaces Kulyrax owns: Redis keeps guards under
 /// `__kulyrax:guard:` and its format marker at `__kulyrax:format`, so a
 /// namespace starting with this could reach them.
@@ -167,12 +170,21 @@ pub fn refusal(adapter: &str, found: Vec<(String, Collision)>) -> Option<String>
 mod tests {
     use super::*;
 
+    /// `name` with its first letter in upper case.
+    fn capitalised(name: &str) -> String {
+        let mut chars = name.chars();
+        chars.next().map_or(String::new(), |c| {
+            c.to_ascii_uppercase().to_string() + chars.as_str()
+        })
+    }
+
     #[test]
     fn sql_tables_without_case() {
+        let legacy_mixed = capitalised(LEGACY_GUARD_TABLE);
         for t in [
             "kulyrax_projection_state",
             "KULYRAX_FORMAT",
-            "Conduit_Projection_State",
+            legacy_mixed.as_str(),
             "kulyrax_tombstone_tmp",
             "users__kulyrax_rebuild",
             "Users__KULYRAX_REBUILD",
@@ -192,10 +204,11 @@ mod tests {
 
     #[test]
     fn document_collections_and_fields() {
+        let legacy_upper = LEGACY_GUARD_TABLE.to_ascii_uppercase();
         for c in [
             "kulyrax_projection_state",
             "kulyrax_format",
-            "CONDUIT_PROJECTION_STATE",
+            legacy_upper.as_str(),
         ] {
             assert!(document_collection(c).is_some(), "{c}");
         }
@@ -209,7 +222,7 @@ mod tests {
         for l in [
             "__KulyraxGuard",
             "__KulyraxFormat",
-            "__ConduitGuard",
+            crate::adapter::legacy::LEGACY_GUARD_LABEL,
             "__KulyraxAnything",
         ] {
             assert!(graph_label(l).is_some(), "{l}");

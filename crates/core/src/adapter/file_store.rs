@@ -33,7 +33,8 @@ use crate::kulyrax_dir::{self, DIR, LAYOUT, LOCK, WAL};
 
 /// The content of a layout marker (`.kulyrax/layout/<kind>`): the file store's
 /// format version. 2 is the `.kulyrax/` layout. 1 was 0.12.1's, the same layout
-/// under `.conduit/`, which the migration rewrites to 2. See
+/// under 0.12's directory name (`legacy::LEGACY_DIR`), which the migration
+/// rewrites to 2. See
 /// [`check_store_format`] for what each value on disk means.
 pub(crate) const LAYOUT_VERSION: &[u8] = b"2
 ";
@@ -899,8 +900,8 @@ const SHOW_REFUSED: usize = 20;
 /// - `2`: the current format.
 /// - `1`: under `.kulyrax/`, written only by unreleased builds between the
 ///   rename (`f3af04b`) and step 5, for stores they created; the same layout
-///   and files as `2`. Read as `2`. (0.12.1's `1` under `.conduit/` is
-///   rewritten to `2` by the migration before this runs.)
+///   and files as `2`. Read as `2`. (0.12.1's `1`, under 0.12's directory,
+///   is rewritten to `2` by the migration before this runs.)
 /// - empty: a marker an older build was killed while writing (it wrote the
 ///   marker in place, after the layout check had passed). Read as `2`.
 /// - above `2`: a newer Kulyrax; refused.

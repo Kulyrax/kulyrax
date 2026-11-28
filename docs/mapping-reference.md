@@ -274,14 +274,18 @@ in code (not loaded from a file) is refused by the adapter's `prepare`.
 
 | Mapping kind | Key | Reserved |
 |---|---|---|
-| SQL | `table` | `kulyrax_projection_state` (guards), `kulyrax_format` (format marker), `conduit_projection_state` (the 0.12 tombstone), `kulyrax_tombstone_tmp` (the tombstone's temporary name), and any name ending in `__kulyrax_rebuild` (rebuild shadows). Compared without case, since Postgres folds unquoted names and MySQL compares them without case. A schema-qualified table is judged by its table part. |
-| Document | `collection` | `kulyrax_projection_state`, `kulyrax_format`, `conduit_projection_state`, `kulyrax_tombstone_tmp`: MongoDB's guards, format marker, 0.12 tombstone and its temporary name, and Elasticsearch's format-marker index. One list for every document backend, compared without case. |
+| SQL | `table` | `kulyrax_projection_state` (guards), `kulyrax_format` (format marker), 0.12's guard table name (now its tombstone), `kulyrax_tombstone_tmp` (the tombstone's temporary name), and any name ending in `__kulyrax_rebuild` (rebuild shadows). Compared without case, since Postgres folds unquoted names and MySQL compares them without case. A schema-qualified table is judged by its table part. |
+| Document | `collection` | `kulyrax_projection_state`, `kulyrax_format`, 0.12's guard collection name (now its tombstone), `kulyrax_tombstone_tmp`: MongoDB's guards, format marker, 0.12 tombstone and its temporary name, and Elasticsearch's format-marker index. One list for every document backend, compared without case. |
 | Document | a top-level field of `document` | any name starting with `__kulyrax`: Elasticsearch keeps each document's guard in `__kulyrax_guard`. |
 | Key-value | `namespace` | any name starting with `__kulyrax`: Redis keeps guards under `__kulyrax:guard:` and its format marker at `__kulyrax:format`. |
-| Graph | a node's `label` | any label starting with `__Kulyrax` or `__Conduit` (Neo4j's guard and format-marker labels, and 0.12's). Labels are case-sensitive, so these are too. |
+| Graph | a node's `label` | any label starting with `__Kulyrax` (Neo4j's guard and format-marker labels) or with 0.12's guard-label prefix. Labels are case-sensitive, so these are too. |
+
+0.12's names (its guard table, collection and label, and its file-store
+directory) are listed in the
+[rc.1 notes, "Upgrading from 0.12.1"](../RELEASES/v1.0.0-rc.1.md#upgrading-from-0121).
 
 File stores need no entry: their names may not contain `.`, so none can be
-`.kulyrax` or `.conduit`.
+`.kulyrax` or 0.12's directory.
 
 ### File stores (`file`, `keyvalue`, `graph`)
 

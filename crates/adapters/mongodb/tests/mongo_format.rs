@@ -198,7 +198,8 @@ fn concurrent_first_starts_leave_one_marker() -> R {
 fn prepare_refuses_a_mapping_on_kulyrax_collections() {
     for (collection, field) in [
         ("kulyrax_format", "v"),
-        ("conduit_projection_state", "v"),
+        // 0.12's guard collection, now its tombstone.
+        (kulyrax_core::adapter::legacy::LEGACY_GUARD_TABLE, "v"),
         ("users", "__kulyrax_guard"),
     ] {
         let m: DocumentMapping = kulyrax_core::yaml::from_str(&format!(

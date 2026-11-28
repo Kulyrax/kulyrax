@@ -38,6 +38,13 @@ const TOMBSTONE: &str = "Moved to .kulyrax/ by Kulyrax 1.0. Kulyrax 0.12 cannot 
 /// The guard table's (and MongoDB guard collection's) name in 0.12.
 pub const LEGACY_GUARD_TABLE: &str = "conduit_projection_state";
 
+/// The prefix of 0.12's Neo4j labels (its guard label `__ConduitGuard`),
+/// reserved for mappings (`crate::adapter::reserved`).
+pub const LEGACY_LABEL_PREFIX: &str = "__Conduit";
+
+/// 0.12's guard label in Neo4j, for tests that name it.
+pub const LEGACY_GUARD_LABEL: &str = "__ConduitGuard";
+
 /// What the tombstone view returns, and the MongoDB tombstone's validator
 /// description: why 0.12 cannot use this database.
 pub const LEGACY_TOMBSTONE_TEXT: &str =
