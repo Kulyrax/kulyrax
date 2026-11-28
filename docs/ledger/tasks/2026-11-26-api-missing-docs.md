@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # `#![deny(missing_docs)]` on every published crate; the docs written (step 4, D8)
@@ -34,7 +34,7 @@ generated `pb` items. The estimate was about a day.
   module that does not exist.
 - [x] Gates: fmt, clippy `-D warnings` (also with `unstable-pb`), workspace
   tests, examples, every Docker backend suite.
-- [ ] PR merged with the 12 required checks green.
+- [x] PR #36 merged with the 12 required checks green (all 18 pass; merge commit e99a19c).
 
 ## Constraints and assumptions
 
@@ -70,4 +70,5 @@ generated `pb` items. The estimate was about a day.
 
 ## Outcome
 
-In progress.
+Completed: merged in #36 (`e99a19c`). The two findings above stay open for the
+owner.

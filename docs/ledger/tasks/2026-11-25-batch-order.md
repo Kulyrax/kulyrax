@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 
 # Review F-01: the batch sort by `sequence` versus delivery order (runbook R1)
@@ -28,7 +28,7 @@ Decision: [2026-11-25-batch-order](../decisions/2026-11-25-batch-order.md)
 - [x] Producer contract §3 rewritten; RELEASES/v0.12.2.md "Behaviour changes".
 - [x] The F-01 tests pass in one batch; the two tests that assumed the sort
   updated to the documented outcome.
-- [ ] Four gates, every Docker suite, PR, merge.
+- [x] Four gates, every Docker suite, PR, merge (#22, merge commit 3fd0c88, 13/13 checks green).
 
 ## Verification
 
@@ -50,3 +50,7 @@ Decision: [2026-11-25-batch-order](../decisions/2026-11-25-batch-order.md)
   entity's out-of-order events (`source_out_of_order_batch.rs`). It is only in the
   contract's one bullet; release notes needed.
 - F-01b (Neo4j edge endpoints ignore labels): its own task, 2026-11-25-neo4j-edge-endpoints, unscheduled.
+
+## Outcome
+
+Completed: merged in #22 (`3fd0c88`).
