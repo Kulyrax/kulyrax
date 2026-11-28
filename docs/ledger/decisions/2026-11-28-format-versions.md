@@ -134,7 +134,10 @@ How the changes are applied:
   `allkeys-*` gives a warning naming the policy; unreadable (blocked or
   failed) gives that one info line; anything else is silent. Kulyrax has no
   logging crate, so warning and info are both stderr lines, distinguished by
-  their prefix (`WARNING:` for the warning only).
+  their prefix (`WARNING:` for the warning only). "Per adapter start" is
+  per adapter instance: a run calls `prepare` more than once, so the check
+  runs on the first call only. A reload builds new adapters, which check
+  again.
   The plan approved: in `prepare`, `HSETNX __kulyrax:format guards 1` (atomic
   insert-if-absent), then `HGET`; a `NOPERM` reply is `MarkerNotCreated`,
   naming the ACL rights; the store is named by host and database number,
