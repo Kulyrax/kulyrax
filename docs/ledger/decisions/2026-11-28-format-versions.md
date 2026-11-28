@@ -116,6 +116,16 @@ How the changes are applied:
     files as `2`). It is read as `2` and rewritten to `2`.
   - `1` under `.conduit/` (0.12.1) is unchanged: step 2's migration moves it
     and writes `2`.
+  - An empty marker (an older build killed while writing one in place) is
+    read as `2`. The owner, 2026-11-28: "Empty layout marker: treat as
+    current, but re-stamp it atomically on open (with a test: empty marker →
+    opened → marker holds the current value). An empty marker should never
+    survive an open under 1.0."
+  - Every accepted marker under the root that does not hold exactly `2\n`
+    (empty, `1`, or `2` written differently) is re-stamped atomically on
+    open: temp file, fsync, rename, directory fsync. This covers every kind's
+    marker on the root, not only the opening adapter's. If any marker is
+    refused, none is re-stamped.
   - Above `2` is refused (exit 4); content that is not an integer is refused
     as unrecognised (exit 4).
 

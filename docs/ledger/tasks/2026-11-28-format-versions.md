@@ -31,6 +31,8 @@ that each migrates from 0.12.1.
 - [ ] An unversioned (0.12.x) file or store is read as format 1 and stamped.
 - [ ] **Change 5:** the layout marker's content is read. A store holding `1`
   and a store holding `2` are each tested; new and migrated stores write `2`.
+  An empty marker is read as current and re-stamped atomically on open (the
+  owner's addition), tested.
 - [ ] **Change 2:** the SQL `kulyrax_format` table is in the guard table's
   schema; tested with a non-default Postgres schema.
 - [ ] **Change 3:** every marker is created insert-if-absent, atomically per
@@ -89,6 +91,9 @@ that each migrates from 0.12.1.
 | clippy | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
 | fmt | `cargo fmt --check` | first run: 2 diffs in the new tests; `cargo fmt` applied, then clean |
 | Change 1, core and CLI tests | `cargo test -p kulyrax-core -p kulyrax-cli` (log summed with awk) | 402 pass, 0 fail, 105 test binaries, exit 0. The first run's summary was cut by a `head -20` in my pipeline, so it was rerun; only the rerun counts |
+| Change 5, file-store marker, first run | `cargo test -p kulyrax-core --lib -- file_store` | 9 pass, 1 fail: `concurrent_first_starts_write_one_marker`, 1 of 8 starts `os error 2`. Cause: adapters in one process share a root and a pid, so two wrote the same marker temp file and one rename found it gone. The run also exposed that an adapter joining a root another adapter had just opened went straight to its layout check, possibly mid-recovery (since before step 5). Fixed: `Root::setup`, a mutex holding "set up", taken around migration, format check, recovery and layout check |
+| Change 5, after the fix | the same; then the concurrency test alone, 30 runs | 10 pass; 30 of 30 |
+| Owner: empty marker re-stamped on open | `an_empty_marker_is_restamped_on_open` (empty `kv` and `graph`, `2` with no newline for `document`; opened by a kv adapter), `a_refused_store_restamps_nothing` | 12 pass. Mutation check: with the re-stamp disabled (scratch copy), the first test fails at its marker assertion; file restored, `cmp` identical |
 | `FormatError` in the D6 error test | `cargo test -p kulyrax-core --test error_traits` | 7 pass: `Send + Sync + 'static`, and `AdapterError::Format`'s `source()` is the `FormatError` |
 
 ## Risks and open questions

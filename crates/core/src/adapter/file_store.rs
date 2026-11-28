@@ -31,10 +31,14 @@ use crate::execution::stages::{self, Stage, timed};
 use crate::format::{FormatError, FormatProblem};
 use crate::kulyrax_dir::{self, DIR, LAYOUT, LOCK, WAL};
 
-/// The content of a layout marker (`.kulyrax/layout/<kind>`): version 2 is the
-/// `.kulyrax/` layout. Version 1 (0.12.1) was the same layout under the old name.
+/// The content of a layout marker (`.kulyrax/layout/<kind>`): the file store's
+/// format version. 2 is the `.kulyrax/` layout. 1 was 0.12.1's, the same layout
+/// under `.conduit/`, which the migration rewrites to 2. See
+/// [`check_store_format`] for what each value on disk means.
 pub(crate) const LAYOUT_VERSION: &[u8] = b"2
 ";
+/// [`LAYOUT_VERSION`] as a number.
+const STORE_FORMAT: u32 = 2;
 
 /// Batch log layout: magic, body length (u64 LE), CRC-32 of the body (u32 LE),
 /// then the body: per entry, a tag byte (1 write, 0 remove), the path length
@@ -502,6 +506,12 @@ struct Root {
     /// adapters must not share a directory, even one spelled differently
     /// only by case (one directory on a case-insensitive file system).
     claims: Mutex<HashMap<String, (&'static str, String)>>,
+    /// Held while an adapter sets the root up in `prepare` (migration,
+    /// format check, recovery, layout check), so a second adapter on the
+    /// same root waits until the first has finished instead of checking a
+    /// layout mid-recovery or racing it on a marker. `true` once migration,
+    /// the format check and recovery have succeeded.
+    setup: Mutex<bool>,
 }
 
 impl Root {
@@ -717,10 +727,10 @@ impl Drop for Root {
 /// are alive: they must join the old handle, not fail on its lock.
 static ROOTS: Mutex<BTreeMap<PathBuf, Weak<Root>>> = Mutex::new(BTreeMap::new());
 
-/// The [`Root`] for `dir`, and whether this call took the OS lock (so this
-/// process has not been writing to the root, and leftover logs must be
-/// replayed).
-fn acquire_root(dir: &Path) -> io::Result<(Arc<Root>, bool)> {
+/// The [`Root`] for `dir`, taking the OS lock if this process does not hold
+/// it yet. A new root is not set up (its `setup` flag is false): this process
+/// has not been writing to it, so leftover logs must be replayed.
+fn acquire_root(dir: &Path) -> io::Result<Arc<Root>> {
     let internal = dir.join(DIR);
     fs::create_dir_all(internal.join(WAL))?;
     let key = fs::canonicalize(dir)?;
@@ -728,7 +738,7 @@ fn acquire_root(dir: &Path) -> io::Result<(Arc<Root>, bool)> {
         .lock()
         .map_err(|_| other("file store registry poisoned by an earlier panic".to_string()))?;
     if let Some(root) = roots.get(&key).and_then(Weak::upgrade) {
-        return Ok((root, false));
+        return Ok(root);
     }
     let lock = take_lock(dir, &internal.join(LOCK), true)?;
     let root = Arc::new(Root {
@@ -746,10 +756,11 @@ fn acquire_root(dir: &Path) -> io::Result<(Arc<Root>, bool)> {
         sync_jobs: Arc::new(AtomicU64::new(0)),
         hurry: Arc::new(AtomicBool::new(false)),
         claims: Mutex::new(HashMap::new()),
+        setup: Mutex::new(false),
     });
     roots.retain(|_, w| w.strong_count() > 0);
     roots.insert(key, Arc::downgrade(&root));
-    Ok((root, true))
+    Ok(root)
 }
 
 /// Open `lock_path` and take its OS lock, or say which process-level lock is
@@ -882,6 +893,86 @@ pub struct FileStore {
 /// At most this many refused paths are named in the error.
 const SHOW_REFUSED: usize = 20;
 
+/// Refuse a store whose format this version does not read, judged from every
+/// layout marker under the root (adapters of several kinds may share a root,
+/// and so its batch logs). What a marker's content means:
+/// - `2`: the current format.
+/// - `1`: under `.kulyrax/`, written only by unreleased builds between the
+///   rename (`f3af04b`) and step 5, for stores they created; the same layout
+///   and files as `2`. Read as `2`. (0.12.1's `1` under `.conduit/` is
+///   rewritten to `2` by the migration before this runs.)
+/// - empty: a marker an older build was killed while writing (it wrote the
+///   marker in place, after the layout check had passed). Read as `2`.
+/// - above `2`: a newer Kulyrax; refused.
+/// - anything else: refused as unrecognised.
+///
+/// Once every marker is accepted, each one that does not hold exactly
+/// [`LAYOUT_VERSION`] (empty, `1`, or `2` written differently) is re-stamped
+/// atomically, whichever adapter kind it belongs to: no empty or old marker
+/// survives an open. Nothing is re-stamped when any marker is refused.
+pub(crate) fn check_store_format(dir: &Path) -> io::Result<()> {
+    let markers = dir.join(DIR).join(LAYOUT);
+    let entries = match fs::read_dir(&markers) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    let mut restamp = Vec::new();
+    for entry in entries {
+        let path = entry?.path();
+        if path.extension().is_some_and(|e| e == "tmp") {
+            // A marker write killed before its rename (the lock is held).
+            remove_if_exists(&path)?;
+            continue;
+        }
+        let bytes = fs::read(&path)?;
+        let content = String::from_utf8_lossy(&bytes);
+        let text = content.trim();
+        let found = if text.is_empty() {
+            STORE_FORMAT
+        } else {
+            match text.parse::<u32>() {
+                Ok(1) => STORE_FORMAT,
+                Ok(v) => v,
+                Err(_) => {
+                    return Err(FormatError::new(
+                        path.display().to_string(),
+                        FormatProblem::Unrecognized(format!("layout marker {text:?}")),
+                    )
+                    .into_io());
+                }
+            }
+        };
+        FormatError::check(&path.display().to_string(), found, STORE_FORMAT)
+            .map_err(FormatError::into_io)?;
+        if bytes != LAYOUT_VERSION {
+            restamp.push(path);
+        }
+    }
+    for path in restamp {
+        write_marker(&path)?;
+    }
+    Ok(())
+}
+
+/// Write a layout marker holding [`LAYOUT_VERSION`]: temp file, fsync,
+/// rename, directory fsync, so a crash never leaves a partly written marker.
+pub(crate) fn write_marker(marker: &Path) -> io::Result<()> {
+    let Some(dir) = marker.parent() else {
+        return Err(other(format!("{} has no parent", marker.display())));
+    };
+    fs::create_dir_all(dir)?;
+    let mut tmp_name = marker.file_name().unwrap_or_default().to_os_string();
+    tmp_name.push(format!(".{}.tmp", std::process::id()));
+    let tmp = dir.join(tmp_name);
+    let mut f = File::create(&tmp)?;
+    f.write_all(LAYOUT_VERSION)?;
+    f.sync_all()?;
+    drop(f);
+    fs::rename(&tmp, marker)?;
+    sync_dir(dir)
+}
+
 impl FileStore {
     pub fn new(dir: PathBuf) -> Self {
         Self {
@@ -914,6 +1005,7 @@ impl FileStore {
         root.claim(layout.kind, &layout.claims)?;
         let marker = self.dir.join(DIR).join(LAYOUT).join(layout.kind);
         if marker.exists() {
+            // Accepted and re-stamped by `check_store_format`.
             return Ok(());
         }
         let refused = (layout.upgrade)(&self.dir)?;
@@ -944,16 +1036,7 @@ impl FileStore {
                 ),
             ));
         }
-        if let Some(dir) = marker.parent() {
-            fs::create_dir_all(dir)?;
-        }
-        let mut f = File::create(&marker)?;
-        f.write_all(b"1\n")?;
-        f.sync_all()?;
-        if let Some(dir) = marker.parent() {
-            sync_dir(dir)?;
-        }
-        Ok(())
+        write_marker(&marker)
     }
 
     fn state(&self) -> Result<std::sync::MutexGuard<'_, StoreState>, AdapterError> {
@@ -983,17 +1066,28 @@ impl FileStore {
                 return Err(AdapterError::WriteFailed(bad.join("; ")));
             }
         }
-        let (root, fresh) = acquire_root(&self.dir).map_err(io_err)?;
-        if fresh {
-            crate::adapter::legacy::migrate_file_store(&self.dir, &mut st.known_dirs)
-                .map_err(io_err)?;
-            let next_seq = recover(&root, &mut st.known_dirs).map_err(io_err)?;
-            root.state().map_err(io_err)?.next_seq = next_seq;
+        let root = acquire_root(&self.dir).map_err(io_err)?;
+        {
+            let mut set_up = root.setup.lock().map_err(|_| {
+                AdapterError::WriteFailed(
+                    "file store set-up poisoned by an earlier panic".to_string(),
+                )
+            })?;
+            if !*set_up {
+                crate::adapter::legacy::migrate_file_store(&self.dir, &mut st.known_dirs)
+                    .map_err(io_err)?;
+                // Before any batch log is replayed: a newer store's logs must
+                // not be applied by this version.
+                check_store_format(&self.dir).map_err(io_err)?;
+                let next_seq = recover(&root, &mut st.known_dirs).map_err(io_err)?;
+                root.state().map_err(io_err)?.next_seq = next_seq;
+                *set_up = true;
+            }
+            // After recovery (logs replay to the paths they were written with),
+            // and before emptiness is judged (an upgrade may move files).
+            self.check_layout(&root).map_err(io_err)?;
+            st.cache_complete = store_is_empty(&self.dir).map_err(io_err)?;
         }
-        // After recovery (logs replay to the paths they were written with),
-        // and before emptiness is judged (an upgrade may move files).
-        self.check_layout(&root).map_err(io_err)?;
-        st.cache_complete = store_is_empty(&self.dir).map_err(io_err)?;
         st.root = Some(root);
         Ok(())
     }
@@ -1360,6 +1454,151 @@ mod tests {
             assert!(wal.join(log_name(good_seq)).exists(), "nothing is replayed");
             assert!(!dir.path().join("a.json").exists(), "nothing is applied");
         }
+    }
+
+    fn kv_layout() -> Layout {
+        Layout {
+            kind: "kv",
+            claims: Vec::new(),
+            names: Vec::new(),
+            upgrade: Box::new(|_| Ok(Vec::new())),
+        }
+    }
+
+    fn marker(dir: &Path) -> PathBuf {
+        dir.join(DIR).join(LAYOUT).join("kv")
+    }
+
+    /// A store with a batch log to replay and a layout marker holding `content`.
+    fn store_with_marker(content: &[u8]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let wal = dir.path().join(DIR).join(WAL);
+        fs::create_dir_all(&wal).expect("mkdir");
+        let log = encode_log(&pending(&[("a.json", Some("1"))]));
+        fs::write(wal.join(log_name(1)), log).expect("write log");
+        fs::create_dir_all(marker(dir.path()).parent().expect("parent")).expect("mkdir");
+        fs::write(marker(dir.path()), content).expect("write marker");
+        dir
+    }
+
+    /// Change 5 of the format-version decision: what each marker value means.
+    #[test]
+    fn layout_marker_values() {
+        // `1` (unreleased builds since the rename), `2`, and a marker an older
+        // build was killed while writing: the current format, rewritten as `2`.
+        for content in [&b"1\n"[..], b"2\n", b""] {
+            let dir = store_with_marker(content);
+            let store = FileStore::with_layout(dir.path().to_path_buf(), kv_layout());
+            store.prepare().expect("opens");
+            assert_eq!(
+                fs::read(marker(dir.path())).expect("marker"),
+                LAYOUT_VERSION
+            );
+            assert!(dir.path().join("a.json").exists(), "its log was replayed");
+        }
+        // Newer, or not a number: refused before the log is replayed.
+        for (content, newer) in [(&b"3\n"[..], true), (b"two\n", false)] {
+            let dir = store_with_marker(content);
+            let store = FileStore::with_layout(dir.path().to_path_buf(), kv_layout());
+            let err = store.prepare().expect_err("refused");
+            let AdapterError::Format(format) = err else {
+                panic!("not a format refusal: {err}");
+            };
+            assert_eq!(
+                matches!(
+                    format.problem,
+                    FormatProblem::Newer {
+                        found: 3,
+                        supported: 2
+                    }
+                ),
+                newer,
+                "{format}"
+            );
+            assert!(format.store.ends_with("kv"), "{}", format.store);
+            assert_eq!(fs::read(marker(dir.path())).expect("marker"), content);
+            assert!(!dir.path().join("a.json").exists(), "nothing replayed");
+            assert!(dir.path().join(DIR).join(WAL).join(log_name(1)).exists());
+        }
+    }
+
+    /// An empty marker is read as current and never survives an open: it is
+    /// re-stamped, for the opening adapter's kind and for any other kind on
+    /// the same root. So is a `1`, and a `2` written without its newline.
+    #[test]
+    fn an_empty_marker_is_restamped_on_open() {
+        let dir = store_with_marker(b"");
+        let layout = dir.path().join(DIR).join(LAYOUT);
+        fs::write(layout.join("graph"), b"").expect("write");
+        fs::write(layout.join("document"), b"2").expect("write");
+        let store = FileStore::with_layout(dir.path().to_path_buf(), kv_layout());
+        store.prepare().expect("opens");
+        for kind in ["kv", "graph", "document"] {
+            assert_eq!(
+                fs::read(layout.join(kind)).expect("marker"),
+                LAYOUT_VERSION,
+                "{kind}"
+            );
+        }
+        let names: Vec<_> = fs::read_dir(&layout)
+            .expect("markers")
+            .map(|e| e.expect("entry").file_name())
+            .collect();
+        assert_eq!(names.len(), 3, "no temp file left: {names:?}");
+    }
+
+    /// When one marker is refused, no other marker is re-stamped.
+    #[test]
+    fn a_refused_store_restamps_nothing() {
+        let dir = store_with_marker(b"");
+        let layout = dir.path().join(DIR).join(LAYOUT);
+        fs::write(layout.join("graph"), b"3\n").expect("write");
+        let store = FileStore::with_layout(dir.path().to_path_buf(), kv_layout());
+        assert!(matches!(store.prepare(), Err(AdapterError::Format(_))));
+        assert_eq!(fs::read(layout.join("kv")).expect("marker"), b"");
+        assert_eq!(fs::read(layout.join("graph")).expect("marker"), b"3\n");
+    }
+
+    #[test]
+    fn a_new_store_writes_the_current_marker() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = FileStore::with_layout(dir.path().to_path_buf(), kv_layout());
+        store.prepare().expect("opens");
+        assert_eq!(
+            fs::read(marker(dir.path())).expect("marker"),
+            LAYOUT_VERSION
+        );
+    }
+
+    /// Change 3: concurrent first starts leave one marker with one version.
+    #[test]
+    fn concurrent_first_starts_write_one_marker() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let results: Vec<Result<(), String>> = std::thread::scope(|s| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    s.spawn(|| {
+                        FileStore::with_layout(dir.path().to_path_buf(), kv_layout())
+                            .prepare()
+                            .map_err(|e| e.to_string())
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap_or_else(|_| Err("panicked".into())))
+                .collect()
+        });
+        assert!(results.iter().all(Result::is_ok), "{results:?}");
+        let entries: Vec<_> = fs::read_dir(dir.path().join(DIR).join(LAYOUT))
+            .expect("markers")
+            .map(|e| e.expect("entry").file_name())
+            .collect();
+        assert_eq!(entries, ["kv"], "one marker, no temp files");
+        assert_eq!(
+            fs::read(marker(dir.path())).expect("marker"),
+            LAYOUT_VERSION
+        );
     }
 
     #[test]
