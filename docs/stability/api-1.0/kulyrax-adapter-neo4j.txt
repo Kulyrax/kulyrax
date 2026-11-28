@@ -1,0 +1,50 @@
+pub mod kulyrax_adapter_neo4j
+pub struct kulyrax_adapter_neo4j::Neo4jAdapter
+impl kulyrax_adapter_neo4j::Neo4jAdapter
+pub fn kulyrax_adapter_neo4j::Neo4jAdapter::from_config(&kulyrax_adapter_neo4j::Neo4jConfig, &kulyrax_core::runtime::registry::AdapterBuildContext) -> core::result::Result<Self, kulyrax_core::runtime::config::ConfigError>
+impl kulyrax_core::adapter::StorageAdapter for kulyrax_adapter_neo4j::Neo4jAdapter
+pub fn kulyrax_adapter_neo4j::Neo4jAdapter::begin_batch(&self, &[&kulyrax_core::event::Event]) -> core::result::Result<(), kulyrax_core::adapter::AdapterError>
+pub fn kulyrax_adapter_neo4j::Neo4jAdapter::commit_batch(&self) -> core::result::Result<(), kulyrax_core::adapter::AdapterError>
+pub fn kulyrax_adapter_neo4j::Neo4jAdapter::handle(&self, &kulyrax_core::event::Event) -> kulyrax_core::adapter::AdapterResult
+pub fn kulyrax_adapter_neo4j::Neo4jAdapter::id(&self) -> &str
+pub fn kulyrax_adapter_neo4j::Neo4jAdapter::kind(&self) -> kulyrax_core::routing::StorageKind
+pub fn kulyrax_adapter_neo4j::Neo4jAdapter::prepare(&self) -> core::result::Result<(), kulyrax_core::adapter::AdapterError>
+pub fn kulyrax_adapter_neo4j::Neo4jAdapter::priority(&self) -> u32
+pub fn kulyrax_adapter_neo4j::Neo4jAdapter::rollback_batch(&self)
+impl core::marker::Forget for kulyrax_adapter_neo4j::Neo4jAdapter
+impl !core::marker::Freeze for kulyrax_adapter_neo4j::Neo4jAdapter
+impl core::marker::Move for kulyrax_adapter_neo4j::Neo4jAdapter
+impl core::marker::Send for kulyrax_adapter_neo4j::Neo4jAdapter
+impl core::marker::Sync for kulyrax_adapter_neo4j::Neo4jAdapter
+impl core::marker::Unpin for kulyrax_adapter_neo4j::Neo4jAdapter
+impl core::marker::UnsafeUnpin for kulyrax_adapter_neo4j::Neo4jAdapter
+impl !core::panic::unwind_safe::RefUnwindSafe for kulyrax_adapter_neo4j::Neo4jAdapter
+impl !core::panic::unwind_safe::UnwindSafe for kulyrax_adapter_neo4j::Neo4jAdapter
+#[non_exhaustive] pub struct kulyrax_adapter_neo4j::Neo4jConfig
+pub kulyrax_adapter_neo4j::Neo4jConfig::database: core::option::Option<alloc::string::String>
+pub kulyrax_adapter_neo4j::Neo4jConfig::id: alloc::string::String
+pub kulyrax_adapter_neo4j::Neo4jConfig::password: alloc::string::String
+pub kulyrax_adapter_neo4j::Neo4jConfig::priority: u32
+pub kulyrax_adapter_neo4j::Neo4jConfig::uri: alloc::string::String
+pub kulyrax_adapter_neo4j::Neo4jConfig::user: alloc::string::String
+impl kulyrax_adapter_neo4j::Neo4jConfig
+pub fn kulyrax_adapter_neo4j::Neo4jConfig::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn kulyrax_adapter_neo4j::Neo4jConfig::with_database(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn kulyrax_adapter_neo4j::Neo4jConfig::with_id(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn kulyrax_adapter_neo4j::Neo4jConfig::with_priority(self, u32) -> Self
+impl core::clone::Clone for kulyrax_adapter_neo4j::Neo4jConfig
+pub fn kulyrax_adapter_neo4j::Neo4jConfig::clone(&self) -> Self
+impl core::fmt::Debug for kulyrax_adapter_neo4j::Neo4jConfig
+pub fn kulyrax_adapter_neo4j::Neo4jConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'de> serde_core::de::Deserialize<'de> for kulyrax_adapter_neo4j::Neo4jConfig
+pub fn kulyrax_adapter_neo4j::Neo4jConfig::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Forget for kulyrax_adapter_neo4j::Neo4jConfig
+impl core::marker::Freeze for kulyrax_adapter_neo4j::Neo4jConfig
+impl core::marker::Move for kulyrax_adapter_neo4j::Neo4jConfig
+impl core::marker::Send for kulyrax_adapter_neo4j::Neo4jConfig
+impl core::marker::Sync for kulyrax_adapter_neo4j::Neo4jConfig
+impl core::marker::Unpin for kulyrax_adapter_neo4j::Neo4jConfig
+impl core::marker::UnsafeUnpin for kulyrax_adapter_neo4j::Neo4jConfig
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_adapter_neo4j::Neo4jConfig
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_adapter_neo4j::Neo4jConfig
+pub fn kulyrax_adapter_neo4j::factory(&kulyrax_core::runtime::config::CustomAdapterConfig, &kulyrax_core::runtime::registry::AdapterBuildContext) -> core::result::Result<alloc::boxed::Box<dyn kulyrax_core::adapter::StorageAdapter>, kulyrax_core::runtime::config::ConfigError>

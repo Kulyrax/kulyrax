@@ -57,11 +57,44 @@ passed-and-skipped, not error:
 | Neo4j | `KULYRAX_NEO4J_URI`, `KULYRAX_NEO4J_USER`, `KULYRAX_NEO4J_PASSWORD` |
 | Elasticsearch | `KULYRAX_ELASTICSEARCH_URL` |
 
-Point the relevant env var at a real instance (a local Docker container is the easiest
-way — see `.github/workflows/ci.yml`'s `test-postgres` / `test-mysql` / `test-redis` /
-`test-mongo` / `test-neo4j` jobs for exactly how CI starts each one, including Mongo's
-replica-set initialization) to run that suite for real before touching backend code.
-CI runs all of them on every PR regardless of what you tested locally.
+A test that skips prints `SKIP: <var> not set`; run with `-- --nocapture` to see
+it. CI runs every suite on every PR regardless of what you tested locally.
+
+### Containers
+
+The same images CI uses (`.github/workflows/ci.yml`), each on its usual port:
+
+| Backend | Start it | Env var value |
+|---|---|---|
+| Postgres | `docker run -d --name kx-pg -p 5432:5432 -e POSTGRES_PASSWORD=kulyrax -e POSTGRES_DB=kulyrax_ci postgres:16` | `postgres://postgres:kulyrax@localhost:5432/kulyrax_ci` |
+| MySQL | `docker run -d --name kx-mysql -p 3306:3306 -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -e MYSQL_DATABASE=kulyrax_ci mysql:8` | `mysql://root@localhost:3306/kulyrax_ci` |
+| Redis | `docker run -d --name kx-redis -p 6379:6379 redis:7` | `redis://localhost:6379` |
+| MongoDB | `docker run -d --name kx-mongo -p 27017:27017 mongo:7 --replSet rs0`, then once `docker exec kx-mongo mongosh --eval 'rs.initiate()'` (the adapter uses transactions, which need a replica set) | `mongodb://localhost:27017/?directConnection=true` |
+| Neo4j | `docker run -d --name kx-neo4j -p 7687:7687 -e NEO4J_AUTH=neo4j/kulyrax-test neo4j:5` | URI `bolt://localhost:7687`, user `neo4j`, password `kulyrax-test` |
+| Elasticsearch | `docker run -d --name kx-es -p 9200:9200 -e discovery.type=single-node -e xpack.security.enabled=false -e ES_JAVA_OPTS="-Xms512m -Xmx512m" docker.elastic.co/elasticsearch/elasticsearch:8.15.0` | `http://localhost:9200` |
+
+If a port is taken, map another (`-p 55432:5432`) and put that port in the URL.
+
+### Running them
+
+- **One backend:**
+  `KULYRAX_PG_URL=… cargo test -p kulyrax-adapter-postgres -- --test-threads=1`.
+- **The Elasticsearch and Neo4j suites need `--test-threads=1`:** on one node,
+  parallel index creation queues behind cluster-state writes, and a Neo4j test
+  owns the whole database (below).
+- **The upgrade tests** (`cargo test -p kulyrax-cli --test rename_migration`)
+  open stores a real Kulyrax 0.12.1 wrote. Build that once and point
+  `KULYRAX_V0121_BIN` at it:
+  ```sh
+  git worktree add ../v0.12.1 v0.12.1
+  cargo build --manifest-path ../v0.12.1/Cargo.toml -p kulyrax-cli \
+    --features kulyrax-core/crash-points --target-dir ../v0.12.1-target
+  ```
+  Without it they print `SKIP`. Set every backend's env var too, as the
+  `upgrade from 0.12.1` CI job does.
+- **Crash tests** (`file_store_crash`, `dlq_crash`, the upgrade kill tests) kill
+  the binary at named points. `kulyrax-cli`'s dev-dependencies turn on
+  `kulyrax-core/crash-points` for them; a normal build has no crash points.
 
 ### Isolation
 
@@ -76,6 +109,16 @@ guard table, collection or label:
 - **Redis, Elasticsearch:** each test uses a namespace or index of its own, named
   after the process id and the run's start time: a process id alone repeats, since
   Windows reuses them. The CLI upgrade tests delete theirs at the end.
+- **Format markers that are one per database or cluster.**
+  - **Redis:** the marker is one key per database. `redis_format` and the
+    CLI's `redis_eviction_notice` use databases 13 and 14, which no other
+    suite uses, and flush them before and after.
+  - **Elasticsearch:** the marker is one per cluster. `es_format` deletes it
+    around each test and, in one test, sets it to a newer version, so **do not
+    run it at the same time as another suite that starts an Elasticsearch
+    adapter on the same cluster** (`kulyrax-ingest`, `kulyrax-cli`): their
+    `prepare` would be refused meanwhile. One `cargo test` runs a crate's
+    binaries one after another, and CI gives each job its own cluster.
 - **Neo4j** has a single database, and the guard-label migration relabels every guard
   node in it, so a Neo4j test owns the whole database while it runs. It takes a
   process-wide lock and an OS file lock in `target/tmp`, then wipes everything: every

@@ -210,9 +210,24 @@ database backend.
 
 Latest release notes: **[`RELEASES/v0.12.2.md`](RELEASES/v0.12.2.md)** (behaviour changes from the 1.0 review; read them before you upgrade). The last security release is [`v0.12.1`](RELEASES/v0.12.1.md).
 
-Kulyrax is in an **alpha** phase — core architecture and execution semantics are stable,
-but public APIs may still evolve. Intended for early feedback, not production
-deployment.
+Kulyrax is a **1.0 release candidate**. The public Rust API, the YAML files, the
+CLI and its exit codes, the gRPC contract and the persisted formats are what
+1.0 freezes under semver ([`docs/stability.md`](docs/stability.md)). A release
+candidate may still change where testing shows it must; the release notes say
+what changed.
+
+### Known limits
+
+- **File stores** (`file`, `keyvalue`, `graph`) are for development and small
+  workloads: under about 1,000 events/s on the reference laptop. Use a database
+  backend in production.
+- **One reader per source.** Each source takes a lock; a second Kulyrax process
+  on the same source is refused. There is no multi-node mode.
+- **The Postgres outbox source needs Postgres 13 or later.**
+- **No published benchmarks** yet.
+
+Security problems: see [`SECURITY.md`](SECURITY.md). What the database user
+needs: [`docs/required-grants.md`](docs/required-grants.md).
 
 Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE) at your
 option.

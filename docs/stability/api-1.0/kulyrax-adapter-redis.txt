@@ -1,0 +1,48 @@
+pub mod kulyrax_adapter_redis
+pub struct kulyrax_adapter_redis::RedisAdapter
+impl kulyrax_adapter_redis::RedisAdapter
+pub fn kulyrax_adapter_redis::RedisAdapter::from_config(&kulyrax_adapter_redis::RedisConfig, &kulyrax_core::runtime::registry::AdapterBuildContext) -> core::result::Result<Self, kulyrax_core::runtime::config::ConfigError>
+impl kulyrax_core::adapter::StorageAdapter for kulyrax_adapter_redis::RedisAdapter
+pub fn kulyrax_adapter_redis::RedisAdapter::begin_batch(&self, &[&kulyrax_core::event::Event]) -> core::result::Result<(), kulyrax_core::adapter::AdapterError>
+pub fn kulyrax_adapter_redis::RedisAdapter::commit_batch(&self) -> core::result::Result<(), kulyrax_core::adapter::AdapterError>
+pub fn kulyrax_adapter_redis::RedisAdapter::handle(&self, &kulyrax_core::event::Event) -> kulyrax_core::adapter::AdapterResult
+pub fn kulyrax_adapter_redis::RedisAdapter::id(&self) -> &str
+pub fn kulyrax_adapter_redis::RedisAdapter::kind(&self) -> kulyrax_core::routing::StorageKind
+pub fn kulyrax_adapter_redis::RedisAdapter::prepare(&self) -> core::result::Result<(), kulyrax_core::adapter::AdapterError>
+pub fn kulyrax_adapter_redis::RedisAdapter::priority(&self) -> u32
+pub fn kulyrax_adapter_redis::RedisAdapter::rollback_batch(&self)
+impl core::marker::Forget for kulyrax_adapter_redis::RedisAdapter
+impl !core::marker::Freeze for kulyrax_adapter_redis::RedisAdapter
+impl core::marker::Move for kulyrax_adapter_redis::RedisAdapter
+impl core::marker::Send for kulyrax_adapter_redis::RedisAdapter
+impl core::marker::Sync for kulyrax_adapter_redis::RedisAdapter
+impl core::marker::Unpin for kulyrax_adapter_redis::RedisAdapter
+impl core::marker::UnsafeUnpin for kulyrax_adapter_redis::RedisAdapter
+impl !core::panic::unwind_safe::RefUnwindSafe for kulyrax_adapter_redis::RedisAdapter
+impl !core::panic::unwind_safe::UnwindSafe for kulyrax_adapter_redis::RedisAdapter
+#[non_exhaustive] pub struct kulyrax_adapter_redis::RedisConfig
+pub kulyrax_adapter_redis::RedisConfig::id: alloc::string::String
+pub kulyrax_adapter_redis::RedisConfig::pool_size: core::option::Option<u32>
+pub kulyrax_adapter_redis::RedisConfig::priority: u32
+pub kulyrax_adapter_redis::RedisConfig::url: alloc::string::String
+impl kulyrax_adapter_redis::RedisConfig
+pub fn kulyrax_adapter_redis::RedisConfig::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn kulyrax_adapter_redis::RedisConfig::with_id(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn kulyrax_adapter_redis::RedisConfig::with_pool_size(self, u32) -> Self
+pub fn kulyrax_adapter_redis::RedisConfig::with_priority(self, u32) -> Self
+impl core::clone::Clone for kulyrax_adapter_redis::RedisConfig
+pub fn kulyrax_adapter_redis::RedisConfig::clone(&self) -> Self
+impl core::fmt::Debug for kulyrax_adapter_redis::RedisConfig
+pub fn kulyrax_adapter_redis::RedisConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'de> serde_core::de::Deserialize<'de> for kulyrax_adapter_redis::RedisConfig
+pub fn kulyrax_adapter_redis::RedisConfig::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Forget for kulyrax_adapter_redis::RedisConfig
+impl core::marker::Freeze for kulyrax_adapter_redis::RedisConfig
+impl core::marker::Move for kulyrax_adapter_redis::RedisConfig
+impl core::marker::Send for kulyrax_adapter_redis::RedisConfig
+impl core::marker::Sync for kulyrax_adapter_redis::RedisConfig
+impl core::marker::Unpin for kulyrax_adapter_redis::RedisConfig
+impl core::marker::UnsafeUnpin for kulyrax_adapter_redis::RedisConfig
+impl core::panic::unwind_safe::RefUnwindSafe for kulyrax_adapter_redis::RedisConfig
+impl core::panic::unwind_safe::UnwindSafe for kulyrax_adapter_redis::RedisConfig
+pub fn kulyrax_adapter_redis::factory(&kulyrax_core::runtime::config::CustomAdapterConfig, &kulyrax_core::runtime::registry::AdapterBuildContext) -> core::result::Result<alloc::boxed::Box<dyn kulyrax_core::adapter::StorageAdapter>, kulyrax_core::runtime::config::ConfigError>
