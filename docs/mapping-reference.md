@@ -193,21 +193,34 @@ properties:
   name: payload.name
 ```
 
-**`kind: edge`** — identity is `[edge_type, from, to]` plus an optional
-`discriminator` for parallel edges (a multigraph). Edges are not faceted.
+**`kind: edge`** — identity is `[edge_type, from_label, from, to_label, to]`
+plus an optional `discriminator` for parallel edges (a multigraph). Edges are
+not faceted. A node is its label and its id, so an edge names both for each
+end: `User u1` and `Org u1` are different nodes, and an edge between two
+`User`s never touches an `Org`.
 
 | field | required | meaning |
 |---|---|---|
 | `edge_type` | yes | edge type/label. |
+| `from_label` | yes | label of the source node. |
 | `from` | yes | path expression resolving the source node id. |
+| `to_label` | yes | label of the target node. |
 | `to` | yes | path expression resolving the target node id. |
 | `discriminator` | no | extra key component distinguishing parallel edges between the same ordered pair. |
-| `properties` | no | JSON-like template for edge properties. |
+| `properties` | no | JSON-like template for edge properties; without it the edge has none. |
+
+An edge may arrive before its nodes. Neo4j then creates placeholder nodes with
+the mapped labels and ids, and the real nodes merge into them when they arrive;
+the file store indexes the edge under each endpoint's label and id, so the
+node, once written, owns it (deleting the node deletes it). A mapping without
+`from_label` or `to_label` is refused when the mappings are loaded (exit 2).
 
 ```yaml
 kind: edge
 event: UserFollowed
 edge_type: FOLLOWS
+from_label: User
+to_label: User
 from: payload.follower_id
 to: payload.followee_id
 version: 1
@@ -246,6 +259,8 @@ records:
       name: payload.customer_name
   - kind: edge
     edge_type: PLACED
+    from_label: Customer
+    to_label: Order
     from: payload.customer_id
     to: payload.order_id
 ```

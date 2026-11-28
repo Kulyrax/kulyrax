@@ -78,9 +78,9 @@ fn graph(root: &Path, label: &str) -> GraphStore {
         "kind: node\nevent: U\nlabel: {label}\nversion: 1\nkey: payload.id\non_existing: replace\nproperties:\n  v: payload.v\n"
     ))
     .unwrap();
-    let edge: GraphMapping = kulyrax_core::yaml::from_str(
-        "kind: edge\nevent: E\nedge_type: LINKS\nversion: 1\nfrom: payload.id\nto: payload.to\non_existing: replace\nproperties:\n  v: payload.v\n",
-    )
+    let edge: GraphMapping = kulyrax_core::yaml::from_str(&format!(
+        "kind: edge\nevent: E\nedge_type: LINKS\nfrom_label: {label}\nto_label: {label}\nversion: 1\nfrom: payload.id\nto: payload.to\non_existing: replace\nproperties:\n  v: payload.v\n"
+    ))
     .unwrap();
     GraphStore::new(
         "graph".into(),

@@ -381,7 +381,9 @@ fn file_store(kind: Kind) -> Backend {
                 .trim()
                 .to_string()
         }),
-        format: "2",
+        // The graph store is at 3 since edges keep their endpoints' labels
+        // (decision 2026-11-28-edge-labels); 0.12.1 wrote nodes only here.
+        format: if kind == Kind::Graph { "3" } else { "2" },
     }
 }
 
@@ -573,7 +575,7 @@ fn neo4j() -> Option<Backend> {
             };
             read().unwrap_or_else(|e| format!("unreadable: {e}"))
         }),
-        format: "1",
+        format: "2",
     })
 }
 

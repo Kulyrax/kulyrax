@@ -10,7 +10,7 @@ use crate::{
     adapter::file_names,
     adapter::file_store::{FileStore, FileTxn, Layout},
     adapter::graph::adapter::GraphError,
-    adapter::graph::exec::{self, GraphBackend, GraphGuard, GraphOutcome},
+    adapter::graph::exec::{self, EdgeRef, GraphBackend, GraphGuard, GraphOutcome},
     adapter::graph::mapping::{GraphMapping, encode_edge_key},
     adapter::graph::runtime::GraphRuntimeBuilder,
     adapter::{AdapterError, AdapterResult, SkipReason, StorageAdapter},
@@ -21,13 +21,15 @@ use crate::{
 };
 
 /// One incident edge recorded against a node (Phase 16.2). Carries both
-/// endpoints so the node-delete detach cascade can drop the edge from the
-/// *other* endpoint's index too.
+/// endpoints, each a label and an id, so the node-delete detach cascade can
+/// drop the edge from the *other* endpoint's index too.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct IncidentRef {
     edge_type: String,
     key: String,
+    from_label: String,
     from: String,
+    to_label: String,
     to: String,
 }
 
@@ -108,6 +110,9 @@ fn layout(builder: &GraphRuntimeBuilder) -> Layout {
             }
             GraphMapping::Edge(e) => {
                 edge_types.insert(e.edge_type.clone());
+                // Endpoint labels name incidence-index directories.
+                labels.insert(e.from_label.clone());
+                labels.insert(e.to_label.clone());
             }
             GraphMapping::Subgraph(_) => {}
         }
@@ -123,7 +128,30 @@ fn layout(builder: &GraphRuntimeBuilder) -> Layout {
         claims: vec!["nodes".into(), "edges".into()],
         names,
         upgrade: Box::new(move |root| upgrade(root, &labels)),
+        older: Box::new(older_graph),
     }
+}
+
+/// A graph store of format 2 or older keyed its edges without their
+/// endpoints' labels, and those labels were never stored, so its edges cannot
+/// be re-keyed. A store with no edge guards moves up as it is; one with any
+/// must be cleared and its history replayed (decision 2026-11-28-edge-labels).
+fn older_graph(root: &Path) -> io::Result<Option<String>> {
+    let has_entries = |dir: &Path| -> io::Result<bool> {
+        match std::fs::read_dir(dir) {
+            Ok(mut entries) => Ok(entries.next().is_some()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e),
+        }
+    };
+    if has_entries(&root.join(EDGE_GUARD_DIR))? {
+        return Ok(Some(
+            "it holds edges keyed by an earlier version, without their endpoints' labels, \
+             which were never stored. Clear the store and replay the full history into it"
+                .to_string(),
+        ));
+    }
+    Ok(None)
 }
 
 /// The layout has not moved; refuse the node files an earlier version named
@@ -138,7 +166,13 @@ fn upgrade(root: &Path, labels: &[String]) -> io::Result<Vec<String>> {
             &mut refused,
         )?;
     }
-    file_names::refuse_foreign_names(&root.join(INCIDENT_DIR), ".json", &mut refused)?;
+    for label in labels {
+        file_names::refuse_foreign_names(
+            &root.join(INCIDENT_DIR).join(label),
+            ".json",
+            &mut refused,
+        )?;
+    }
     Ok(refused)
 }
 
@@ -295,13 +329,17 @@ fn edge_value_path(edge_type: &str, key: &str) -> String {
 }
 
 fn edge_guard_path(edge_type: &str, key: &str) -> String {
-    format!(".kulyrax/guard/edges/{edge_type}/{}.json", edge_stem(key))
+    format!("{EDGE_GUARD_DIR}/{edge_type}/{}.json", edge_stem(key))
 }
 
 const INCIDENT_DIR: &str = ".kulyrax/incident";
+const EDGE_GUARD_DIR: &str = ".kulyrax/guard/edges";
 
-fn incident_path(node_id: &str) -> String {
-    format!("{INCIDENT_DIR}/{}.json", file_names::stem(node_id))
+/// A node's incidence index: per label, as nodes are (graph format 3). Keyed
+/// by id alone, deleting one label's node cascaded into another label's
+/// node's edges.
+fn incident_path(label: &str, node_id: &str) -> String {
+    format!("{INCIDENT_DIR}/{label}/{}.json", file_names::stem(node_id))
 }
 
 fn ge_err(e: std::io::Error) -> GraphError {
@@ -351,8 +389,8 @@ impl FileGraphBackend<'_, '_> {
         }
     }
 
-    fn read_incident(&mut self, node_id: &str) -> Result<IncidentIndex, GraphError> {
-        match self.read_owned(&incident_path(node_id), Owner::Node(node_id))? {
+    fn read_incident(&mut self, label: &str, node_id: &str) -> Result<IncidentIndex, GraphError> {
+        match self.read_owned(&incident_path(label, node_id), Owner::Node(node_id))? {
             Some(content) => serde_json::from_str(&content).map_err(invalid),
             None => Ok(IncidentIndex::default()),
         }
@@ -378,34 +416,40 @@ impl FileGraphBackend<'_, '_> {
         Ok(())
     }
 
-    fn add_incident(&mut self, node_id: &str, r: &IncidentRef) -> Result<(), GraphError> {
-        let mut idx = self.read_incident(node_id)?;
+    fn add_incident(
+        &mut self,
+        label: &str,
+        node_id: &str,
+        r: &IncidentRef,
+    ) -> Result<(), GraphError> {
+        let mut idx = self.read_incident(label, node_id)?;
         if !idx
             .edges
             .iter()
             .any(|e| e.edge_type == r.edge_type && e.key == r.key)
         {
             idx.edges.push(r.clone());
-            self.commit_owned(&incident_path(node_id), Owner::Node(node_id), &idx)?;
+            self.commit_owned(&incident_path(label, node_id), Owner::Node(node_id), &idx)?;
         }
         Ok(())
     }
 
     fn drop_incident(
         &mut self,
+        label: &str,
         node_id: &str,
         edge_type: &str,
         key: &str,
     ) -> Result<(), GraphError> {
-        let mut idx = self.read_incident(node_id)?;
+        let mut idx = self.read_incident(label, node_id)?;
         let before = idx.edges.len();
         idx.edges
             .retain(|e| !(e.edge_type == edge_type && e.key == key));
         if idx.edges.len() != before {
             if idx.edges.is_empty() {
-                self.txn.remove(&incident_path(node_id));
+                self.txn.remove(&incident_path(label, node_id));
             } else {
-                self.commit_owned(&incident_path(node_id), Owner::Node(node_id), &idx)?;
+                self.commit_owned(&incident_path(label, node_id), Owner::Node(node_id), &idx)?;
             }
         }
         Ok(())
@@ -429,19 +473,10 @@ impl GraphBackend for FileGraphBackend<'_, '_> {
         self.read_guard(&edge_guard_path(edge_type, key), Owner::Edge(key))
     }
 
-    /// Checks every label a node with this id could have been projected
-    /// under: each directory under `.kulyrax/guard/nodes/`, on disk or still
-    /// pending in the batch. Small in practice.
-    fn node_is_tombstoned(&mut self, node_id: &str) -> Result<bool, GraphError> {
-        for label in self.txn.child_dirs(NODE_GUARD_DIR).map_err(ge_err)? {
-            if let Some(g) =
-                self.read_guard(&node_guard_path(&label, node_id), Owner::Node(node_id))?
-                && g.deleted
-            {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+    fn node_is_tombstoned(&mut self, label: &str, node_id: &str) -> Result<bool, GraphError> {
+        Ok(self
+            .read_guard(&node_guard_path(label, node_id), Owner::Node(node_id))?
+            .is_some_and(|g| g.deleted))
     }
 
     fn write_node(
@@ -483,28 +518,35 @@ impl GraphBackend for FileGraphBackend<'_, '_> {
         )
     }
 
+    /// An endpoint not projected yet gets its incidence entry under its
+    /// label and id now: the node's own write lands on the same `(label,
+    /// id)`, so the edge is the node's from then on (the file store's
+    /// labelled placeholder).
     fn write_edge(
         &mut self,
-        edge_type: &str,
-        from: &str,
-        to: &str,
-        key: &str,
+        edge: &EdgeRef<'_>,
         properties: Option<&Value>,
         guard: &GraphGuard,
     ) -> Result<(), GraphError> {
         if let Some(properties) = properties {
-            self.commit_json(&edge_value_path(edge_type, key), properties)?;
+            self.commit_json(&edge_value_path(edge.edge_type, edge.key), properties)?;
             let r = IncidentRef {
-                edge_type: edge_type.to_string(),
-                key: key.to_string(),
-                from: from.to_string(),
-                to: to.to_string(),
+                edge_type: edge.edge_type.to_string(),
+                key: edge.key.to_string(),
+                from_label: edge.from_label.to_string(),
+                from: edge.from.to_string(),
+                to_label: edge.to_label.to_string(),
+                to: edge.to.to_string(),
             };
-            for endpoint in dedup_pair(from, to) {
-                self.add_incident(endpoint, &r)?;
+            for (label, id) in edge.endpoints() {
+                self.add_incident(label, id, &r)?;
             }
         }
-        self.commit_owned(&edge_guard_path(edge_type, key), Owner::Edge(key), guard)
+        self.commit_owned(
+            &edge_guard_path(edge.edge_type, edge.key),
+            Owner::Edge(edge.key),
+            guard,
+        )
     }
 
     fn delete_node_cascade(
@@ -514,7 +556,7 @@ impl GraphBackend for FileGraphBackend<'_, '_> {
         guard: &GraphGuard,
     ) -> Result<(), GraphError> {
         self.txn.remove(&node_value_path(label, node_id));
-        let incident = self.read_incident(node_id)?;
+        let incident = self.read_incident(label, node_id)?;
         for r in &incident.edges {
             self.txn.remove(&edge_value_path(&r.edge_type, &r.key));
             let egp = edge_guard_path(&r.edge_type, &r.key);
@@ -526,13 +568,13 @@ impl GraphBackend for FileGraphBackend<'_, '_> {
             eg.deleted = true;
             eg.permanent = guard.permanent;
             self.commit_owned(&egp, Owner::Edge(&r.key), &eg)?;
-            for other in [&r.from, &r.to] {
-                if other.as_str() != node_id {
-                    self.drop_incident(other, &r.edge_type, &r.key)?;
+            for (other_label, other) in [(&r.from_label, &r.from), (&r.to_label, &r.to)] {
+                if (other_label.as_str(), other.as_str()) != (label, node_id) {
+                    self.drop_incident(other_label, other, &r.edge_type, &r.key)?;
                 }
             }
         }
-        self.txn.remove(&incident_path(node_id));
+        self.txn.remove(&incident_path(label, node_id));
         self.commit_owned(
             &node_guard_path(label, node_id),
             Owner::Node(node_id),
@@ -540,22 +582,15 @@ impl GraphBackend for FileGraphBackend<'_, '_> {
         )
     }
 
-    fn delete_edge(
-        &mut self,
-        edge_type: &str,
-        from: &str,
-        to: &str,
-        key: &str,
-        guard: &GraphGuard,
-    ) -> Result<(), GraphError> {
-        self.txn.remove(&edge_value_path(edge_type, key));
-        for endpoint in dedup_pair(from, to) {
-            self.drop_incident(endpoint, edge_type, key)?;
+    fn delete_edge(&mut self, edge: &EdgeRef<'_>, guard: &GraphGuard) -> Result<(), GraphError> {
+        self.txn.remove(&edge_value_path(edge.edge_type, edge.key));
+        for (label, id) in edge.endpoints() {
+            self.drop_incident(label, id, edge.edge_type, edge.key)?;
         }
-        self.commit_owned(&edge_guard_path(edge_type, key), Owner::Edge(key), guard)
+        self.commit_owned(
+            &edge_guard_path(edge.edge_type, edge.key),
+            Owner::Edge(edge.key),
+            guard,
+        )
     }
-}
-
-fn dedup_pair<'a>(a: &'a str, b: &'a str) -> Vec<&'a str> {
-    if a == b { vec![a] } else { vec![a, b] }
 }

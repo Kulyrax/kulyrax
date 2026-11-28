@@ -1,5 +1,5 @@
 ---
-status: blocked
+status: in-progress
 ---
 
 # G0: the Postgres column-type lookup ignores the schema; Neo4j edge endpoints ignore labels (F-01b)
@@ -13,7 +13,29 @@ Runbook G0 (the owner's deferred item) and the owner's instruction of
 - report the impact: could released versions have written wrong data?
 - **STOP**: no fix before the owner answers.
 
-Blocked on the owner's answer to the impact report.
+The owner answered (2026-11-28), quoted:
+
+> G0 decisions:
+> 1. Option A, for ALL graph edge mappings: from_label and to_label required
+>    (file graph store and Neo4j), refused at validation if missing (exit 2).
+>    Check whether the file graph store has the same label-blind edge bug
+>    (incident files keyed by id only); reproduce first, then fix both. An edge
+>    arriving before its nodes creates labelled placeholders that the real
+>    nodes then merge into; test that on both stores.
+> 2. Postgres: resolve tables with to_regclass (search_path and schema.table
+>    both work); make `table: app.users` work, with a test.
+> 3. Fix the edge-without-properties failure too, with a test matching the
+>    docs' own subgraph example.
+> 4. No advisory, no 0.12.3. RELEASES/v1.0.0-rc.1.md opens with a "Data
+>    correctness: check your data" section: affected versions and conditions
+>    per bug, and the repair (Postgres: kulyrax rebuild the affected tables;
+>    Neo4j: clear and replay). Draft a short notice for the v0.12.1 and v0.12.2
+>    GitHub release pages and the README's known issues, pointing there;
+>    publish the release-page notices only after I say so.
+> 5. SECURITY.md wording approved as written.
+
+and chose "labels in identity" for the edge key: decision
+[2026-11-28-edge-labels](../decisions/2026-11-28-edge-labels.md).
 
 ## Acceptance criteria
 
@@ -24,13 +46,25 @@ Blocked on the owner's answer to the impact report.
   (`neo4j_edge_labels.rs`).
 - [x] Impact on released versions, each claim marked as run or read
   (below).
-- [ ] The owner's answer; then the fixes, tests green, rc.1 notes under
-  Fixes, PR, merge.
+- [x] The owner's answer (above).
+- [x] The file graph store's label-blind cascade reproduced before the fix
+  (below).
+- [ ] Fixes, each with its test green: `from_label`/`to_label` required on
+  both stores (missing → exit 2); labelled placeholders merged on both
+  stores; Postgres `to_regclass` with `table: app.users`; an edge without
+  `properties` (the docs' subgraph example) on both stores; earlier graph
+  stores with edges refused (exit 4), nodes-only re-stamped, on both.
+- [ ] rc.1 notes open with "Data correctness: check your data"; README known
+  issues; release-page notices drafted, not published.
+- [ ] Gates and Docker suites green; PR; merged with all required checks
+  green.
 
 ## Constraints and assumptions
 
-- Tests only; no fix (the owner's instruction). The branch is pushed to the
-  fork with no PR, because the tests fail by design.
+- The reproduction commit was tests only, pushed with no PR (it failed by
+  design). The fixes follow on the same branch.
+- The release-page notices are published only on the owner's word; the draft
+  is outside the repository.
 
 ## Verification
 
@@ -46,6 +80,15 @@ Blocked on the owner's answer to the impact report.
 | F-01b, edge before nodes | the same, after | the edge's outcome `Created`; **0 edges between `(:User u1)` and `(:User u2)`; 2 label-less nodes**: the edge sits on placeholders the node writes never join. Silent |
 | F-01b, another label's node | the same | `(:User u1)`, `(:Org u1)`, `(:User u2)`, then the edge `u1 → u2`: **FOLLOWS from Org u1: 1, from User u1: 1**. The edge attaches to every node with that id. Silent |
 | Edge without `properties` | the same, third test | the edge event fails, `$properties … NO_VALUE`; nothing written. Loud. Released code is the same (`properties` defaults to null and is passed to `SET r = $properties` in v0.9.0 and v0.12.2): **inferred from the code, not run** |
+
+| File graph store, another label's node (recorded afterwards) | `cargo test -p kulyrax-core --test graph_edge_labels`, before the fix: `User u1`, `User u2`, `Org u1`, edge `u1 → u2`, then delete `Org u1` | FOLLOWS edge files before the delete 1, **after 0**: the cascade read `.kulyrax/incident/u1.json`, keyed by id only. Silent. Same code in v0.9.0, v0.12.1, v0.12.2 (`git show <tag>:…/graph/store.rs`, `incident_path(node_id)`); `node_is_tombstoned` checked every label's guard too, so an edge to `User u1` was skipped while `Org u1` was deleted (read, not run) |
+| File graph store, edge without `properties` | `git show upstream/main:…/graph/store.rs` `write_edge` | properties resolved to `null` and were written as the edge file's content: no failure, a `null` edge (read, not run) |
+
+| After the fixes: core | `cargo test -p kulyrax-core --no-fail-fast` | 0 failures; `graph_edge_labels` 6 passed: another label's delete keeps the edge, the endpoint's own delete cascades; an edge before its nodes is indexed under `incident/User/`, then owned by the real nodes; the docs' subgraph example writes the edge as `{}`; a mapping without `from_label` / `to_label` does not parse; a marker-2 graph store with an edge is refused (`AdapterError::Format`, marker left at 2), with nodes only re-stamped to 3 |
+| After the fixes: Docker suites | scratchpad `docker-suites.sh`, results `suite-runs/20261128-234418` | postgres 44, mysql 36, redis 28, mongodb 31, elasticsearch 20, neo4j 35, source-postgres 18, ingest 17, cli 41 passed; 0 failed, 0 skipped. Ran: `pg_column_types` (both creation orders, `table: <schema>.seen`), `neo4j_edge_labels` (placeholders merged: 2 `User` nodes with their names, the edge between them, 0 unlabelled; `Org u1` untouched and its delete keeps the edge; the docs' subgraph example), `neo4j_format` (0.12 or format-1 database with an edge guard refused, marker 1 kept; format 1 nodes-only moves to 2; newer `3` refused) |
+| After the fixes: CLI exit codes | `cargo test -p kulyrax-cli --test exit_codes` | 9 passed: an edge mapping without `from_label`, without `to_label` (parse, names the file) or with an empty one (validation, names the event) exits 2; `to_label: __KulyraxGuard` exits 2 as reserved |
+| Gates | scratchpad `e1-gates.sh` (log `g0-gates.log`) | fmt, clippy `-D warnings`, clippy `unstable-pb`, rustdoc `-D warnings`: ok; workspace tests 169 binaries, 672 passed, 0 failed |
+| Allowlist checks | CI's old-name and YAML-parser greps, run locally; `iconv` on every changed file | clean |
 
 ## Impact on released versions
 
@@ -92,10 +135,15 @@ wrong data silently.**
 **Neo4j edge without `properties`: no wrong data;** every such event fails
 (dead-lettered or halts the run), in every release (inferred).
 
-## Decisions needed
+## Decisions
 
-- **F-01b: how an edge names its endpoints' labels.** The edge mapping has no
-  endpoint labels today. Options:
+Decided by the owner (Objective): A for every graph backend, labels in the
+edge's identity ([2026-11-28-edge-labels](../decisions/2026-11-28-edge-labels.md));
+Postgres as below; no advisory, the rc.1 notes instead. The options as put to
+the owner:
+
+- **F-01b: how an edge names its endpoints' labels.** The edge mapping had no
+  endpoint labels. Options:
   - **A (recommended):** add `from_label` and `to_label` to `kind: edge`,
     required for the Neo4j backend at validation. The edge `MERGE`s then name
     the labels. An edge before its nodes then creates labelled placeholders,

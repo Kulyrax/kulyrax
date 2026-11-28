@@ -100,7 +100,7 @@ impl Db {
 }
 
 fn one_marker() -> Vec<(String, String)> {
-    vec![("guards".to_string(), "1".to_string())]
+    vec![("guards".to_string(), "2".to_string())]
 }
 
 #[test]
@@ -118,9 +118,10 @@ fn a_new_database_gets_one_marker() -> R {
     Ok(())
 }
 
-/// A database with guards and no marker (0.12.x): format 1, stamped.
+/// A database with node guards only and no marker (0.12.x): stamped with
+/// the current format, as it is.
 #[test]
-fn a_0_12_database_is_stamped_as_format_1() -> R {
+fn a_0_12_database_with_nodes_only_is_stamped_current() -> R {
     let Some(lease) = common::lease() else {
         eprintln!("SKIP: KULYRAX_NEO4J_URI not set");
         return Ok(());
@@ -142,7 +143,7 @@ fn a_newer_or_unknown_marker_is_refused_before_the_guard_constraint() -> R {
         return Ok(());
     };
     let db = Db::connect(lease.uri())?;
-    for (version, newer) in [("2", true), ("'two'", false)] {
+    for (version, newer) in [("3", true), ("'two'", false)] {
         db.run("MATCH (f:__KulyraxFormat) DELETE f")?;
         db.run(&format!(
             "CREATE (:__KulyraxFormat {{component: 'guards', version: {version}}})"
@@ -155,8 +156,8 @@ fn a_newer_or_unknown_marker_is_refused_before_the_guard_constraint() -> R {
             matches!(
                 e.problem,
                 FormatProblem::Newer {
-                    found: 2,
-                    supported: 1
+                    found: 3,
+                    supported: 2
                 }
             ),
             newer,
@@ -168,6 +169,64 @@ fn a_newer_or_unknown_marker_is_refused_before_the_guard_constraint() -> R {
             "guards untouched"
         );
     }
+    Ok(())
+}
+
+const EDGE_GUARD: &str = "CREATE (:__KulyraxGuard {kind: 'edge', target: 'FOLLOWS', \
+     entity_key: '[\"FOLLOWS\",\"u1\",\"u2\"]', facet: '', last_sequence: 3, deleted: false, \
+     permanent: false})";
+
+/// Format 1 keyed edges without their endpoints' labels (decision
+/// 2026-11-28-edge-labels): a database holding edge guards from 0.12.x (no
+/// marker) or from format 1 is refused, naming the repair, before the guard
+/// constraint is touched; a format-1 database without edges moves to 2.
+#[test]
+fn an_earlier_database_with_edges_is_refused() -> R {
+    let Some(lease) = common::lease() else {
+        eprintln!("SKIP: KULYRAX_NEO4J_URI not set");
+        return Ok(());
+    };
+    let db = Db::connect(lease.uri())?;
+    for marker in [None, Some(1)] {
+        db.run("MATCH (n) DETACH DELETE n")?;
+        db.run(EDGE_GUARD)?;
+        if let Some(v) = marker {
+            db.run(&format!(
+                "CREATE (:__KulyraxFormat {{component: 'guards', version: {v}}})"
+            ))?;
+        }
+        let err = adapter(lease.uri()).prepare().expect_err("refused");
+        let AdapterError::Format(e) = err else {
+            panic!("{marker:?}: not a format refusal: {err}");
+        };
+        assert!(
+            matches!(e.problem, FormatProblem::Unrecognized(_)),
+            "{marker:?}: {e}"
+        );
+        assert!(e.to_string().contains("replay the full history"), "{e}");
+        assert_eq!(
+            db.markers()?,
+            vec![("guards".to_string(), "1".to_string())],
+            "{marker:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn a_format_1_database_without_edges_moves_to_2() -> R {
+    let Some(lease) = common::lease() else {
+        eprintln!("SKIP: KULYRAX_NEO4J_URI not set");
+        return Ok(());
+    };
+    let db = Db::connect(lease.uri())?;
+    db.run("CREATE (:__KulyraxFormat {component: 'guards', version: 1})")?;
+    db.run(
+        "CREATE (:__KulyraxGuard {kind: 'node', target: 'FormatUser', entity_key: 'u1', \
+         facet: '', last_sequence: 7, deleted: false, permanent: false})",
+    )?;
+    adapter(lease.uri()).prepare()?;
+    assert_eq!(db.markers()?, one_marker());
     Ok(())
 }
 

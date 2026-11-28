@@ -19,7 +19,7 @@ use std::io::{self, Write};
 use std::path::Path;
 
 use crate::adapter::file_store::{
-    remove_if_exists, replay_logs, sync_dir, take_lock, write_marker,
+    STORE_FORMAT, remove_if_exists, replay_logs, sync_dir, take_lock, write_marker,
 };
 use crate::adapter::sql::adapter::SqlError;
 use crate::crash::crash_point;
@@ -193,7 +193,7 @@ pub fn migrate_file_store(dir: &Path, known_dirs: &mut HashSet<String>) -> io::R
     let markers = new_dir.join(LAYOUT);
     if markers.is_dir() {
         for entry in fs::read_dir(&markers)? {
-            write_marker(&entry?.path())?;
+            write_marker(&entry?.path(), STORE_FORMAT)?;
         }
     }
     // A kill here: the entries are moved and the markers say `2`, but

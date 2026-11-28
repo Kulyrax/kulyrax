@@ -62,7 +62,7 @@ fn mappings() -> HashMap<String, GraphMapping> {
     m.insert(
         "UserFollowed".to_string(),
         kulyrax_core::yaml::from_str::<GraphMapping>(
-            "kind: edge\nevent: UserFollowed\nedge_type: FOLLOWS\nversion: 1\nfrom: payload.follower\nto: payload.followee\non_existing: replace\nproperties:\n  since: payload.ts\n",
+            "kind: edge\nevent: UserFollowed\nedge_type: FOLLOWS\nfrom_label: User\nto_label: User\nversion: 1\nfrom: payload.follower\nto: payload.followee\non_existing: replace\nproperties:\n  since: payload.ts\n",
         )
         .unwrap(),
     );

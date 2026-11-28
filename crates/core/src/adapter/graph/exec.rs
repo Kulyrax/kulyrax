@@ -137,10 +137,11 @@ pub trait GraphBackend {
         key: &str,
     ) -> Result<Option<GraphGuard>, GraphError>;
 
-    /// Is `node_id` explicitly tombstoned, under *any* label? (Phase 16.4: an
+    /// Is the node `(label, node_id)` explicitly tombstoned? (Phase 16.4: an
     /// edge may not attach to an explicitly-deleted node; an endpoint that
-    /// was never projected at all is fine.)
-    fn node_is_tombstoned(&mut self, node_id: &str) -> Result<bool, GraphError>;
+    /// was never projected at all is fine.) Per label: another label's node
+    /// with the same id is another node (decision 2026-11-28-edge-labels).
+    fn node_is_tombstoned(&mut self, label: &str, node_id: &str) -> Result<bool, GraphError>;
 
     /// Apply the resolved node properties (or a named facet's own fields)
     /// and the updated guard together. `properties: None` means "leave the
@@ -159,13 +160,12 @@ pub trait GraphBackend {
 
     /// Apply the resolved edge properties and the updated guard together.
     /// `properties: None` means "leave the edge untouched, just persist the
-    /// guard". Edges are not faceted.
+    /// guard". Edges are not faceted. An endpoint not projected yet is created
+    /// as a placeholder with its label, which the node's own write then
+    /// fills in.
     fn write_edge(
         &mut self,
-        edge_type: &str,
-        from: &str,
-        to: &str,
-        key: &str,
+        edge: &EdgeRef<'_>,
         properties: Option<&Value>,
         guard: &GraphGuard,
     ) -> Result<(), GraphError>;
@@ -181,14 +181,39 @@ pub trait GraphBackend {
     ) -> Result<(), GraphError>;
 
     /// Remove one edge and write its tombstoned guard.
-    fn delete_edge(
-        &mut self,
-        edge_type: &str,
-        from: &str,
-        to: &str,
-        key: &str,
-        guard: &GraphGuard,
-    ) -> Result<(), GraphError>;
+    fn delete_edge(&mut self, edge: &EdgeRef<'_>, guard: &GraphGuard) -> Result<(), GraphError>;
+}
+
+/// One edge, as a [`GraphBackend`] receives it: its type, its endpoints
+/// (each a label and an id) and its canonical key.
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+pub struct EdgeRef<'a> {
+    /// The relationship type.
+    pub edge_type: &'a str,
+    /// The `from` endpoint's label.
+    pub from_label: &'a str,
+    /// The `from` endpoint's node id.
+    pub from: &'a str,
+    /// The `to` endpoint's label.
+    pub to_label: &'a str,
+    /// The `to` endpoint's node id.
+    pub to: &'a str,
+    /// The canonical edge key (`canonical_edge_key`).
+    pub key: &'a str,
+}
+
+impl EdgeRef<'_> {
+    /// The endpoints as `(label, id)`, once each (a self-loop has one).
+    pub fn endpoints(&self) -> Vec<(&str, &str)> {
+        let from = (self.from_label, self.from);
+        let to = (self.to_label, self.to);
+        if from == to {
+            vec![from]
+        } else {
+            vec![from, to]
+        }
+    }
 }
 
 /// What a graph write did.
@@ -229,8 +254,12 @@ pub struct NodePlan {
 pub struct EdgePlan {
     /// The relationship type.
     pub edge_type: String,
+    /// The `from` endpoint's label.
+    pub from_label: String,
     /// The `from` endpoint's node id.
     pub from: String,
+    /// The `to` endpoint's label.
+    pub to_label: String,
     /// The `to` endpoint's node id.
     pub to: String,
     /// Canonical edge identity (`canonical_edge_key`) — stable across
@@ -246,8 +275,18 @@ pub struct EdgePlan {
     pub permanent: bool,
 }
 
-fn dedup_pair<'a>(a: &'a str, b: &'a str) -> Vec<&'a str> {
-    if a == b { vec![a] } else { vec![a, b] }
+impl EdgePlan {
+    /// This edge as a backend receives it.
+    pub fn edge_ref(&self) -> EdgeRef<'_> {
+        EdgeRef {
+            edge_type: &self.edge_type,
+            from_label: &self.from_label,
+            from: &self.from,
+            to_label: &self.to_label,
+            to: &self.to,
+            key: &self.key,
+        }
+    }
 }
 
 /// Project one resolved record through [`project_node`] or [`project_edge`].
@@ -275,16 +314,27 @@ pub fn project_record<B: GraphBackend>(
         }
         ResolvedRecord::Edge {
             edge_type,
+            from_label,
             from,
+            to_label,
             to,
             discriminator,
             properties,
         } => {
             let plan = EdgePlan {
                 edge_type: edge_type.clone(),
+                from_label: from_label.clone(),
                 from: from.clone(),
+                to_label: to_label.clone(),
                 to: to.clone(),
-                key: canonical_edge_key(edge_type, from, to, discriminator.as_deref()),
+                key: canonical_edge_key(
+                    edge_type,
+                    from_label,
+                    from,
+                    to_label,
+                    to,
+                    discriminator.as_deref(),
+                ),
                 properties: properties.clone(),
                 on_existing: projection.on_existing,
                 operation: projection.operation,
@@ -455,7 +505,7 @@ pub fn project_edge<B: GraphBackend>(
             g.last_event_id = event.event_id.clone();
             g.deleted = true;
             timed(Stage::Write, || {
-                backend.write_edge(&plan.edge_type, &plan.from, &plan.to, &plan.key, None, &g)
+                backend.write_edge(&plan.edge_ref(), None, &g)
             })?;
             return Ok(GraphOutcome::Skipped(SkipReason::AlreadyDeleted));
         }
@@ -465,8 +515,8 @@ pub fn project_edge<B: GraphBackend>(
     // Phase 16.4: an edge may not attach to an explicitly-tombstoned node.
     // An endpoint that was *never* projected is fine (16.3, permissive).
     if decision != WriteDecision::Delete {
-        for endpoint in dedup_pair(&plan.from, &plan.to) {
-            if timed(Stage::Read, || backend.node_is_tombstoned(endpoint))? {
+        for (label, id) in plan.edge_ref().endpoints() {
+            if timed(Stage::Read, || backend.node_is_tombstoned(label, id))? {
                 return Ok(GraphOutcome::Skipped(SkipReason::EntityAbsent));
             }
         }
@@ -479,21 +529,12 @@ pub fn project_edge<B: GraphBackend>(
     g.permanent = decision == WriteDecision::Delete && plan.permanent;
 
     if decision == WriteDecision::Delete {
-        timed(Stage::Write, || {
-            backend.delete_edge(&plan.edge_type, &plan.from, &plan.to, &plan.key, &g)
-        })?;
+        timed(Stage::Write, || backend.delete_edge(&plan.edge_ref(), &g))?;
         return Ok(GraphOutcome::Deleted);
     }
 
     timed(Stage::Write, || {
-        backend.write_edge(
-            &plan.edge_type,
-            &plan.from,
-            &plan.to,
-            &plan.key,
-            Some(&plan.properties),
-            &g,
-        )
+        backend.write_edge(&plan.edge_ref(), Some(&plan.properties), &g)
     })?;
 
     Ok(match decision {

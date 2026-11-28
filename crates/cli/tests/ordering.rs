@@ -115,7 +115,7 @@ fn neo4j_project(p: &Path, uri: &str, label: &str, edge: &str) {
     write(
         p.join("mappings/graph/f.yaml"),
         &format!(
-            "kind: edge\nevent: F\nedge_type: {edge}\nversion: 1\nfrom: payload.from\nto: payload.to\nproperties:\n  since: payload.since\n"
+            "kind: edge\nevent: F\nedge_type: {edge}\nfrom_label: {label}\nto_label: {label}\nversion: 1\nfrom: payload.from\nto: payload.to\nproperties:\n  since: payload.since\n"
         ),
     );
     // Delivery order obeys the contract: both nodes, then the edge. The edge

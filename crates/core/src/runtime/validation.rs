@@ -1069,6 +1069,10 @@ pub fn validate_projection_config(
                 GraphMapping::Edge(e) => {
                     if e.edge_type.trim().is_empty() {
                         push("empty edge_type");
+                    } else if e.from_label.trim().is_empty() {
+                        push("empty from_label");
+                    } else if e.to_label.trim().is_empty() {
+                        push("empty to_label");
                     } else if !is_scalar_path(&e.from) {
                         push("from must be a 'payload.' or 'metadata.' path");
                     } else if !is_scalar_path(&e.to) {

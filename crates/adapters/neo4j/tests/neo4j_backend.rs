@@ -211,7 +211,7 @@ fn neo4j_edge_out_of_order() -> R {
     m.insert(
         "E".into(),
         graph_mapping(&format!(
-            "kind: edge\nevent: E\nedge_type: {etype}\nversion: 1\nfrom: payload.from\nto: payload.to\non_existing: replace\nproperties:\n  weight: payload.weight\n"
+            "kind: edge\nevent: E\nedge_type: {etype}\nfrom_label: {etype}\nto_label: {etype}\nversion: 1\nfrom: payload.from\nto: payload.to\non_existing: replace\nproperties:\n  weight: payload.weight\n"
         )),
     );
     let a = neo4j_adapter(&uri, m);
@@ -269,7 +269,7 @@ fn neo4j_detach_delete() -> R {
     m.insert(
         "E".into(),
         graph_mapping(&format!(
-            "kind: edge\nevent: E\nedge_type: {etype}\nversion: 1\nfrom: payload.from\nto: payload.to\ndiscriminator: payload.d\nproperties: {{}}\n"
+            "kind: edge\nevent: E\nedge_type: {etype}\nfrom_label: {label}\nto_label: {label}\nversion: 1\nfrom: payload.from\nto: payload.to\ndiscriminator: payload.d\nproperties: {{}}\n"
         )),
     );
     let a = neo4j_adapter(&uri, m);
@@ -633,7 +633,7 @@ fn batch_mappings(label: &str, etype: &str) -> HashMap<String, GraphMapping> {
         (
             "E".to_string(),
             graph_mapping(&format!(
-                "kind: edge\nevent: E\nedge_type: {etype}\nversion: 1\nfrom: payload.from\nto: payload.to\non_existing: replace\nproperties:\n  weight: payload.weight\n"
+                "kind: edge\nevent: E\nedge_type: {etype}\nfrom_label: {label}\nto_label: {label}\nversion: 1\nfrom: payload.from\nto: payload.to\non_existing: replace\nproperties:\n  weight: payload.weight\n"
             )),
         ),
     ])
@@ -795,7 +795,7 @@ fn subgraph_mapping(order: &str, customer: &str, placed: &str) -> HashMap<String
     HashMap::from([(
         "OrderPlaced".to_string(),
         graph_mapping(&format!(
-            "kind: subgraph\nevent: OrderPlaced\nversion: 1\nrecords:\n  - kind: node\n    label: {order}\n    key: payload.order_id\n    on_existing: replace\n    properties:\n      total: payload.total\n  - kind: node\n    label: {customer}\n    key: payload.customer_id\n    properties:\n      name: payload.customer\n  - kind: edge\n    edge_type: {placed}\n    from: payload.customer_id\n    to: payload.order_id\n    properties:\n      at: payload.at\n"
+            "kind: subgraph\nevent: OrderPlaced\nversion: 1\nrecords:\n  - kind: node\n    label: {order}\n    key: payload.order_id\n    on_existing: replace\n    properties:\n      total: payload.total\n  - kind: node\n    label: {customer}\n    key: payload.customer_id\n    properties:\n      name: payload.customer\n  - kind: edge\n    edge_type: {placed}\n    from_label: {customer}\n    to_label: {order}\n    from: payload.customer_id\n    to: payload.order_id\n    properties:\n      at: payload.at\n"
         )),
     )])
 }

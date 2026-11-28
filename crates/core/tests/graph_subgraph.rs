@@ -38,6 +38,8 @@ records:
       name: payload.customer
   - kind: edge
     edge_type: PLACED
+    from_label: Customer
+    to_label: Order
     from: payload.customer_id
     to: payload.order_id
     properties:

@@ -132,6 +132,11 @@ pub struct GraphEdgeMapping {
     pub event: String,
     /// The relationship type.
     pub edge_type: String,
+    /// The `from` endpoint's node label. Required: nodes are per label, so an
+    /// endpoint is a label and an id (decision 2026-11-28-edge-labels).
+    pub from_label: String,
+    /// The `to` endpoint's node label. Required, as `from_label`.
+    pub to_label: String,
     /// The payload version this mapping is written for; older events are upcast
     /// to it.
     pub version: u32,
@@ -180,8 +185,12 @@ pub enum ResolvedRecord {
     Edge {
         /// The relationship type.
         edge_type: String,
+        /// The `from` endpoint's label.
+        from_label: String,
         /// The `from` endpoint's node id.
         from: String,
+        /// The `to` endpoint's label.
+        to_label: String,
         /// The `to` endpoint's node id.
         to: String,
         /// The resolved discriminator, for parallel edges.
@@ -298,7 +307,13 @@ impl GraphMapping {
                 })
             }
             GraphMapping::Edge(m) => {
-                let properties = expand_value(&m.properties, payload_obj, &event.metadata)?;
+                // `properties` is optional for edges: absent, the edge has
+                // none (Neo4j refused a null `SET r = $properties`).
+                let properties = if m.properties.is_null() {
+                    Value::Object(Map::new())
+                } else {
+                    expand_value(&m.properties, payload_obj, &event.metadata)?
+                };
                 let from = scalar_key("from", &m.from, payload_obj, &event.metadata)?;
                 let to = scalar_key("to", &m.to, payload_obj, &event.metadata)?;
                 let discriminator = match &m.discriminator {
@@ -312,7 +327,9 @@ impl GraphMapping {
                 };
                 Ok(ResolvedRecord::Edge {
                     edge_type: m.edge_type.clone(),
+                    from_label: m.from_label.clone(),
                     from,
+                    to_label: m.to_label.clone(),
                     to,
                     discriminator,
                     properties,
@@ -390,20 +407,23 @@ fn resolve_path(
 }
 
 /// Canonical edge identity (Phase 11.1 composite-key encoding): an ordered
-/// JSON array `[edge_type, from, to]`, or `[edge_type, from, to, discriminator]`
-/// for a multigraph. One encoding path, so a 3-component key never collides
-/// with a differently-split 4-component one.
+/// JSON array `[edge_type, from_label, from, to_label, to]`, plus the
+/// discriminator for a multigraph. The endpoints' labels are part of it
+/// (graph format 2; decision 2026-11-28-edge-labels): `User u1 → u2` and
+/// `Org u1 → u2` are two edges. One encoding path, so a key never collides
+/// with a differently-split one.
 pub fn canonical_edge_key(
     edge_type: &str,
+    from_label: &str,
     from: &str,
+    to_label: &str,
     to: &str,
     discriminator: Option<&str>,
 ) -> String {
-    let parts: Vec<&str> = match discriminator {
-        Some(d) => vec![edge_type, from, to, d],
-        None => vec![edge_type, from, to],
-    };
-    serde_json::to_string(&parts).unwrap_or_else(|_| format!("{edge_type}/{from}/{to}"))
+    let mut parts: Vec<&str> = vec![edge_type, from_label, from, to_label, to];
+    parts.extend(discriminator);
+    serde_json::to_string(&parts)
+        .unwrap_or_else(|_| format!("{edge_type}/{from_label}/{from}/{to_label}/{to}"))
 }
 
 /// Filesystem-safe encoding of a canonical edge key — lowercase hex of its

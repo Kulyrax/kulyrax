@@ -78,9 +78,9 @@ fn graph(root: &Path, label: &str) -> GraphStore {
         "kind: node\nevent: U\nlabel: {label}\nversion: 1\nkey: payload.id\non_existing: replace\nproperties:\n  v: payload.v\n"
     ))
     .unwrap();
-    let edge: GraphMapping = kulyrax_core::yaml::from_str(
-        "kind: edge\nevent: E\nedge_type: LINKS\nversion: 1\nfrom: payload.id\nto: payload.to\non_existing: replace\nproperties:\n  v: payload.v\n",
-    )
+    let edge: GraphMapping = kulyrax_core::yaml::from_str(&format!(
+        "kind: edge\nevent: E\nedge_type: LINKS\nfrom_label: {label}\nto_label: {label}\nversion: 1\nfrom: payload.id\nto: payload.to\non_existing: replace\nproperties:\n  v: payload.v\n"
+    ))
     .unwrap();
     GraphStore::new(
         "graph".into(),
@@ -178,7 +178,15 @@ fn assert_migrated(root: &Path) {
     assert!(!root.join(".kulyrax-tmp-conduit").exists());
     for e in std::fs::read_dir(root.join(".kulyrax/layout")).unwrap() {
         let path = e.unwrap().path();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "2\n", "{path:?}");
+        // The graph store is at 3 since edges keep their endpoints' labels
+        // (decision 2026-11-28-edge-labels); this one holds nodes only, so
+        // it is re-stamped in place.
+        let want = if path.ends_with("graph") {
+            "3\n"
+        } else {
+            "2\n"
+        };
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), want, "{path:?}");
     }
 }
 
